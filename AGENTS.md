@@ -1,0 +1,3 @@
+# AGENTS
+
+[AGENTS](CLAUDE.md)

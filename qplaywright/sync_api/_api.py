@@ -1,0 +1,332 @@
+"""Synchronous QPlaywright API — the main entry point for test scripts.
+
+Usage::
+
+    from qplaywright.sync_api import sync_qplaywright
+
+    with sync_qplaywright() as qp:
+        app = qp.connect()
+        window = app.window()
+        window.locator("role=button", has_text="OK").click()
+"""
+
+from __future__ import annotations
+
+import base64
+import contextlib
+import subprocess
+import time
+from typing import Any, Generator
+
+from qplaywright.protocol import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    METHOD_PING,
+    METHOD_LIST_WINDOWS,
+    METHOD_WIDGET_TREE,
+    METHOD_SCREENSHOT,
+    METHOD_WINDOW_TITLE,
+    METHOD_WINDOW_SIZE,
+    METHOD_WINDOW_RESIZE,
+    METHOD_WINDOW_CLOSE,
+)
+from qplaywright.sync_api._connection import Connection
+from qplaywright.sync_api._locator import Locator
+
+
+# --------------------------------------------------------------------------- #
+#  Window — equivalent to Playwright's Page                                    #
+# --------------------------------------------------------------------------- #
+
+class Window:
+    """Represents a top-level Qt window. Equivalent to Playwright's ``Page``.
+
+    Provides locator-based widget interaction, screenshots, and window
+    management.
+    """
+
+    def __init__(self, conn: Connection, wid: int, title: str = "", timeout: float = 30.0):
+        self._conn = conn
+        self._wid = wid
+        self._title_cache = title
+        self._timeout = timeout
+
+    @property
+    def wid(self) -> int:
+        return self._wid
+
+    # -- Locator factory -----------------------------------------------------
+
+    def locator(self, selector: str, *, has_text: str | None = None) -> Locator:
+        """Create a locator scoped to this window.
+
+        Args:
+            selector: Playwright-style selector (see protocol.py for syntax).
+            has_text: Filter by text content (case-insensitive contains).
+
+        Returns:
+            A Locator instance.
+
+        Examples::
+
+            window.locator("role=button", has_text="Submit")
+            window.locator("#username")
+            window.locator(".QLabel")
+            window.locator("text=Hello World")
+        """
+        return Locator(
+            self._conn,
+            selector,
+            has_text=has_text,
+            parent_wid=self._wid,
+            timeout=self._timeout,
+        )
+
+    def get_by_role(self, role: str, *, name: str | None = None) -> Locator:
+        """Locate by accessibility role. Equivalent to Playwright's getByRole.
+
+        Args:
+            role: Widget role (button, checkbox, textbox, combobox, etc.)
+            name: Filter by text/accessible name.
+
+        Examples::
+
+            window.get_by_role("button", name="Submit")
+            window.get_by_role("textbox")
+        """
+        return self.locator(f"role={role}", has_text=name)
+
+    def get_by_text(self, text: str, *, exact: bool = True) -> Locator:
+        """Locate by visible text content.
+
+        Args:
+            text: The text to match.
+            exact: If True, match exactly. If False, match as substring.
+        """
+        if exact:
+            return self.locator(f"text={text}")
+        return self.locator(f"has-text={text}")
+
+    def get_by_label(self, text: str) -> Locator:
+        """Locate an input by its associated label text."""
+        return self.locator(f"has-text={text}")
+
+    def get_by_placeholder(self, text: str) -> Locator:
+        """Locate an input by placeholder text."""
+        # Uses Qt property access
+        return self.locator(f"text={text}")
+
+    def get_by_test_id(self, test_id: str) -> Locator:
+        """Locate by objectName (Qt equivalent of data-testid)."""
+        return self.locator(f"#{test_id}")
+
+    # -- Window properties ---------------------------------------------------
+
+    def title(self) -> str:
+        """Get the window title."""
+        return self._conn.send(METHOD_WINDOW_TITLE, {"wid": self._wid})
+
+    def size(self) -> dict[str, int]:
+        """Get the window size as {width, height}."""
+        return self._conn.send(METHOD_WINDOW_SIZE, {"wid": self._wid})
+
+    def resize(self, width: int, height: int) -> None:
+        """Resize the window."""
+        self._conn.send(METHOD_WINDOW_RESIZE, {"wid": self._wid, "width": width, "height": height})
+
+    def close(self) -> None:
+        """Close the window."""
+        self._conn.send(METHOD_WINDOW_CLOSE, {"wid": self._wid})
+
+    # -- Screenshots ---------------------------------------------------------
+
+    def screenshot(self, *, path: str | None = None) -> bytes | dict:
+        """Take a screenshot of the entire window.
+
+        Args:
+            path: If provided, save the screenshot to this file path.
+
+        Returns:
+            If path is None, returns dict with base64 data.
+            If path is provided, returns dict with path and dimensions.
+        """
+        params: dict[str, Any] = {"wid": self._wid}
+        if path:
+            params["path"] = path
+        return self._conn.send(METHOD_SCREENSHOT, params)
+
+    # -- Widget tree ---------------------------------------------------------
+
+    def widget_tree(self, *, max_depth: int = 10) -> list[dict]:
+        """Get the full widget tree (for debugging)."""
+        return self._conn.send(METHOD_WIDGET_TREE, {"max_depth": max_depth})
+
+    # -- Waiting -------------------------------------------------------------
+
+    def wait_for_timeout(self, timeout: float) -> None:
+        """Wait for the specified time in milliseconds."""
+        time.sleep(timeout / 1000.0)
+
+    def __repr__(self) -> str:
+        return f"Window(wid={self._wid}, title={self._title_cache!r})"
+
+
+# --------------------------------------------------------------------------- #
+#  Application — equivalent to Playwright's Browser                            #
+# --------------------------------------------------------------------------- #
+
+class Application:
+    """Represents a connected Qt application. Equivalent to Playwright's ``Browser``.
+
+    Provides access to windows and global operations.
+    """
+
+    def __init__(self, conn: Connection, timeout: float = 30.0):
+        self._conn = conn
+        self._timeout = timeout
+
+    def windows(self) -> list[Window]:
+        """List all visible top-level windows."""
+        result = self._conn.send(METHOD_LIST_WINDOWS)
+        return [
+            Window(self._conn, w["wid"], title=w.get("title", ""), timeout=self._timeout)
+            for w in result
+        ]
+
+    def window(self, *, title: str | None = None, index: int = 0) -> Window:
+        """Get a specific window by title or index.
+
+        Args:
+            title: Match window by title (substring match).
+            index: If title is None, get the nth visible window (default: first).
+
+        Returns:
+            A Window instance.
+        """
+        wins = self.windows()
+        if not wins:
+            raise RuntimeError("No visible windows found in the application")
+
+        if title is not None:
+            for w in wins:
+                if title.lower() in w.title().lower():
+                    return w
+            raise RuntimeError(f"No window found with title containing: {title!r}")
+
+        if index >= len(wins):
+            raise IndexError(f"Window index {index} out of range (found {len(wins)} windows)")
+
+        return wins[index]
+
+    def main_window(self) -> Window:
+        """Get the main (first visible) window."""
+        return self.window(index=0)
+
+    def close(self) -> None:
+        """Close the connection to the application."""
+        self._conn.close()
+
+    def __repr__(self) -> str:
+        return f"Application(connected={self._conn.connected})"
+
+
+# --------------------------------------------------------------------------- #
+#  QPlaywright — top-level context manager                                     #
+# --------------------------------------------------------------------------- #
+
+class QPlaywright:
+    """Top-level QPlaywright context. Equivalent to Playwright's ``Playwright``.
+
+    Usage::
+
+        with sync_qplaywright() as qp:
+            app = qp.connect()
+    """
+
+    def connect(
+        self,
+        host: str = DEFAULT_HOST,
+        port: int = DEFAULT_PORT,
+        *,
+        timeout: float = 30.0,
+    ) -> Application:
+        """Connect to a running Qt application with QPlaywright agent embedded.
+
+        Args:
+            host: Agent host address.
+            port: Agent port.
+            timeout: Default timeout for operations (seconds).
+
+        Returns:
+            An Application instance.
+        """
+        conn = Connection(host=host, port=port, timeout=timeout)
+
+        # Retry connection with backoff
+        deadline = time.monotonic() + timeout
+        last_error = None
+        while time.monotonic() < deadline:
+            try:
+                conn.connect()
+                # Verify with ping
+                conn.send(METHOD_PING)
+                return Application(conn, timeout=timeout)
+            except (ConnectionRefusedError, ConnectionError, OSError) as e:
+                last_error = e
+                time.sleep(0.2)
+
+        raise ConnectionError(
+            f"Could not connect to QPlaywright agent at {host}:{port} "
+            f"(timeout={timeout}s): {last_error}"
+        )
+
+    def launch(
+        self,
+        executable: str,
+        *args: str,
+        host: str = DEFAULT_HOST,
+        port: int = DEFAULT_PORT,
+        timeout: float = 30.0,
+    ) -> Application:
+        """Launch a Qt application and connect to its agent.
+
+        The application must have QPlaywright agent embedded via ``start_agent()``.
+
+        Args:
+            executable: Path to the Qt application executable.
+            *args: Command-line arguments.
+            host: Agent host address.
+            port: Agent port.
+            timeout: Connection timeout in seconds.
+
+        Returns:
+            An Application instance.
+        """
+        self._process = subprocess.Popen([executable, *args])
+        return self.connect(host=host, port=port, timeout=timeout)
+
+    def close(self) -> None:
+        """Clean up resources."""
+        proc = getattr(self, "_process", None)
+        if proc and proc.poll() is None:
+            proc.terminate()
+
+
+@contextlib.contextmanager
+def sync_qplaywright() -> Generator[QPlaywright, None, None]:
+    """Context manager that creates a QPlaywright instance.
+
+    Usage::
+
+        from qplaywright.sync_api import sync_qplaywright
+
+        with sync_qplaywright() as qp:
+            app = qp.connect(port=19876)
+            window = app.window()
+            window.locator("role=button").click()
+    """
+    qp = QPlaywright()
+    try:
+        yield qp
+    finally:
+        qp.close()

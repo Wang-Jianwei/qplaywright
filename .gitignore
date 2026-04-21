@@ -1,0 +1,14 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+*.egg-info/
+
+agent_cpp/build/
+
+demo_screenshot.png
+demo_mcp_screenshot.png
+demo_playwright_compat_screenshot.png

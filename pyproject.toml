@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qplaywright"
+version = "0.1.0"
+description = "Playwright-compatible automation library for Qt QWidget applications"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+qplaywright-mcp = "qplaywright.mcp_server:main"
+
+[project.optional-dependencies]
+mcp = ["mcp[cli]>=1.2.0"]
+dev = ["pytest", "PySide6", "mcp[cli]>=1.2.0"]
+
+[tool.setuptools.packages.find]
+include = ["qplaywright*"]
