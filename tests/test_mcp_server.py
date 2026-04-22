@@ -31,6 +31,19 @@ class FakeApp:
         self.closed = True
 
 
+class FakeTransportConn:
+    def __init__(self, *, error: Exception | None = None, responses: dict[str, object] | None = None):
+        self.error = error
+        self.responses = responses or {}
+        self.calls = []
+
+    def send(self, method: str, params=None, *, timeout=None):
+        self.calls.append({"method": method, "params": params, "timeout": timeout})
+        if self.error is not None:
+            raise self.error
+        return self.responses.get(method, {"ok": True})
+
+
 class FakeWindow:
     def __init__(self, wid: int, title: str):
         self.wid = wid
@@ -140,6 +153,74 @@ def test_connect_connection_replaces_existing(monkeypatch):
     assert created[0].connected == ("127.0.0.1", 19877, 5.0)
 
 
+def test_get_connection_removes_stale_connection_from_state():
+    app = FakeApp([])
+    app._conn = FakeTransportConn(error=ConnectionError("Agent closed connection"))
+    qplaywright = FakeQPlaywright()
+    state = mcp_server.ServerState(
+        connections={
+            "default": mcp_server.ManagedConnection(
+                name="default",
+                qplaywright=qplaywright,
+                app=app,
+                host="127.0.0.1",
+                port=19876,
+                timeout=30.0,
+            )
+        }
+    )
+
+    with pytest.raises(ConnectionError, match="Call connect again to establish a fresh session"):
+        mcp_server._get_connection(state, "default")
+
+    assert "default" not in state.connections
+    assert app.closed is True
+    assert qplaywright.closed is True
+
+
+def test_list_connections_reports_dead_connection_without_raising():
+    live_app = FakeApp([FakeWindow(1, "Main")])
+    live_app._conn = FakeTransportConn(
+        responses={
+            mcp_server.METHOD_LIST_WINDOWS: [
+                {"wid": 1, "title": "Main", "class": "", "width": None, "height": None, "index": 0}
+            ]
+        }
+    )
+    dead_app = FakeApp([FakeWindow(2, "Restarted")])
+    dead_app._conn = FakeTransportConn(error=ConnectionError("Agent closed connection"))
+
+    state = mcp_server.ServerState(
+        connections={
+            "alive": mcp_server.ManagedConnection(
+                name="alive",
+                qplaywright=FakeQPlaywright(),
+                app=live_app,
+                host="127.0.0.1",
+                port=19876,
+                timeout=30.0,
+            ),
+            "dead": mcp_server.ManagedConnection(
+                name="dead",
+                qplaywright=FakeQPlaywright(),
+                app=dead_app,
+                host="127.0.0.1",
+                port=19877,
+                timeout=30.0,
+            ),
+        }
+    )
+
+    result = {entry["connection"]: entry for entry in mcp_server.list_connections(state)}
+
+    assert result["alive"]["alive"] is True
+    assert result["alive"]["window_count"] == 1
+    assert result["alive"]["error"] is None
+    assert result["dead"]["alive"] is False
+    assert result["dead"]["window_count"] is None
+    assert "Call connect again to establish a fresh session" in result["dead"]["error"]
+
+
 def test_resolve_window_prefers_wid_then_title():
     first = FakeWindow(1, "Main Window")
     second = FakeWindow(2, "Preferences")
@@ -230,6 +311,45 @@ def test_invoke_locator_method_raises_detailed_failure_for_structured_invoke_res
 
     with pytest.raises(ValueError, match=r"Invoke failed for method 'setAmount' \(errorCode=2\): Missing required argument: value"):
         mcp_server._invoke_locator_method(locator, method_name="setAmount", args={})
+
+
+def test_configure_stdio_for_mcp_reconfigures_utf8_streams(monkeypatch):
+    class FakeStream:
+        def __init__(self):
+            self.calls = []
+
+        def reconfigure(self, **kwargs):
+            self.calls.append(kwargs)
+
+    fake_stdin = FakeStream()
+    fake_stdout = FakeStream()
+    fake_stderr = FakeStream()
+
+    monkeypatch.setattr(mcp_server.sys, "stdin", fake_stdin)
+    monkeypatch.setattr(mcp_server.sys, "stdout", fake_stdout)
+    monkeypatch.setattr(mcp_server.sys, "stderr", fake_stderr)
+
+    mcp_server._configure_stdio_for_mcp("stdio")
+
+    assert fake_stdin.calls == [{"encoding": "utf-8", "errors": "strict"}]
+    assert fake_stdout.calls == [{"encoding": "utf-8", "errors": "strict"}]
+    assert fake_stderr.calls == [{"encoding": "utf-8", "errors": "backslashreplace"}]
+
+
+def test_configure_stdio_for_mcp_skips_non_stdio(monkeypatch):
+    class FakeStream:
+        def __init__(self):
+            self.calls = []
+
+        def reconfigure(self, **kwargs):
+            self.calls.append(kwargs)
+
+    fake_stdout = FakeStream()
+    monkeypatch.setattr(mcp_server.sys, "stdout", fake_stdout)
+
+    mcp_server._configure_stdio_for_mcp("streamable-http")
+
+    assert fake_stdout.calls == []
 
 
 def test_initialize_active_window_uses_first_visible_window(monkeypatch):

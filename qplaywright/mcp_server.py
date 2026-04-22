@@ -11,6 +11,7 @@ import atexit
 import contextlib
 import logging
 import re
+import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -29,6 +30,7 @@ from qplaywright.protocol import (
     METHOD_HOVER,
     METHOD_INVOKE,
     METHOD_IS_VISIBLE,
+    METHOD_PING,
     METHOD_PRESS,
     METHOD_SCREENSHOT_WIDGET,
     METHOD_SELECT_OPTION,
@@ -179,15 +181,38 @@ def _initialize_active_window(connection: ManagedConnection) -> list[dict[str, A
     return windows
 
 
+def _ping_connection(connection: ManagedConnection) -> None:
+    client = getattr(connection.app, "_conn", None)
+    if client is None:
+        return
+    client.send(METHOD_PING, timeout=min(connection.timeout, 5.0))
+
+
+def _stale_connection_message(connection: ManagedConnection, exc: Exception) -> str:
+    return (
+        f"Connection {connection.name!r} to {connection.host}:{connection.port} is no longer alive: {exc}. "
+        "The remote qplaywright agent disconnected or restarted. Call connect again to establish a fresh session."
+    )
+
+
 def _get_connection(state: ServerState, name: str) -> ManagedConnection:
     normalized = _normalize_connection_name(name)
     try:
-        return state.connections[normalized]
+        connection = state.connections[normalized]
     except KeyError as exc:
         available = ", ".join(sorted(state.connections)) or "<none>"
         raise ValueError(
             f"Unknown connection {normalized!r}. Available connections: {available}"
         ) from exc
+
+    try:
+        _ping_connection(connection)
+    except Exception as exc:
+        connection.close()
+        state.connections.pop(normalized, None)
+        raise ConnectionError(_stale_connection_message(connection, exc)) from exc
+
+    return connection
 
 
 def connect_connection(
@@ -281,6 +306,15 @@ def list_connections(state: ServerState) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for name in sorted(state.connections):
         connection = state.connections[name]
+        error: str | None = None
+        alive = True
+        try:
+            _ping_connection(connection)
+            window_count = len(_window_summary(connection))
+        except Exception as exc:
+            alive = False
+            window_count = None
+            error = _stale_connection_message(connection, exc)
         results.append(
             {
                 "connection": connection.name,
@@ -288,7 +322,9 @@ def list_connections(state: ServerState) -> list[dict[str, Any]]:
                 "port": connection.port,
                 "timeout": connection.timeout,
                 "launched_executable": connection.launched_executable,
-                "window_count": len(_window_summary(connection)),
+                "window_count": window_count,
+                "alive": alive,
+                "error": error,
             }
         )
     return results
@@ -1640,6 +1676,19 @@ else:  # pragma: no cover - exercised only without the extra installed
     mcp = None
 
 
+def _configure_stdio_for_mcp(transport: str) -> None:
+    """Force UTF-8 stdio for MCP line transport on Windows and other locale-based consoles."""
+
+    if transport != "stdio":
+        return
+
+    for stream_name, errors in (("stdin", "strict"), ("stdout", "strict"), ("stderr", "backslashreplace")):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors=errors)
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     """Entry point for running the qplaywright MCP server."""
 
@@ -1658,6 +1707,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
     LOGGER.debug("Starting qplaywright MCP server with transport=%s", args.transport)
+    _configure_stdio_for_mcp(args.transport)
     mcp.run(transport=args.transport)
 
 
