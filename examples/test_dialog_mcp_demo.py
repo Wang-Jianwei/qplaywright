@@ -76,6 +76,15 @@ async def main() -> None:
                 assert len(dialog_windows) == 2
                 assert any("Payment Review" in window["title"] for window in dialog_windows)
 
+                dialog_snapshot = await _call_tool(
+                    session,
+                    "browser_snapshot",
+                    {"connection": "demo", "window_index": 1, "depth": 6},
+                )
+                print(f"Dialog scoped snapshot: {dialog_snapshot['snapshot']}")
+                assert "Payment Review" in dialog_snapshot["snapshot"]
+                assert "QPlaywright Demo App" not in dialog_snapshot["snapshot"]
+
                 dialog_root = await _call_tool(
                     session,
                     "inspect_widget",

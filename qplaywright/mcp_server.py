@@ -119,8 +119,16 @@ def _list_windows_raw(connection: ManagedConnection) -> list[dict[str, Any]]:
     return windows
 
 
-def _widget_tree_raw(connection: ManagedConnection, *, max_depth: int) -> list[dict[str, Any]]:
-    return connection.app._conn.send(METHOD_WIDGET_TREE, {"max_depth": max_depth})
+def _widget_tree_raw(
+    connection: ManagedConnection,
+    *,
+    max_depth: int,
+    window_wid: int | None = None,
+) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {"max_depth": max_depth}
+    if window_wid is not None:
+        params["wid"] = window_wid
+    return connection.app._conn.send(METHOD_WIDGET_TREE, params)
 
 
 def _window_summary(connection: ManagedConnection) -> list[dict[str, Any]]:
@@ -137,6 +145,24 @@ def _window_summary(connection: ManagedConnection) -> list[dict[str, Any]]:
             }
         )
     return summaries
+
+
+def _resolve_window_scope_wid(
+    connection: ManagedConnection,
+    *,
+    window_wid: int | None = None,
+    window_title: str | None = None,
+    window_index: int | None = None,
+) -> int | None:
+    if window_wid is None and window_title is None and window_index is None:
+        return None
+    window = _resolve_window(
+        connection,
+        window_wid=window_wid,
+        window_title=window_title,
+        window_index=window_index,
+    )
+    return window.wid
 
 
 def _select_active_window(connection: ManagedConnection, window_wid: int | None) -> None:
@@ -598,11 +624,20 @@ def _compat_snapshot_result(
     *,
     snapshot_target: str | None = None,
     depth: int = 10,
+    window_wid: int | None = None,
+    window_title: str | None = None,
+    window_index: int | None = None,
 ) -> dict[str, Any]:
     if snapshot_target is None:
+        scoped_window_wid = _resolve_window_scope_wid(
+            managed_connection,
+            window_wid=window_wid,
+            window_title=window_title,
+            window_index=window_index,
+        )
         return _snapshot_payload(
             managed_connection,
-            _widget_tree_raw(managed_connection, max_depth=depth),
+            _widget_tree_raw(managed_connection, max_depth=depth, window_wid=scoped_window_wid),
             depth=depth,
         )
 
@@ -736,12 +771,25 @@ if FastMCP is not None:
 
 
     @mcp.tool()
-    def widget_tree(connection: str = "default", max_depth: int = 10) -> list[dict[str, Any]]:
+    def widget_tree(
+        connection: str = "default",
+        max_depth: int = 10,
+        window_wid: int | None = None,
+        window_title: str | None = None,
+        window_index: int | None = None,
+    ) -> list[dict[str, Any]]:
         """Return the current visible widget tree for the connected application."""
 
         if max_depth < 0:
             raise ValueError("max_depth must be >= 0")
-        return _widget_tree_raw(_get_connection(_SERVER_STATE, connection), max_depth=max_depth)
+        connection_state = _get_connection(_SERVER_STATE, connection)
+        scoped_window_wid = _resolve_window_scope_wid(
+            connection_state,
+            window_wid=window_wid,
+            window_title=window_title,
+            window_index=window_index,
+        )
+        return _widget_tree_raw(connection_state, max_depth=max_depth, window_wid=scoped_window_wid)
 
 
     @mcp.tool()
@@ -1342,6 +1390,9 @@ if FastMCP is not None:
         target: str | None = None,
         filename: str | None = None,
         depth: int = 10,
+        window_wid: int | None = None,
+        window_title: str | None = None,
+        window_index: int | None = None,
     ) -> dict[str, Any]:
         """Return a text snapshot of the current Qt widget tree or one targeted widget."""
 
@@ -1349,7 +1400,16 @@ if FastMCP is not None:
         if target is None:
             payload = _snapshot_payload(
                 connection_state,
-                _widget_tree_raw(connection_state, max_depth=depth),
+                _widget_tree_raw(
+                    connection_state,
+                    max_depth=depth,
+                    window_wid=_resolve_window_scope_wid(
+                        connection_state,
+                        window_wid=window_wid,
+                        window_title=window_title,
+                        window_index=window_index,
+                    ),
+                ),
                 depth=depth,
             )
         else:
@@ -1362,7 +1422,14 @@ if FastMCP is not None:
                 raise ValueError(_target_not_found_message(connection_state, target))
             payload = _snapshot_payload(connection_state, [node], depth=depth)
 
-        result = {"connection": connection, "target": target, **payload}
+        result = {
+            "connection": connection,
+            "target": target,
+            "window_wid": window_wid,
+            "window_title": window_title,
+            "window_index": window_index,
+            **payload,
+        }
         if filename is not None:
             result["path"] = _write_text_file(filename, payload["snapshot"])
         return result

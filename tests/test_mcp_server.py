@@ -445,6 +445,53 @@ def test_action_result_with_snapshot_merges_payload(monkeypatch):
     assert result["refs"] == [{"ref": "e1"}]
 
 
+def test_widget_tree_raw_includes_optional_window_wid(monkeypatch):
+    captured = {}
+
+    class FakeConn:
+        def send(self, method, params):
+            captured["method"] = method
+            captured["params"] = params
+            return []
+
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+    connection.app._conn = FakeConn()
+
+    mcp_server._widget_tree_raw(connection, max_depth=4, window_wid=12)
+
+    assert captured == {"method": mcp_server.METHOD_WIDGET_TREE, "params": {"max_depth": 4, "wid": 12}}
+
+
+def test_compat_snapshot_result_scopes_to_explicit_window(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main"), FakeWindow(22, "Dialog")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_widget_tree_raw",
+        lambda managed_connection, **kwargs: [{"wid": kwargs.get("window_wid"), "class": "DialogWindow", "objectName": "", "text": "Dialog", "children": []}],
+    )
+
+    payload = mcp_server._compat_snapshot_result(connection, depth=3, window_index=1)
+
+    assert 'DialogWindow "Dialog"' in payload["snapshot"]
+    assert payload["refs"][0]["wid"] == 22
+
+
 def test_target_not_found_message_suggests_refresh_for_missing_snapshot_ref():
     connection = mcp_server.ManagedConnection(
         name="demo",

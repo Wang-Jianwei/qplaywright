@@ -34,7 +34,7 @@ python -m qplaywright.mcp_server --transport streamable-http
 
 1. `connect` to a running Qt app with an embedded qplaywright agent.
 2. `list_windows` to discover the target top-level window.
-3. `widget_tree` or `inspect_widget` to understand the UI structure.
+3. `widget_tree` or `inspect_widget` to understand the UI structure. When multiple top-level windows are visible, prefer `window_wid`, `window_title`, or `window_index` so you do not fetch unrelated windows.
 4. Use action tools like `click`, `fill`, `type_text`, `set_checked`,
    `press_key`, `scroll`, `select_option`, `wait_for`, and `screenshot`.
 5. `disconnect` when finished.
@@ -156,7 +156,7 @@ Most playwright-mcp compatibility tools use these fields:
 | `disconnect` | `name` | `connection`, `closed`, `launched_executable` |
 | `list_live_connections` | none | list entries with `connection`, `host`, `port`, `timeout`, `launched_executable`, `window_count` |
 | `list_windows` | `connection` | list entries with `index`, `wid`, `title`, `class`, `width`, `height` |
-| `widget_tree` | `connection`, `max_depth` | widget tree nodes including `wid`, `class`, `text`, `objectName`, `children` |
+| `widget_tree` | `connection`, `max_depth`, optional `window_wid` or `window_title` or `window_index` | widget tree nodes including `wid`, `class`, `text`, `objectName`, `children` |
 | `inspect_widget` | common native locator params, plus `property_name`, `include_methods` | `exists`, `count`, and when found: `text`, `value`, `is_visible`, `is_enabled`, `is_checked`, `bounding_box`, optional `methods` |
 | `get_widget_methods` | common native locator params | `connection`, `selector`, `methods` where each method includes `name`, `args`, `returnType`, `brief` |
 | `click` | common native locator params, plus `double_click` | `ok`, `selector`, `double_click`, `connection` |
@@ -205,7 +205,7 @@ For method-only custom widgets, the common shape is:
 | `browser_press_key` | `key`, `connection`, `target`, `element` | `ok`, `target`, `key`, plus fresh `snapshot` and `refs` |
 | `browser_resize` | `width`, `height`, `connection` | `ok`, `width`, `height`, `connection` |
 | `browser_select_option` | `target`, `values`, `connection`, `element` | `ok`, `target`, `value`, plus fresh `snapshot` and `refs` |
-| `browser_snapshot` | `connection`, `target`, `filename`, `depth` | `snapshot`, `refs`, optional `path`, plus `connection`, `target` |
+| `browser_snapshot` | `connection`, `target`, `filename`, `depth`, optional `window_wid` or `window_title` or `window_index` when `target` is omitted | `snapshot`, `refs`, optional `path`, plus `connection`, `target` |
 | `browser_tabs` | `action`, `connection`, optional `index`, unused `url` placeholder | `result`, plus `windows`, and sometimes `selected` or `closed` |
 | `browser_take_screenshot` | `connection`, `element`, `target`, `type`, `filename`, `fullPage` | screenshot payload with `path`, `width`, `height`, plus `connection`, `selector` |
 | `browser_type` | `target`, `text`, `connection`, `element`, `submit`, `slowly` | `ok`, `target`, `text`, `slowly`, optional `submitted`, plus fresh `snapshot` and `refs` |
@@ -220,6 +220,8 @@ For method-only custom widgets, the common shape is:
 live connection. Those refs can be fed back into tools like `browser_click`,
 `browser_type`, `browser_select_option`, and `browser_take_screenshot` without
 re-resolving the original selector.
+
+When you only need one top-level window, prefer passing `window_wid`, `window_title`, or `window_index` to `widget_tree` or `browser_snapshot`. This reduces snapshot cost by avoiding traversal of unrelated visible windows, while keeping the target Qt application stateless from the MCP side.
 
 ## End-to-End Demo
 

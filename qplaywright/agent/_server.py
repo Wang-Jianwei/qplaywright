@@ -379,7 +379,14 @@ def _handle_command(req: Request) -> Any:
         return result
 
     if method == METHOD_WIDGET_TREE:
-        roots = _get_top_level_widgets()
+        wid = params.get("wid")
+        if wid is not None:
+            root = _registry.get(wid)
+            if root is None:
+                raise ValueError(f"Widget id={wid} not found or was garbage collected")
+            roots = [root]
+        else:
+            roots = _get_top_level_widgets()
         return [_widget_tree_to_dict(r, max_depth=params.get("max_depth", 10)) for r in roots if r.isVisible()]
 
     if method == METHOD_COUNT:
