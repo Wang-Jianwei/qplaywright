@@ -40,6 +40,17 @@ async def main() -> None:
 
                 await _call_tool(session, "connect", {"name": "demo", "port": 19876, "timeout": 10.0})
 
+                await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "setAmount",
+                        "args": {"value": "88.50"},
+                    },
+                )
+
                 tabs = await _call_tool(session, "browser_tabs", {"action": "list", "connection": "demo"})
                 print(f"Tabs: {tabs['result']}")
 
@@ -55,6 +66,9 @@ async def main() -> None:
                 password_ref = refs_by_target["#password"]
                 remember_ref = refs_by_target["#remember"]
                 role_ref = refs_by_target["#role"]
+                environment_ref = refs_by_target["#environment"]
+                notify_ref = refs_by_target["#notify"]
+                notes_ref = refs_by_target["#notes"]
                 login_ref = refs_by_target["#login_btn"]
 
                 await _call_tool(
@@ -65,6 +79,7 @@ async def main() -> None:
                         "fields": [
                             {"target": username_ref, "value": "admin"},
                             {"target": password_ref, "value": "secret123"},
+                            {"target": notes_ref, "value": "Reviewed by playwright compat flow"},
                         ],
                     },
                 )
@@ -86,8 +101,18 @@ async def main() -> None:
                 )
                 await _call_tool(
                     session,
+                    "browser_select_option",
+                    {"connection": "demo", "target": environment_ref, "values": ["Production"]},
+                )
+                await _call_tool(
+                    session,
                     "browser_click",
                     {"connection": "demo", "target": remember_ref},
+                )
+                await _call_tool(
+                    session,
+                    "browser_click",
+                    {"connection": "demo", "target": notify_ref},
                 )
                 login_result = await _call_tool(
                     session,
@@ -104,7 +129,7 @@ async def main() -> None:
                 await _call_tool(
                     session,
                     "browser_verify_text_visible",
-                    {"connection": "demo", "text": "Logged in as admin"},
+                    {"connection": "demo", "text": "amount=88.50"},
                 )
                 await _call_tool(
                     session,
@@ -129,6 +154,7 @@ async def main() -> None:
                     {"connection": "demo", "target": status_ref, "depth": 0},
                 )
                 print(f"Status snapshot: {status['snapshot']}")
+                assert "amount=88.50" in status["snapshot"]
 
                 screenshot = await _call_tool(
                     session,

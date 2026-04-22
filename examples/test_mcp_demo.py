@@ -98,6 +98,39 @@ async def main() -> None:
                 )
                 print(f"Widget tree roots: {len(tree)}")
 
+                methods = await _call_tool(
+                    session,
+                    "get_widget_methods",
+                    {"connection": "demo", "selector": "#amount_editor"},
+                )
+                method_names = [entry["name"] for entry in methods["methods"]]
+                print(f"Custom methods: {method_names}")
+                assert method_names == ["amount", "setAmount", "clearAmount"]
+
+                await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "setAmount",
+                        "args": {"value": "123.45"},
+                    },
+                )
+
+                amount_result = await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "amount",
+                        "args": {},
+                    },
+                )
+                print(f"Amount result: {amount_result['result']}")
+                assert amount_result["result"]["value"] == "123.45"
+
                 await _call_tool(
                     session,
                     "fill",
@@ -120,6 +153,25 @@ async def main() -> None:
                 )
                 await _call_tool(
                     session,
+                    "select_option",
+                    {"connection": "demo", "selector": "#environment", "label": "Production"},
+                )
+                await _call_tool(
+                    session,
+                    "set_checked",
+                    {"connection": "demo", "selector": "#notify", "checked": True},
+                )
+                await _call_tool(
+                    session,
+                    "fill",
+                    {
+                        "connection": "demo",
+                        "selector": "#notes",
+                        "value": "Escalate to finance reviewer",
+                    },
+                )
+                await _call_tool(
+                    session,
                     "click",
                     {
                         "connection": "demo",
@@ -135,6 +187,16 @@ async def main() -> None:
                 )
                 print(f"Status after login: {status['text']}")
                 assert "Logged in as admin" in status["text"]
+                assert "amount=123.45" in status["text"]
+
+                summary = await _call_tool(
+                    session,
+                    "inspect_widget",
+                    {"connection": "demo", "selector": "#summary"},
+                )
+                print(f"Summary after login: {summary['text']}")
+                assert "last-login" in summary["text"]
+                assert "amount=123.45" in summary["text"]
 
                 await _call_tool(
                     session,
@@ -152,6 +214,19 @@ async def main() -> None:
                 )
                 print(f"Status after clear: {cleared['text']}")
                 assert "cleared" in cleared["text"].lower()
+
+                cleared_amount = await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "amount",
+                        "args": {},
+                    },
+                )
+                print(f"Amount after clear: {cleared_amount['result']}")
+                assert cleared_amount["result"]["value"] == "0.00"
 
                 screenshot = await _call_tool(
                     session,
