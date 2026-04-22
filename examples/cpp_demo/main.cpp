@@ -2,7 +2,7 @@
  * Demo Qt application with QPlaywright agent embedded.
  *
  * Build:
- *   cd agent_cpp && mkdir build && cd build
+ *   cd examples/cpp_demo && mkdir build && cd build
  *   cmake .. -DCMAKE_PREFIX_PATH=<your-qt-path>
  *   cmake --build .
  *

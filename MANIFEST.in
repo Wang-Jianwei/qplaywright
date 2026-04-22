@@ -1,1 +1,2 @@
-include agent_cpp/qplaywright_agent.h
+include qplaywright/cpp/qplaywright_agent.h
+include qplaywright/cpp/CMakeLists.txt

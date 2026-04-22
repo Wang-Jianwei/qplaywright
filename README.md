@@ -39,6 +39,9 @@ The Python package includes:
 - The MCP server entrypoint.
 - The C++ header-only Qt agent.
 
+In the source tree, the C++ agent lives under `qplaywright/cpp`.
+The demo application lives separately under `examples/cpp_demo`.
+
 If you need the packaged C++ agent header path at runtime:
 
 ```python
@@ -68,6 +71,14 @@ int main(int argc, char *argv[]) {
     QPlaywrightAgent::start(19876);
     return app.exec();
 }
+```
+
+Build the bundled C++ demo from the source tree:
+
+```bash
+cd examples/cpp_demo
+cmake -S . -B build -DCMAKE_PREFIX_PATH=<your-qt-path>
+cmake --build build
 ```
 
 ### Python client

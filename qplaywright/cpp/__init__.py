@@ -6,10 +6,6 @@ def agent_header_path() -> Path:
     if packaged.exists():
         return packaged
 
-    repo_header = Path(__file__).resolve().parents[2] / "agent_cpp" / "qplaywright_agent.h"
-    if repo_header.exists():
-        return repo_header
-
     raise FileNotFoundError("qplaywright_agent.h is not available in the installed package")
 
 

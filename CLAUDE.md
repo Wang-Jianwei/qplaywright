@@ -17,7 +17,7 @@ They communicate via JSON Lines over TCP (default `127.0.0.1:19876`).
 
 ```bash
 # Configure (supports Qt5 or Qt6)
-cd agent_cpp && mkdir build && cd build
+cd examples/cpp_demo && mkdir build && cd build
 cmake .. -G "MinGW Makefiles" \
   -DCMAKE_PREFIX_PATH="D:/Qt/Qt5.14.2/5.14.2/mingw73_64" \
   -DCMAKE_CXX_COMPILER="D:/Qt/Qt5.14.2/Tools/mingw730_64/bin/g++.exe"
@@ -67,7 +67,7 @@ python examples/demo_app.py
 
 ## Architecture
 
-```
+```text
 Client (Python)                    Agent (C++ or Python, in Qt app)
 ┌─────────────────┐    TCP/JSON   ┌──────────────────────┐
 │ sync_qplaywright │───Lines────►│ QPlaywrightAgent      │
@@ -86,7 +86,7 @@ Client (Python)                    Agent (C++ or Python, in Qt app)
 
 ### Protocol (`qplaywright/protocol.py`)
 
-Single source of truth for method names, selector syntax, and the role→Qt class mapping (`ROLE_MAP`). The C++ agent (`agent_cpp/qplaywright_agent.h`) duplicates the role map and method dispatch independently — keep them in sync when adding new methods or roles.
+Single source of truth for method names, selector syntax, and the role→Qt class mapping (`ROLE_MAP`). The C++ agent (`qplaywright/cpp/qplaywright_agent.h`) duplicates the role map and method dispatch independently — keep them in sync when adding new methods or roles.
 
 ### Selector Syntax
 
@@ -103,9 +103,9 @@ Both agents maintain a `wid` registry (widget pointer → stable integer). The c
 ### Key Files
 
 | File | Purpose |
-|---|---|
+| --- | --- |
 | `qplaywright/protocol.py` | Method constants, `Request`/`Response`, `ROLE_MAP`, selector docs |
-| `agent_cpp/qplaywright_agent.h` | Single-header C++ agent (Q_OBJECT classes, needs AUTOMOC) |
+| `qplaywright/cpp/qplaywright_agent.h` | Single-header C++ agent (Q_OBJECT classes, needs AUTOMOC) |
 | `qplaywright/agent/_server.py` | Python agent: TCP server + command handler |
 | `qplaywright/agent/_selector.py` | Python selector engine + widget serialization |
 | `qplaywright/sync_api/_api.py` | Client entry: `sync_qplaywright()`, `Application`, `Window` |

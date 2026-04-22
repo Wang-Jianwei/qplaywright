@@ -19,15 +19,3 @@ target_link_libraries(qplaywright_agent INTERFACE
     Qt${QT_VERSION_MAJOR}::Network
     Qt${QT_VERSION_MAJOR}::Test
 )
-
-# ---- Demo app ----
-add_executable(demo_app
-    ${CMAKE_CURRENT_SOURCE_DIR}/../examples/cpp_demo/main.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/qplaywright_agent.h
-)
-target_link_libraries(demo_app PRIVATE
-    Qt${QT_VERSION_MAJOR}::Widgets
-    Qt${QT_VERSION_MAJOR}::Network
-    Qt${QT_VERSION_MAJOR}::Test
-)
-target_include_directories(demo_app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

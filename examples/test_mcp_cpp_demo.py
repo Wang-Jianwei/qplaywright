@@ -24,32 +24,44 @@ from examples.test_mcp_demo import _call_tool, _project_root, _python_path_env
 
 def _find_cpp_demo_executable(root: Path) -> Path:
     candidates = [
-        root / "agent_cpp" / "build_validate" / "demo_app.exe",
-        root / "agent_cpp" / "build" / "demo_app.exe",
+        root / "examples" / "cpp_demo" / "build_verify" / "demo_app.exe",
+        root / "examples" / "cpp_demo" / "build" / "demo_app.exe",
     ]
     for candidate in candidates:
         if candidate.exists():
             return candidate
     raise FileNotFoundError(
-        "Could not find demo_app.exe. Build the C++ demo first in agent_cpp/build or agent_cpp/build_validate."
+        "Could not find demo_app.exe. Build the C++ demo first in examples/cpp_demo/build or examples/cpp_demo/build_verify."
     )
 
 
-def _cpp_demo_env(root: Path) -> dict[str, str]:
+def _cpp_demo_env(root: Path, runtime_dir: Path | None = None) -> dict[str, str]:
     env = _python_path_env(root)
-    runtime_dir = root / "agent_cpp" / "build"
-    if runtime_dir.exists():
-        env["PATH"] = str(runtime_dir) + os.pathsep + env.get("PATH", "")
-        platforms_dir = runtime_dir / "platforms"
+    runtime_candidates = []
+    if runtime_dir is not None:
+        runtime_candidates.append(runtime_dir)
+    runtime_candidates.extend(
+        [
+            root / "examples" / "cpp_demo" / "build_verify",
+            root / "examples" / "cpp_demo" / "build",
+        ]
+    )
+
+    for candidate in runtime_candidates:
+        if not candidate.exists():
+            continue
+        env["PATH"] = str(candidate) + os.pathsep + env.get("PATH", "")
+        platforms_dir = candidate / "platforms"
         if platforms_dir.exists():
             env["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(platforms_dir)
+        break
     return env
 
 
 async def main() -> None:
     root = _project_root()
-    env = _cpp_demo_env(root)
     executable = _find_cpp_demo_executable(root)
+    env = _cpp_demo_env(root, executable.parent)
 
     demo_process = subprocess.Popen([str(executable)], cwd=executable.parent, env=env)
 
