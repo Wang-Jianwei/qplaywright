@@ -35,6 +35,7 @@ from qplaywright.protocol import (
     METHOD_GET_PROPERTY,
     METHOD_GET_TEXT,
     METHOD_GET_VALUE,
+    METHOD_GET_METHODS,
     METHOD_IS_VISIBLE,
     METHOD_IS_ENABLED,
     METHOD_IS_CHECKED,
@@ -43,6 +44,7 @@ from qplaywright.protocol import (
     METHOD_CLICK,
     METHOD_DBLCLICK,
     METHOD_FILL,
+    METHOD_INVOKE,
     METHOD_CLEAR,
     METHOD_CHECK,
     METHOD_UNCHECK,
@@ -67,9 +69,19 @@ from qplaywright.agent._selector import (
     widget_to_dict,
     _widget_text,
     _widget_class_name,
+    _widget_value,
+    _declared_method_schema,
+    _invoke_method,
 )
 
 logger = logging.getLogger("qplaywright.agent")
+
+_INVOKE_ERROR_NONE = 0
+_INVOKE_ERROR_METHOD_NOT_EXPOSED = 1
+_INVOKE_ERROR_MISSING_REQUIRED_ARGUMENT = 2
+_INVOKE_ERROR_UNEXPECTED_ARGUMENT = 3
+_INVOKE_ERROR_ARGUMENT_TYPE_MISMATCH = 4
+_INVOKE_ERROR_METHOD_INVOCATION_FAILED = 5
 
 # We import Qt lazily to avoid hard dependency at module level.
 _QtWidgets = None
@@ -254,6 +266,58 @@ def _resolve_one(params: dict):
     return widgets[0]
 
 
+def _normalize_invoke_result(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode(errors="replace")
+    if isinstance(value, dict):
+        return {str(key): _normalize_invoke_result(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_invoke_result(item) for item in value]
+    raise TypeError(f"Invoke result is not JSON-serializable: {type(value).__name__}")
+
+
+def _invoke_result_success(value=None):
+    return {
+        "ok": True,
+        "value": _normalize_invoke_result(value),
+        "errorCode": _INVOKE_ERROR_NONE,
+        "errorMessage": "",
+    }
+
+
+def _invoke_result_failure(code: int, message: str):
+    return {
+        "ok": False,
+        "value": None,
+        "errorCode": code,
+        "errorMessage": message,
+    }
+
+
+def _invoke_error_code(exc: Exception) -> int:
+    message = str(exc)
+    if message.startswith("Method is not exposed:"):
+        return _INVOKE_ERROR_METHOD_NOT_EXPOSED
+    if message.startswith("Missing required argument:"):
+        return _INVOKE_ERROR_MISSING_REQUIRED_ARGUMENT
+    if message.startswith("Unexpected argument:"):
+        return _INVOKE_ERROR_UNEXPECTED_ARGUMENT
+    if message.startswith("Argument "):
+        return _INVOKE_ERROR_ARGUMENT_TYPE_MISMATCH
+    return _INVOKE_ERROR_METHOD_INVOCATION_FAILED
+
+
+def _invoke_widget_method(widget, request: dict):
+    try:
+        result = _invoke_method(widget, request)
+        _process_events()
+        return _invoke_result_success(result)
+    except Exception as exc:
+        return _invoke_result_failure(_invoke_error_code(exc), str(exc))
+
+
 def _key_to_qt(key_str: str):
     """Convert a Playwright-style key name to Qt key enum."""
     _import_qt()
@@ -328,11 +392,11 @@ def _handle_command(req: Request) -> Any:
 
     if method == METHOD_GET_VALUE:
         w = _resolve_one(params)
-        if hasattr(w, "value"):
-            return w.value()
-        if hasattr(w, "currentText"):
-            return w.currentText()
-        return _widget_text(w)
+        return _widget_value(w)
+
+    if method == METHOD_GET_METHODS:
+        w = _resolve_one(params)
+        return _normalize_invoke_result(_declared_method_schema(w))
 
     if method == METHOD_GET_PROPERTY:
         w = _resolve_one(params)
@@ -381,6 +445,10 @@ def _handle_command(req: Request) -> Any:
         value = params["value"]
         _fill_widget(w, value)
         return True
+
+    if method == METHOD_INVOKE:
+        w = _resolve_one(params)
+        return _invoke_widget_method(w, params.get("request") or {})
 
     if method == METHOD_CLEAR:
         w = _resolve_one(params)

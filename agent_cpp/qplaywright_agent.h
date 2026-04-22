@@ -26,6 +26,8 @@
 #include <QApplication>
 #include <QWidget>
 #include <QMetaObject>
+#include <QMetaType>
+#include <QMetaProperty>
 #include <QBuffer>
 #include <QPixmap>
 #include <QScreen>
@@ -64,6 +66,9 @@
 #include <QStatusBar>
 #include <QDialog>
 #include <QScrollBar>
+#include <QStringList>
+#include <QVariant>
+#include <QVector>
 
 #include <functional>
 
@@ -75,14 +80,638 @@ class QPlaywrightAgent;
 class QPlaywrightHandler;
 class QPlaywrightClientConnection;
 
+enum class QPlaywrightInvokeErrorCode {
+    None,
+    MethodNotExposed,
+    MissingRequiredArgument,
+    UnexpectedArgument,
+    ArgumentTypeMismatch,
+    MethodInvocationFailed,
+};
+
+class QPlaywrightMethodArg
+{
+public:
+    QPlaywrightMethodArg() = default;
+
+    static QPlaywrightMethodArg fromVariantMap(const QVariantMap &map)
+    {
+        QPlaywrightMethodArg arg;
+        arg.m_name = map.value("name").toString().trimmed();
+        arg.m_type = map.value("type", QStringLiteral("QVariant")).toString();
+        arg.m_brief = map.value("brief").toString();
+        arg.m_required = map.value("required", true).toBool();
+        arg.m_defaultValue = map.value("defaultValue");
+        return arg;
+    }
+
+    QString name() const { return m_name; }
+    QString type() const { return m_type; }
+    QString brief() const { return m_brief; }
+    bool required() const { return m_required; }
+    QVariant defaultValue() const { return m_defaultValue; }
+    bool hasDefaultValue() const { return m_defaultValue.isValid(); }
+
+    QVariantMap toVariantMap() const
+    {
+        QVariantMap map;
+        map.insert("name", m_name);
+        map.insert("type", m_type);
+        map.insert("brief", m_brief);
+        map.insert("required", m_required);
+        map.insert("defaultValue", m_defaultValue);
+        return map;
+    }
+
+private:
+    QString m_name;
+    QString m_type = QStringLiteral("QVariant");
+    QString m_brief;
+    bool m_required = true;
+    QVariant m_defaultValue;
+};
+
+class QPlaywrightClassMethod
+{
+public:
+    QPlaywrightClassMethod() = default;
+
+    static QPlaywrightClassMethod fromVariantMap(const QVariantMap &map)
+    {
+        QPlaywrightClassMethod method;
+        method.m_name = map.value("name").toString().trimmed();
+        method.m_returnType = map.value("returnType", QStringLiteral("QVariant")).toString();
+        method.m_brief = map.value("brief").toString();
+
+        const QVariantList rawArgs = map.value("args").toList();
+        for (const QVariant &rawArg : rawArgs)
+            method.m_args.append(QPlaywrightMethodArg::fromVariantMap(rawArg.toMap()));
+        return method;
+    }
+
+    QString name() const { return m_name; }
+    QVector<QPlaywrightMethodArg> args() const { return m_args; }
+    QString returnType() const { return m_returnType; }
+    QString brief() const { return m_brief; }
+
+    QString signature() const
+    {
+        QStringList argTypeNames;
+        for (const QPlaywrightMethodArg &arg : m_args)
+            argTypeNames.append(arg.type());
+        return QStringLiteral("%1(%2)").arg(m_name, argTypeNames.join(QStringLiteral(", ")));
+    }
+
+    bool acceptsArgs(const QVariantMap &providedArgs, QString *error = nullptr) const
+    {
+        for (auto it = providedArgs.constBegin(); it != providedArgs.constEnd(); ++it) {
+            bool known = false;
+            for (const QPlaywrightMethodArg &arg : m_args) {
+                if (arg.name() == it.key()) {
+                    known = true;
+                    break;
+                }
+            }
+            if (!known) {
+                if (error)
+                    *error = QStringLiteral("Unexpected argument: %1").arg(it.key());
+                return false;
+            }
+        }
+
+        for (const QPlaywrightMethodArg &arg : m_args) {
+            if (!providedArgs.contains(arg.name()) && arg.required() && !arg.hasDefaultValue()) {
+                if (error)
+                    *error = QStringLiteral("Missing required argument: %1").arg(arg.name());
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    QVariantMap toVariantMap() const
+    {
+        QVariantList argMaps;
+        for (const QPlaywrightMethodArg &arg : m_args)
+            argMaps.append(arg.toVariantMap());
+
+        QVariantMap map;
+        map.insert("name", m_name);
+        map.insert("args", argMaps);
+        map.insert("returnType", m_returnType);
+        map.insert("brief", m_brief);
+        return map;
+    }
+
+private:
+    QString m_name;
+    QVector<QPlaywrightMethodArg> m_args;
+    QString m_returnType = QStringLiteral("QVariant");
+    QString m_brief;
+};
+
+class QPlaywrightClassMetadata
+{
+public:
+    QPlaywrightClassMetadata() = default;
+
+    static QPlaywrightClassMetadata fromVariantMap(const QVariantMap &map)
+    {
+        QPlaywrightClassMetadata metadata;
+        metadata.m_role = map.value("role").toString().trimmed();
+        const QVariantList rawMethods = map.value("methods").toList();
+        for (const QVariant &rawMethod : rawMethods)
+            metadata.m_methods.append(QPlaywrightClassMethod::fromVariantMap(rawMethod.toMap()));
+        return metadata;
+    }
+
+    QString role() const { return m_role; }
+    QVector<QPlaywrightClassMethod> methods() const { return m_methods; }
+
+    bool hasMethod(const QString &name) const
+    {
+        for (const QPlaywrightClassMethod &method : m_methods) {
+            if (method.name() == name)
+                return true;
+        }
+        return false;
+    }
+
+    QPlaywrightClassMethod findMethod(const QString &name) const
+    {
+        for (const QPlaywrightClassMethod &method : m_methods) {
+            if (method.name() == name)
+                return method;
+        }
+        return {};
+    }
+
+    QVariantMap toVariantMap() const
+    {
+        QVariantList methodMaps;
+        for (const QPlaywrightClassMethod &method : m_methods)
+            methodMaps.append(method.toVariantMap());
+
+        QVariantMap map;
+        map.insert("role", m_role);
+        map.insert("methods", methodMaps);
+        return map;
+    }
+
+private:
+    QString m_role;
+    QVector<QPlaywrightClassMethod> m_methods;
+};
+
+class QPlaywrightInvokeRequest
+{
+public:
+    QPlaywrightInvokeRequest() = default;
+
+    static QPlaywrightInvokeRequest fromJsonObject(const QJsonObject &object)
+    {
+        QPlaywrightInvokeRequest request;
+        request.m_method = object.value("method").toString().trimmed();
+        request.m_args = object.value("args").toObject().toVariantMap();
+        return request;
+    }
+
+    QString method() const { return m_method; }
+    QVariantMap args() const { return m_args; }
+
+private:
+    QString m_method;
+    QVariantMap m_args;
+};
+
+class QPlaywrightPreparedCall
+{
+public:
+    QPlaywrightPreparedCall() = default;
+
+    QPlaywrightPreparedCall &method(const QPlaywrightClassMethod &method)
+    {
+        m_method = method;
+        return *this;
+    }
+
+    QPlaywrightPreparedCall &orderedArgs(const QVariantList &orderedArgs)
+    {
+        m_orderedArgs = orderedArgs;
+        return *this;
+    }
+
+    QPlaywrightClassMethod method() const { return m_method; }
+    QVariantList orderedArgs() const { return m_orderedArgs; }
+
+private:
+    QPlaywrightClassMethod m_method;
+    QVariantList m_orderedArgs;
+};
+
+class QPlaywrightInvokeResult
+{
+public:
+    QPlaywrightInvokeResult() = default;
+
+    static QPlaywrightInvokeResult success(const QVariant &value = QVariant())
+    {
+        QPlaywrightInvokeResult result;
+        result.m_ok = true;
+        result.m_value = value;
+        return result;
+    }
+
+    static QPlaywrightInvokeResult failure(QPlaywrightInvokeErrorCode code, const QString &message)
+    {
+        QPlaywrightInvokeResult result;
+        result.m_ok = false;
+        result.m_errorCode = code;
+        result.m_errorMessage = message;
+        return result;
+    }
+
+    bool ok() const { return m_ok; }
+
+    QJsonObject toJsonObject() const
+    {
+        QJsonObject object;
+        object["ok"] = m_ok;
+        object["value"] = QJsonValue::fromVariant(m_value);
+        object["errorCode"] = static_cast<int>(m_errorCode);
+        object["errorMessage"] = m_errorMessage;
+        return object;
+    }
+
+private:
+    bool m_ok = false;
+    QVariant m_value;
+    QPlaywrightInvokeErrorCode m_errorCode = QPlaywrightInvokeErrorCode::None;
+    QString m_errorMessage;
+};
+
+Q_DECLARE_METATYPE(QPlaywrightMethodArg)
+Q_DECLARE_METATYPE(QPlaywrightClassMethod)
+Q_DECLARE_METATYPE(QPlaywrightClassMetadata)
+Q_DECLARE_METATYPE(QPlaywrightInvokeResult)
+Q_DECLARE_METATYPE(QPlaywrightInvokeErrorCode)
+
+class QPlaywrightTypeConverter
+{
+public:
+    static bool convert(const QVariant &input, const QString &targetType, QVariant *output, QString *error = nullptr)
+    {
+        if (targetType.isEmpty() || targetType == QStringLiteral("QVariant")) {
+            *output = input;
+            return true;
+        }
+
+        QVariant converted = input;
+
+        if (targetType == QStringLiteral("QString")) {
+            *output = converted.toString();
+            return true;
+        }
+        if (targetType == QStringLiteral("int")) {
+            if (!converted.canConvert<int>()) {
+                if (error)
+                    *error = QStringLiteral("Cannot convert value to int");
+                return false;
+            }
+            *output = converted.toInt();
+            return true;
+        }
+        if (targetType == QStringLiteral("double")) {
+            if (!converted.canConvert<double>()) {
+                if (error)
+                    *error = QStringLiteral("Cannot convert value to double");
+                return false;
+            }
+            *output = converted.toDouble();
+            return true;
+        }
+        if (targetType == QStringLiteral("bool")) {
+            if (!converted.canConvert<bool>()) {
+                if (error)
+                    *error = QStringLiteral("Cannot convert value to bool");
+                return false;
+            }
+            *output = converted.toBool();
+            return true;
+        }
+        if (targetType == QStringLiteral("QStringList")) {
+            if (!converted.canConvert<QStringList>()) {
+                if (error)
+                    *error = QStringLiteral("Cannot convert value to QStringList");
+                return false;
+            }
+            *output = converted.toStringList();
+            return true;
+        }
+
+        if (error)
+            *error = QStringLiteral("Unsupported target type: %1").arg(targetType);
+        return false;
+    }
+};
+
+class QPlaywrightInvoker
+{
+public:
+    static QPlaywrightInvokeResult prepareCall(
+        const QPlaywrightClassMetadata &metadata,
+        const QPlaywrightInvokeRequest &request,
+        QPlaywrightPreparedCall *preparedCall)
+    {
+        if (!metadata.hasMethod(request.method())) {
+            return QPlaywrightInvokeResult::failure(
+                QPlaywrightInvokeErrorCode::MethodNotExposed,
+                QStringLiteral("Method is not exposed: %1").arg(request.method())
+            );
+        }
+
+        const QPlaywrightClassMethod method = metadata.findMethod(request.method());
+        QString argError;
+        if (!method.acceptsArgs(request.args(), &argError)) {
+            const QPlaywrightInvokeErrorCode code = argError.startsWith(QStringLiteral("Missing required"))
+                ? QPlaywrightInvokeErrorCode::MissingRequiredArgument
+                : QPlaywrightInvokeErrorCode::UnexpectedArgument;
+            return QPlaywrightInvokeResult::failure(code, argError);
+        }
+
+        QVariantList orderedArgs;
+        for (const QPlaywrightMethodArg &arg : method.args()) {
+            QVariant rawValue;
+            if (request.args().contains(arg.name()))
+                rawValue = request.args().value(arg.name());
+            else
+                rawValue = arg.defaultValue();
+
+            QVariant convertedValue;
+            QString conversionError;
+            if (!QPlaywrightTypeConverter::convert(rawValue, arg.type(), &convertedValue, &conversionError)) {
+                return QPlaywrightInvokeResult::failure(
+                    QPlaywrightInvokeErrorCode::ArgumentTypeMismatch,
+                    QStringLiteral("Argument %1: %2").arg(arg.name(), conversionError)
+                );
+            }
+            orderedArgs.append(convertedValue);
+        }
+
+        preparedCall->method(method).orderedArgs(orderedArgs);
+        return QPlaywrightInvokeResult::success();
+    }
+
+    static QPlaywrightInvokeResult executePreparedCall(QObject *target, const QPlaywrightPreparedCall &preparedCall)
+    {
+        const QPlaywrightClassMethod method = preparedCall.method();
+        const QVariantList orderedArgs = preparedCall.orderedArgs();
+
+        if (orderedArgs.size() > 2) {
+            return QPlaywrightInvokeResult::failure(
+                QPlaywrightInvokeErrorCode::MethodInvocationFailed,
+                QStringLiteral("First implementation supports at most 2 arguments: %1").arg(method.signature())
+            );
+        }
+
+        if (method.returnType().isEmpty() || method.returnType() == QStringLiteral("void"))
+            return invokeVoid(target, method, orderedArgs);
+        if (method.returnType() == QStringLiteral("QString"))
+            return invokeQString(target, method, orderedArgs);
+        if (method.returnType() == QStringLiteral("QVariant"))
+            return invokeQVariant(target, method, orderedArgs);
+        if (method.returnType() == QStringLiteral("bool"))
+            return invokeBool(target, method, orderedArgs);
+        if (method.returnType() == QStringLiteral("int"))
+            return invokeInt(target, method, orderedArgs);
+        if (method.returnType() == QStringLiteral("double"))
+            return invokeDouble(target, method, orderedArgs);
+
+        return QPlaywrightInvokeResult::failure(
+            QPlaywrightInvokeErrorCode::MethodInvocationFailed,
+            QStringLiteral("Unsupported return type: %1").arg(method.returnType())
+        );
+    }
+
+private:
+    static bool invokeNoReturn(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args)
+    {
+        const QByteArray methodName = method.name().toLatin1();
+        if (args.isEmpty())
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection);
+        if (args.size() == 1)
+            return invokeNoReturnOneArg(target, methodName, method.args().at(0).type(), args.at(0));
+        if (args.size() == 2)
+            return invokeNoReturnTwoArgs(target, methodName, method.args(), args);
+        return false;
+    }
+
+    static QPlaywrightInvokeResult invokeVoid(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args)
+    {
+        if (!invokeNoReturn(target, method, args)) {
+            return QPlaywrightInvokeResult::failure(
+                QPlaywrightInvokeErrorCode::MethodInvocationFailed,
+                QStringLiteral("invokeMethod failed: %1").arg(method.signature())
+            );
+        }
+        return QPlaywrightInvokeResult::success();
+    }
+
+    static QPlaywrightInvokeResult invokeQString(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args)
+    {
+        QString value;
+        return buildReturnResult(invokeWithReturn(target, method, args, Q_RETURN_ARG(QString, value)), method, value);
+    }
+
+    static QPlaywrightInvokeResult invokeQVariant(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args)
+    {
+        QVariant value;
+        return buildReturnResult(invokeWithReturn(target, method, args, Q_RETURN_ARG(QVariant, value)), method, value);
+    }
+
+    static QPlaywrightInvokeResult invokeBool(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args)
+    {
+        bool value = false;
+        return buildReturnResult(invokeWithReturn(target, method, args, Q_RETURN_ARG(bool, value)), method, value);
+    }
+
+    static QPlaywrightInvokeResult invokeInt(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args)
+    {
+        int value = 0;
+        return buildReturnResult(invokeWithReturn(target, method, args, Q_RETURN_ARG(int, value)), method, value);
+    }
+
+    static QPlaywrightInvokeResult invokeDouble(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args)
+    {
+        double value = 0.0;
+        return buildReturnResult(invokeWithReturn(target, method, args, Q_RETURN_ARG(double, value)), method, value);
+    }
+
+    template <typename ReturnArg>
+    static bool invokeWithReturn(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args, ReturnArg returnArg)
+    {
+        const QByteArray methodName = method.name().toLatin1();
+        if (args.isEmpty())
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg);
+        if (args.size() == 1)
+            return invokeWithReturnOneArg(target, methodName, returnArg, method.args().at(0).type(), args.at(0));
+        if (args.size() == 2)
+            return invokeWithReturnTwoArgs(target, methodName, returnArg, method.args(), args);
+        return false;
+    }
+
+    template <typename TValue>
+    static QPlaywrightInvokeResult buildReturnResult(bool ok, const QPlaywrightClassMethod &method, const TValue &value)
+    {
+        if (!ok) {
+            return QPlaywrightInvokeResult::failure(
+                QPlaywrightInvokeErrorCode::MethodInvocationFailed,
+                QStringLiteral("invokeMethod failed: %1").arg(method.signature())
+            );
+        }
+        return QPlaywrightInvokeResult::success(QVariant::fromValue(value));
+    }
+
+    static bool invokeNoReturnOneArg(QObject *target, const QByteArray &methodName, const QString &declaredType, const QVariant &value)
+    {
+        if (declaredType == QStringLiteral("QString")) {
+            const QString converted = value.toString();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(QString, converted));
+        }
+        if (declaredType == QStringLiteral("QVariant")) {
+            const QVariant converted = value;
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(QVariant, converted));
+        }
+        if (declaredType == QStringLiteral("int")) {
+            const int converted = value.toInt();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(int, converted));
+        }
+        if (declaredType == QStringLiteral("bool")) {
+            const bool converted = value.toBool();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(bool, converted));
+        }
+        if (declaredType == QStringLiteral("double")) {
+            const double converted = value.toDouble();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(double, converted));
+        }
+        return false;
+    }
+
+    static bool invokeNoReturnTwoArgs(QObject *target, const QByteArray &methodName, const QVector<QPlaywrightMethodArg> &declaredArgs, const QVariantList &values)
+    {
+        const QString firstType = declaredArgs.at(0).type();
+        const QString secondType = declaredArgs.at(1).type();
+
+        if (firstType == QStringLiteral("int") && secondType == QStringLiteral("int")) {
+            const int first = values.at(0).toInt();
+            const int second = values.at(1).toInt();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(int, first), Q_ARG(int, second));
+        }
+        if (firstType == QStringLiteral("QString") && secondType == QStringLiteral("QString")) {
+            const QString first = values.at(0).toString();
+            const QString second = values.at(1).toString();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(QString, first), Q_ARG(QString, second));
+        }
+        if (firstType == QStringLiteral("QVariant") && secondType == QStringLiteral("QVariant")) {
+            const QVariant first = values.at(0);
+            const QVariant second = values.at(1);
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(QVariant, first), Q_ARG(QVariant, second));
+        }
+        return false;
+    }
+
+    template <typename ReturnArg>
+    static bool invokeWithReturnOneArg(QObject *target, const QByteArray &methodName, ReturnArg returnArg, const QString &declaredType, const QVariant &value)
+    {
+        if (declaredType == QStringLiteral("QString")) {
+            const QString converted = value.toString();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(QString, converted));
+        }
+        if (declaredType == QStringLiteral("QVariant")) {
+            const QVariant converted = value;
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(QVariant, converted));
+        }
+        if (declaredType == QStringLiteral("int")) {
+            const int converted = value.toInt();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(int, converted));
+        }
+        if (declaredType == QStringLiteral("bool")) {
+            const bool converted = value.toBool();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(bool, converted));
+        }
+        if (declaredType == QStringLiteral("double")) {
+            const double converted = value.toDouble();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(double, converted));
+        }
+        return false;
+    }
+
+    template <typename ReturnArg>
+    static bool invokeWithReturnTwoArgs(QObject *target, const QByteArray &methodName, ReturnArg returnArg, const QVector<QPlaywrightMethodArg> &declaredArgs, const QVariantList &values)
+    {
+        const QString firstType = declaredArgs.at(0).type();
+        const QString secondType = declaredArgs.at(1).type();
+
+        if (firstType == QStringLiteral("int") && secondType == QStringLiteral("int")) {
+            const int first = values.at(0).toInt();
+            const int second = values.at(1).toInt();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(int, first), Q_ARG(int, second));
+        }
+        if (firstType == QStringLiteral("QString") && secondType == QStringLiteral("QString")) {
+            const QString first = values.at(0).toString();
+            const QString second = values.at(1).toString();
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(QString, first), Q_ARG(QString, second));
+        }
+        if (firstType == QStringLiteral("QVariant") && secondType == QStringLiteral("QVariant")) {
+            const QVariant first = values.at(0);
+            const QVariant second = values.at(1);
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(QVariant, first), Q_ARG(QVariant, second));
+        }
+        return false;
+    }
+};
+
 // -------------------------------------------------------------------------- //
 //  Role mapping                                                               //
 // -------------------------------------------------------------------------- //
+
+namespace QPlaywrightMetadata {
+
+inline QPlaywrightClassMetadata classMetadata(const QObject *object)
+{
+    const QVariant value = object->property("qplaywrightClassMetadata");
+    if (!value.isValid() || value.isNull())
+        return {};
+
+    if (value.userType() == qMetaTypeId<QPlaywrightClassMetadata>())
+        return value.value<QPlaywrightClassMetadata>();
+
+    if (value.canConvert<QVariantMap>())
+        return QPlaywrightClassMetadata::fromVariantMap(value.toMap());
+
+    return {};
+}
+
+inline QJsonArray methodSchema(const QWidget *widget)
+{
+    QJsonArray methods;
+    const QVector<QPlaywrightClassMethod> declaredMethods = classMetadata(widget).methods();
+    for (const QPlaywrightClassMethod &method : declaredMethods)
+        methods.append(QJsonValue::fromVariant(method.toVariantMap()).toObject());
+    return methods;
+}
+
+} // namespace QPlaywrightMetadata
 
 namespace QPlaywrightRoles {
 
 inline bool matchesRole(const QWidget *widget, const QString &role)
 {
+    const QString declaredRole = QPlaywrightMetadata::classMetadata(widget).role().trimmed().toLower();
+    if (!declaredRole.isEmpty() && declaredRole == role.toLower())
+        return true;
+
     static const QHash<QString, QStringList> roleMap = {
         {"button",      {"QPushButton", "QToolButton", "QCommandLinkButton"}},
         {"checkbox",    {"QCheckBox"}},
@@ -248,6 +877,13 @@ inline QJsonObject widgetToJson(const QWidget *w, int depth = 0, int maxDepth = 
     obj["visible"] = w->isVisible();
     obj["enabled"] = w->isEnabled();
 
+    const QString role = QPlaywrightMetadata::classMetadata(w).role().trimmed().toLower();
+    if (!role.isEmpty()) {
+        QJsonArray roleArray;
+        roleArray.append(role);
+        obj["roles"] = roleArray;
+    }
+
     QJsonObject geo;
     geo["x"] = w->x();
     geo["y"] = w->y();
@@ -263,6 +899,13 @@ inline QJsonObject widgetToJson(const QWidget *w, int depth = 0, int maxDepth = 
         obj["currentText"] = combo->currentText();
         obj["currentIndex"] = combo->currentIndex();
     }
+
+    if (auto *spin = qobject_cast<const QSpinBox *>(w))
+        obj["value"] = spin->value();
+    if (auto *dspin = qobject_cast<const QDoubleSpinBox *>(w))
+        obj["value"] = dspin->value();
+    if (auto *slider = qobject_cast<const QSlider *>(w))
+        obj["value"] = slider->value();
 
     if (depth < maxDepth) {
         QJsonArray children;
@@ -349,6 +992,21 @@ public slots:
     }
 
 private:
+    QJsonValue invokeWidgetMethod(QWidget *widget, const QJsonObject &requestObject)
+    {
+        const QPlaywrightClassMetadata metadata = QPlaywrightMetadata::classMetadata(widget);
+        const QPlaywrightInvokeRequest request = QPlaywrightInvokeRequest::fromJsonObject(requestObject);
+
+        QPlaywrightPreparedCall preparedCall;
+        const QPlaywrightInvokeResult prepareResult = QPlaywrightInvoker::prepareCall(metadata, request, &preparedCall);
+        if (!prepareResult.ok())
+            return prepareResult.toJsonObject();
+
+        const QPlaywrightInvokeResult executeResult = QPlaywrightInvoker::executePreparedCall(widget, preparedCall);
+        QApplication::processEvents();
+        return executeResult.toJsonObject();
+    }
+
     QJsonObject serializeWidgetTree(QWidget *w, int depth = 0, int maxDepth = 10)
     {
         auto &reg = QPlaywrightRegistry::instance();
@@ -360,6 +1018,13 @@ private:
         obj["text"] = QPlaywrightRoles::widgetText(w);
         obj["visible"] = w->isVisible();
         obj["enabled"] = w->isEnabled();
+
+        const QString role = QPlaywrightMetadata::classMetadata(w).role().trimmed().toLower();
+        if (!role.isEmpty()) {
+            QJsonArray roleArray;
+            roleArray.append(role);
+            obj["roles"] = roleArray;
+        }
 
         QJsonObject geo;
         geo["x"] = w->x();
@@ -376,6 +1041,13 @@ private:
             obj["currentText"] = combo->currentText();
             obj["currentIndex"] = combo->currentIndex();
         }
+
+        if (auto *spin = qobject_cast<const QSpinBox *>(w))
+            obj["value"] = spin->value();
+        if (auto *dspin = qobject_cast<const QDoubleSpinBox *>(w))
+            obj["value"] = dspin->value();
+        if (auto *slider = qobject_cast<const QSlider *>(w))
+            obj["value"] = slider->value();
 
         if (depth < maxDepth) {
             QJsonArray children;
@@ -452,6 +1124,11 @@ private:
             return QPlaywrightRoles::widgetText(w);
         }
 
+        if (method == "get_methods") {
+            QWidget *w = resolveOne(params);
+            return QPlaywrightMetadata::methodSchema(w);
+        }
+
         if (method == "get_property") {
             QWidget *w = resolveOne(params);
             QString prop = params["property"].toString();
@@ -499,6 +1176,10 @@ private:
             QString value = params["value"].toString();
             fillWidget(w, value);
             return true;
+        }
+        if (method == "invoke") {
+            QWidget *w = resolveOne(params);
+            return invokeWidgetMethod(w, params["request"].toObject());
         }
         if (method == "clear") {
             QWidget *w = resolveOne(params);

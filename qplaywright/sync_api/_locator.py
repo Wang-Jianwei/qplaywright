@@ -11,6 +11,7 @@ from qplaywright.protocol import (
     METHOD_COUNT,
     METHOD_GET_TEXT,
     METHOD_GET_VALUE,
+    METHOD_GET_METHODS,
     METHOD_GET_PROPERTY,
     METHOD_IS_VISIBLE,
     METHOD_IS_ENABLED,
@@ -19,6 +20,7 @@ from qplaywright.protocol import (
     METHOD_CLICK,
     METHOD_DBLCLICK,
     METHOD_FILL,
+    METHOD_INVOKE,
     METHOD_CLEAR,
     METHOD_CHECK,
     METHOD_UNCHECK,
@@ -138,6 +140,10 @@ class Locator:
         """Get the current value of an input widget."""
         return self._send(METHOD_GET_VALUE)
 
+    def methods(self) -> list[dict[str, Any]]:
+        """Return exposed custom methods and any declared argument metadata."""
+        return self._send(METHOD_GET_METHODS)
+
     def get_attribute(self, name: str) -> Any:
         """Get a Qt property value."""
         return self._send(METHOD_GET_PROPERTY, property=name)
@@ -202,6 +208,15 @@ class Locator:
     def fill(self, value: str) -> None:
         """Fill the widget with the given value (clears first)."""
         self._send(METHOD_FILL, value=value)
+
+    def invoke(self, name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Invoke a custom widget method declared in qplaywrightClassMetadata.
+
+        Arguments are sent as a named-argument mapping and the agent returns a
+        structured invoke result: ``ok``, ``value``, ``errorCode``, and
+        ``errorMessage``.
+        """
+        return self._send(METHOD_INVOKE, request={"method": name, "args": args or {}})
 
     def clear(self) -> None:
         """Clear the widget's text."""

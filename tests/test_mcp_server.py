@@ -78,6 +78,30 @@ class FakeLocator:
     def get_attribute(self, name: str) -> str:
         return f"attr:{name}"
 
+    def methods(self) -> list[dict[str, object]]:
+        return [
+            {
+                "name": "setAmount",
+                "args": [
+                    {
+                        "name": "value",
+                        "type": "QString",
+                        "brief": "Formatted amount text",
+                        "required": True,
+                        "defaultValue": None,
+                    }
+                ],
+                "returnType": "QVariant",
+                "brief": "Update the current amount",
+            }
+        ]
+
+    def invoke(self, method_name: str, args: dict[str, object] | None = None):
+        return {
+            "method_name": method_name,
+            "args": dict(args or {}),
+        }
+
 
 def test_connect_connection_replaces_existing(monkeypatch):
     created: list[FakeQPlaywright] = []
@@ -142,6 +166,35 @@ def test_inspect_locator_handles_empty_and_present_results():
     assert present["text"] == "Save"
     assert present["value"] == "ready"
     assert present["property_value"] == "attr:placeholderText"
+
+    with_methods = mcp_server._inspect_locator(FakeLocator(count=1), include_methods=True)
+    assert with_methods["methods"][0]["name"] == "setAmount"
+
+
+def test_locator_methods_returns_first_match_methods():
+    methods = mcp_server._locator_methods(FakeLocator(count=1))
+
+    assert methods[0]["args"][0]["name"] == "value"
+    assert methods[0]["returnType"] == "QVariant"
+
+    with pytest.raises(ValueError, match="No widget found for method introspection"):
+        mcp_server._locator_methods(FakeLocator(count=0))
+
+
+def test_invoke_locator_method_uses_first_match():
+    result = mcp_server._invoke_locator_method(
+        FakeLocator(count=1),
+        method_name="setAmount",
+        args={"value": "88.00"},
+    )
+
+    assert result == {
+        "method_name": "setAmount",
+        "args": {"value": "88.00"},
+    }
+
+    with pytest.raises(ValueError, match="No widget found for invoke"):
+        mcp_server._invoke_locator_method(FakeLocator(count=0), method_name="setAmount")
 
 
 def test_initialize_active_window_uses_first_visible_window(monkeypatch):

@@ -23,8 +23,10 @@ from qplaywright.protocol import (
     METHOD_DBLCLICK,
     METHOD_FILL,
     METHOD_FIND,
+    METHOD_GET_METHODS,
     METHOD_GET_VALUE,
     METHOD_HOVER,
+    METHOD_INVOKE,
     METHOD_IS_VISIBLE,
     METHOD_PRESS,
     METHOD_SCREENSHOT_WIDGET,
@@ -327,7 +329,12 @@ def _resolve_locator(
     return locator
 
 
-def _inspect_locator(locator: Any, *, property_name: str | None = None) -> dict[str, Any]:
+def _inspect_locator(
+    locator: Any,
+    *,
+    property_name: str | None = None,
+    include_methods: bool = False,
+) -> dict[str, Any]:
     count = locator.count()
     result: dict[str, Any] = {
         "exists": count > 0,
@@ -353,7 +360,29 @@ def _inspect_locator(locator: Any, *, property_name: str | None = None) -> dict[
         result["property_name"] = property_name
         result["property_value"] = first.get_attribute(property_name)
 
+    if include_methods:
+        result["methods"] = first.methods()
+
     return result
+
+
+def _locator_methods(locator: Any) -> list[dict[str, Any]]:
+    count = locator.count()
+    if count == 0:
+        raise ValueError("No widget found for method introspection")
+    return locator.first().methods()
+
+
+def _invoke_locator_method(
+    locator: Any,
+    *,
+    method_name: str,
+    args: dict[str, Any] | None = None,
+) -> Any:
+    count = locator.count()
+    if count == 0:
+        raise ValueError("No widget found for invoke")
+    return locator.first().invoke(method_name, args or {})
 
 
 def _selector_help_text() -> str:
@@ -683,6 +712,7 @@ if FastMCP is not None:
         window_title: str | None = None,
         window_index: int = 0,
         property_name: str | None = None,
+        include_methods: bool = False,
     ) -> dict[str, Any]:
         """Inspect widgets matched by a selector and return common state for the first match."""
 
@@ -695,7 +725,7 @@ if FastMCP is not None:
             window_title=window_title,
             window_index=window_index,
         )
-        result = _inspect_locator(locator, property_name=property_name)
+        result = _inspect_locator(locator, property_name=property_name, include_methods=include_methods)
         result.update(
             {
                 "connection": connection,
@@ -705,9 +735,43 @@ if FastMCP is not None:
                 "window_wid": window_wid,
                 "window_title": window_title,
                 "window_index": window_index,
+                "include_methods": include_methods,
             }
         )
         return result
+
+
+    @mcp.tool()
+    def get_widget_methods(
+        selector: str,
+        connection: str = "default",
+        has_text: str | None = None,
+        nth: int | None = None,
+        window_wid: int | None = None,
+        window_title: str | None = None,
+        window_index: int = 0,
+    ) -> dict[str, Any]:
+        """Return exposed custom widget methods and any declared argument metadata."""
+
+        locator = _resolve_locator(
+            _get_connection(_SERVER_STATE, connection),
+            selector=selector,
+            has_text=has_text,
+            nth=nth,
+            window_wid=window_wid,
+            window_title=window_title,
+            window_index=window_index,
+        )
+        return {
+            "connection": connection,
+            "selector": selector,
+            "has_text": has_text,
+            "nth": nth,
+            "window_wid": window_wid,
+            "window_title": window_title,
+            "window_index": window_index,
+            "methods": _locator_methods(locator),
+        }
 
 
     @mcp.tool()
@@ -763,6 +827,40 @@ if FastMCP is not None:
         )
         locator.fill(value)
         return {"ok": True, "selector": selector, "value": value, "connection": connection}
+
+
+    @mcp.tool()
+    def invoke_widget_method(
+        selector: str,
+        method_name: str,
+        connection: str = "default",
+        has_text: str | None = None,
+        nth: int | None = None,
+        window_wid: int | None = None,
+        window_title: str | None = None,
+        window_index: int = 0,
+        args: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Invoke one exposed custom widget method by exact name."""
+
+        locator = _resolve_locator(
+            _get_connection(_SERVER_STATE, connection),
+            selector=selector,
+            has_text=has_text,
+            nth=nth,
+            window_wid=window_wid,
+            window_title=window_title,
+            window_index=window_index,
+        )
+        result = _invoke_locator_method(locator, method_name=method_name, args=args)
+        return {
+            "ok": True,
+            "connection": connection,
+            "selector": selector,
+            "method_name": method_name,
+            "args": dict(args or {}),
+            "result": result,
+        }
 
 
     @mcp.tool()

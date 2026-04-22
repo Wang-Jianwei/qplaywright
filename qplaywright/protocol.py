@@ -75,6 +75,7 @@ METHOD_WIDGET_TREE = "widget_tree"
 METHOD_GET_PROPERTY = "get_property"
 METHOD_GET_TEXT = "get_text"
 METHOD_GET_VALUE = "get_value"
+METHOD_GET_METHODS = "get_methods"
 METHOD_IS_VISIBLE = "is_visible"
 METHOD_IS_ENABLED = "is_enabled"
 METHOD_IS_CHECKED = "is_checked"
@@ -85,6 +86,7 @@ METHOD_BOUNDING_BOX = "bounding_box"
 METHOD_CLICK = "click"
 METHOD_DBLCLICK = "dblclick"
 METHOD_FILL = "fill"
+METHOD_INVOKE = "invoke"
 METHOD_CLEAR = "clear"
 METHOD_CHECK = "check"
 METHOD_UNCHECK = "uncheck"
@@ -123,6 +125,20 @@ METHOD_PING = "ping"
 #   .ClassName           →  match by metaObject()->className()
 #   name=objectName      →  alias for #objectName
 #   has-text=partial     →  contains text (case-insensitive)
+#
+# Custom widgets declare automation metadata through the Qt dynamic property
+# qplaywrightClassMetadata. The property value is a mapping with:
+#
+#   role     → one Playwright-style role such as textbox or button
+#   methods  → list of method declarations used by methods() and invoke()
+#
+# Each method declaration follows this shape:
+#
+#   {name, args, returnType, brief}
+#
+# where each args entry is:
+#
+#   {name, type, brief, required, defaultValue}
 #
 # Filters (keyword args to locator()):
 #   has_text="..."       →  same as has-text=
