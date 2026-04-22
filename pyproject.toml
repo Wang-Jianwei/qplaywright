@@ -9,6 +9,9 @@ description = "Playwright-compatible automation library for Qt QWidget applicati
 requires-python = ">=3.9"
 dependencies = []
 
+[tool.setuptools.package-data]
+"qplaywright.cpp" = ["qplaywright_agent.h"]
+
 [project.scripts]
 qplaywright-mcp = "qplaywright.mcp_server:main"
 
