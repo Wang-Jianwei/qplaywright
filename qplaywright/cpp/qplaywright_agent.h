@@ -1460,16 +1460,90 @@ private:
         return widgets.first();
     }
 
+    QWidget *primaryEventTarget(QWidget *w)
+    {
+        if (auto *scrollArea = qobject_cast<QAbstractScrollArea *>(w)) {
+            if (scrollArea->viewport())
+                return scrollArea->viewport();
+        }
+        return w;
+    }
+
+    bool isSameOrDescendantWidget(QWidget *candidate, QWidget *ancestor)
+    {
+        QWidget *current = candidate;
+        while (current) {
+            if (current == ancestor)
+                return true;
+            current = current->parentWidget();
+        }
+        return false;
+    }
+
+    struct ClickTarget
+    {
+        QWidget *widget;
+        QPoint localPos;
+    };
+
+    ClickTarget resolveClickTarget(QWidget *w)
+    {
+        QWidget *target = primaryEventTarget(w);
+        if (!target->isVisible()) {
+            throw std::runtime_error(
+                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
+                "; event target is not visible"
+            );
+        }
+        if (!target->isEnabled()) {
+            throw std::runtime_error(
+                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
+                "; event target is disabled"
+            );
+        }
+
+        QPoint center = target->rect().center();
+        QPoint globalPos = target->mapToGlobal(center);
+        QWidget *hit = QApplication::widgetAt(globalPos);
+        if (!hit)
+            hit = target->childAt(center);
+        if (!hit)
+            hit = target;
+
+        if (!isSameOrDescendantWidget(hit, target)) {
+            throw std::runtime_error(
+                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
+                "; center point is covered by " + std::string(hit->metaObject()->className())
+            );
+        }
+        if (!hit->isVisible()) {
+            throw std::runtime_error(
+                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
+                "; resolved click target is not visible"
+            );
+        }
+        if (!hit->isEnabled()) {
+            throw std::runtime_error(
+                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
+                "; resolved click target is disabled"
+            );
+        }
+
+        return {hit, hit->mapFromGlobal(globalPos)};
+    }
+
     // ----- Action helpers -----
 
     void clickWidget(QWidget *w, bool doubleClick)
     {
-        w->setFocus();
+        auto clickTarget = resolveClickTarget(w);
+        QWidget *target = clickTarget.widget;
+        target->setFocus(Qt::MouseFocusReason);
         QApplication::processEvents();
-        QTest::mouseClick(w, Qt::LeftButton);
-        if (doubleClick) {
-            QTest::mouseDClick(w, Qt::LeftButton);
-        }
+        if (doubleClick)
+            QTest::mouseDClick(target, Qt::LeftButton, Qt::NoModifier, clickTarget.localPos);
+        else
+            QTest::mouseClick(target, Qt::LeftButton, Qt::NoModifier, clickTarget.localPos);
         QApplication::processEvents();
     }
 
@@ -1551,10 +1625,7 @@ private:
 
     void scrollWidget(QWidget *w, int dx, int dy)
     {
-        QWidget *target = w;
-        if (auto *scrollArea = qobject_cast<QAbstractScrollArea *>(w)) {
-            target = scrollArea->viewport();
-        }
+        QWidget *target = primaryEventTarget(w);
         QPoint center = target->rect().center();
         QPoint globalPos = target->mapToGlobal(center);
 #if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)

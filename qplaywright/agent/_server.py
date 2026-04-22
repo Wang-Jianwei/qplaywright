@@ -595,8 +595,70 @@ def _process_events(ms: int = 10):
         _QApplication.processEvents()
 
 
+def _primary_event_target(widget):
+    viewport = getattr(widget, "viewport", None)
+    if callable(viewport):
+        target = viewport()
+        if target is not None:
+            return target
+    return widget
+
+
+def _is_same_or_descendant_widget(candidate, ancestor) -> bool:
+    current = candidate
+    while current is not None:
+        if current is ancestor:
+            return True
+        parent_widget = getattr(current, "parentWidget", None)
+        current = parent_widget() if callable(parent_widget) else None
+    return False
+
+
+def _resolve_click_target(widget):
+    """Return the concrete event receiver and local click position."""
+    _import_qt()
+
+    target = _primary_event_target(widget)
+    if not target.isVisible():
+        raise ValueError(
+            f"Cannot click widget of type {_widget_class_name(widget)}: event target is not visible"
+        )
+    if not target.isEnabled():
+        raise ValueError(
+            f"Cannot click widget of type {_widget_class_name(widget)}: event target is disabled"
+        )
+
+    center = target.rect().center()
+    global_pos = target.mapToGlobal(center)
+
+    hit = None
+    widget_at = getattr(_QApplication, "widgetAt", None)
+    if callable(widget_at):
+        hit = widget_at(global_pos)
+    if hit is None and hasattr(target, "childAt"):
+        hit = target.childAt(center)
+    if hit is None:
+        hit = target
+
+    if not _is_same_or_descendant_widget(hit, target):
+        raise ValueError(
+            f"Cannot click widget of type {_widget_class_name(widget)}: center point is covered by {_widget_class_name(hit)}"
+        )
+    if hasattr(hit, "isVisible") and not hit.isVisible():
+        raise ValueError(
+            f"Cannot click widget of type {_widget_class_name(widget)}: resolved click target is not visible"
+        )
+    if hasattr(hit, "isEnabled") and not hit.isEnabled():
+        raise ValueError(
+            f"Cannot click widget of type {_widget_class_name(widget)}: resolved click target is disabled"
+        )
+
+    local_pos = hit.mapFromGlobal(global_pos) if hasattr(hit, "mapFromGlobal") else center
+    return hit, local_pos
+
+
 def _click_widget(widget, *, double: bool = False):
-    """Simulate a mouse click on the center of a widget."""
+    """Simulate a mouse click on the concrete event target under the widget center."""
     _import_qt()
     QTest = _QtTest
     Qt = _QtCore.Qt
@@ -604,18 +666,28 @@ def _click_widget(widget, *, double: bool = False):
     if QTest and hasattr(QTest, "QTest"):
         QTest = QTest.QTest
 
-    widget.setFocus()
+    event_target, local_pos = _resolve_click_target(widget)
+
+    try:
+        event_target.setFocus(Qt.MouseFocusReason)
+    except Exception:
+        event_target.setFocus()
     _process_events()
 
     if QTest and hasattr(QTest, "mouseClick"):
-        if double:
-            QTest.mouseDClick(widget, Qt.LeftButton)
-        else:
-            QTest.mouseClick(widget, Qt.LeftButton)
+        try:
+            if double:
+                QTest.mouseDClick(event_target, Qt.LeftButton, Qt.NoModifier, local_pos)
+            else:
+                QTest.mouseClick(event_target, Qt.LeftButton, Qt.NoModifier, local_pos)
+        except TypeError:
+            if double:
+                QTest.mouseDClick(event_target, Qt.LeftButton)
+            else:
+                QTest.mouseClick(event_target, Qt.LeftButton)
     else:
         # Fallback: use QApplication.postEvent
-        center = widget.rect().center()
-        _post_mouse_event(widget, center, double=double)
+        _post_mouse_event(event_target, local_pos, double=double)
 
     _process_events()
 
@@ -773,7 +845,7 @@ def _scroll_widget(widget, delta_x: int = 0, delta_y: int = 0):
     QWheelEvent = _QtGui.QWheelEvent
     Qt = _QtCore.Qt
 
-    target = widget.viewport() if hasattr(widget, "viewport") else widget
+    target = _primary_event_target(widget)
 
     center = target.rect().center()
     global_pos = target.mapToGlobal(center)
