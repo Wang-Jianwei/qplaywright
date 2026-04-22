@@ -229,6 +229,17 @@ The script starts `examples/demo_app.py`, launches the qplaywright MCP server as
 an stdio subprocess, exercises several tools, and writes a screenshot to
 `demo_mcp_screenshot.png`.
 
+If you want a concrete dialog example, run:
+
+```bash
+python examples/test_dialog_mcp_demo.py
+```
+
+This script opens a real `QDialog`, verifies it appears as a second top-level
+window, fills and selects controls inside the dialog, clicks the approve
+button, and then asserts that the dialog closes and the main window reflects
+the review result.
+
 ## OpenCode
 
 如果你希望在 OpenCode 中把 qplaywright 作为本地 MCP 使用，请参考：

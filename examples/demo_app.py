@@ -7,9 +7,10 @@ Run this first, then run test_demo.py in another terminal to automate it.
 
 import os
 import sys
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QMainWindow,
     QWidget,
     QVBoxLayout,
@@ -236,9 +237,116 @@ class FancyAmountEdit(QWidget):
         }
 
 
+class PaymentReviewDialog(QDialog):
+    reviewSubmitted = Signal(dict)
+    reviewCancelled = Signal()
+
+    def __init__(self, *, payment_snapshot, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Payment Review")
+        self.setObjectName("payment_review_dialog")
+        self.setModal(True)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setMinimumWidth(460)
+        self._payment_snapshot = dict(payment_snapshot)
+
+        layout = QVBoxLayout(self)
+
+        summary_group = QGroupBox("Payment Summary")
+        summary_layout = QVBoxLayout(summary_group)
+        self.summary_label = QLabel(self._payment_snapshot["summary"])
+        self.summary_label.setObjectName("dialog_payment_summary")
+        self.summary_label.setWordWrap(True)
+        self.snapshot_label = QLabel(
+            f"currency={self._payment_snapshot['currency']} amount={self._payment_snapshot['amount']} precision={self._payment_snapshot['precision']}"
+        )
+        self.snapshot_label.setObjectName("dialog_payment_snapshot")
+        self.snapshot_label.setWordWrap(True)
+        summary_layout.addWidget(self.summary_label)
+        summary_layout.addWidget(self.snapshot_label)
+        layout.addWidget(summary_group)
+
+        form_group = QGroupBox("Review Decision")
+        form_layout = QVBoxLayout(form_group)
+
+        code_row = QHBoxLayout()
+        code_row.addWidget(QLabel("Approval code:"))
+        self.approval_code_input = QLineEdit()
+        self.approval_code_input.setObjectName("approval_code")
+        self.approval_code_input.setPlaceholderText("APR-2026-001")
+        code_row.addWidget(self.approval_code_input)
+        form_layout.addLayout(code_row)
+
+        risk_row = QHBoxLayout()
+        risk_row.addWidget(QLabel("Risk level:"))
+        self.risk_combo = QComboBox()
+        self.risk_combo.setObjectName("review_risk")
+        self.risk_combo.addItems(["Low", "Medium", "High"])
+        risk_row.addWidget(self.risk_combo)
+        form_layout.addLayout(risk_row)
+
+        self.escalate_check = QCheckBox("Escalate to finance control")
+        self.escalate_check.setObjectName("review_escalate")
+        form_layout.addWidget(self.escalate_check)
+
+        self.review_notes_input = QTextEdit()
+        self.review_notes_input.setObjectName("review_notes_dialog")
+        self.review_notes_input.setPlaceholderText("Explain why this payment should be approved or rejected...")
+        self.review_notes_input.setFixedHeight(90)
+        form_layout.addWidget(self.review_notes_input)
+
+        layout.addWidget(form_group)
+
+        self.result_label = QLabel("Decision: waiting")
+        self.result_label.setObjectName("dialog_result")
+        layout.addWidget(self.result_label)
+
+        button_row = QHBoxLayout()
+        self.approve_btn = QPushButton("Approve")
+        self.approve_btn.setObjectName("approve_review_btn")
+        self.approve_btn.clicked.connect(lambda: self._submit("approved"))
+        button_row.addWidget(self.approve_btn)
+
+        self.reject_btn = QPushButton("Reject")
+        self.reject_btn.setObjectName("reject_review_btn")
+        self.reject_btn.clicked.connect(lambda: self._submit("rejected"))
+        button_row.addWidget(self.reject_btn)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setObjectName("cancel_review_btn")
+        self.cancel_btn.clicked.connect(self._cancel)
+        button_row.addWidget(self.cancel_btn)
+
+        layout.addLayout(button_row)
+
+    def _payload(self, decision):
+        return {
+            "decision": decision,
+            "approvalCode": self.approval_code_input.text().strip(),
+            "risk": self.risk_combo.currentText(),
+            "escalate": self.escalate_check.isChecked(),
+            "notes": self.review_notes_input.toPlainText().strip(),
+            "paymentSummary": self._payment_snapshot["summary"],
+        }
+
+    def _submit(self, decision):
+        payload = self._payload(decision)
+        self.result_label.setText(
+            f"Decision: {decision} code={payload['approvalCode'] or '<empty>'} risk={payload['risk']} escalate={payload['escalate']}"
+        )
+        self.reviewSubmitted.emit(payload)
+        self.close()
+
+    def _cancel(self):
+        self.result_label.setText("Decision: cancelled")
+        self.reviewCancelled.emit()
+        self.close()
+
+
 class DemoWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.review_dialog = None
         self.setWindowTitle("QPlaywright Demo App")
         self.setMinimumSize(640, 520)
 
@@ -327,6 +435,11 @@ class DemoWindow(QMainWindow):
         self.summary_label.setWordWrap(True)
         layout.addWidget(self.summary_label)
 
+        self.review_status_label = QLabel("Review: Not started")
+        self.review_status_label.setObjectName("review_status")
+        self.review_status_label.setWordWrap(True)
+        layout.addWidget(self.review_status_label)
+
         # --- Log area ---
         self.log_area = QTextEdit()
         self.log_area.setObjectName("log")
@@ -340,6 +453,11 @@ class DemoWindow(QMainWindow):
         self.clear_btn.setObjectName("clear_btn")
         self.clear_btn.clicked.connect(self._on_clear_log)
         btn_row.addWidget(self.clear_btn)
+
+        self.review_btn = QPushButton("Review Payment")
+        self.review_btn.setObjectName("review_btn")
+        self.review_btn.clicked.connect(self._open_review_dialog)
+        btn_row.addWidget(self.review_btn)
 
         self.quit_btn = QPushButton("Quit")
         self.quit_btn.setObjectName("quit_btn")
@@ -400,11 +518,46 @@ class DemoWindow(QMainWindow):
         if notes:
             self.log_area.append(f"[INFO] Reviewer notes: {notes}")
 
+    def _open_review_dialog(self):
+        if self.review_dialog is not None and self.review_dialog.isVisible():
+            self.review_dialog.raise_()
+            self.review_dialog.activateWindow()
+            return
+
+        dialog = PaymentReviewDialog(payment_snapshot=self.amount_editor.snapshot(), parent=self)
+        dialog.reviewSubmitted.connect(self._on_review_submitted)
+        dialog.reviewCancelled.connect(self._on_review_cancelled)
+        dialog.finished.connect(self._on_review_finished)
+        self.review_dialog = dialog
+        dialog.open()
+        self.log_area.append(f"[INFO] Opened payment review dialog for {self.amount_editor.summary()}")
+        self.review_status_label.setText(f"Review: Open for {self.amount_editor.summary()}")
+
+    def _on_review_submitted(self, payload):
+        self.review_status_label.setText(
+            f"Review: {payload['decision']} code={payload['approvalCode'] or '<empty>'} risk={payload['risk']} escalate={payload['escalate']}"
+        )
+        self.status_label.setText(
+            f"Status: Review {payload['decision']} for {payload['paymentSummary']}"
+        )
+        self.log_area.append(
+            f"[INFO] Review {payload['decision']}: code={payload['approvalCode'] or '<empty>'}, risk={payload['risk']}, escalate={payload['escalate']}, notes={payload['notes'] or '<empty>'}"
+        )
+
+    def _on_review_cancelled(self):
+        self.review_status_label.setText("Review: Cancelled")
+        self.status_label.setText("Status: Review cancelled")
+        self.log_area.append("[INFO] Review dialog cancelled")
+
+    def _on_review_finished(self, _result):
+        self.review_dialog = None
+
     def _on_clear_log(self):
         self.log_area.clear()
         self.amount_editor.clearAmount()
         self.notes_input.clear()
         self.status_label.setText("Status: Log cleared")
+        self.review_status_label.setText("Review: Not started")
         self._update_summary()
 
 

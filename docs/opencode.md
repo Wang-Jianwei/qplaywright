@@ -200,12 +200,14 @@ D:/Python/Python312/python.exe examples/demo_app.py
 如果你想看已经验证通过的完整示例，直接参考以下文件：
 
 - `examples/test_mcp_demo.py`
+- `examples/test_dialog_mcp_demo.py`
 - `examples/test_playwright_mcp_compat.py`
 - `docs/mcp.md`
 
 其中：
 
 - `examples/test_mcp_demo.py` 展示原生 qplaywright MCP 工具流。
+- `examples/test_dialog_mcp_demo.py` 展示真实弹出 `QDialog` 的窗口发现、控件操作和关闭验证。
 - `examples/test_playwright_mcp_compat.py` 展示 playwright-mcp 风格兼容层的完整调用路径。
 
 ## 推荐测试路径
