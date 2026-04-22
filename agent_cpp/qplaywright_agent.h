@@ -1170,7 +1170,16 @@ private:
         if (method == "widget_tree") {
             int maxDepth = params["max_depth"].toInt(10);
             QJsonArray arr;
-            for (QWidget *w : QApplication::topLevelWidgets()) {
+            QList<QWidget *> roots;
+            if (params.contains("wid")) {
+                QWidget *root = reg.get(params["wid"].toInt());
+                if (!root)
+                    throw std::runtime_error("Widget not found by wid");
+                roots.append(root);
+            } else {
+                roots = QApplication::topLevelWidgets();
+            }
+            for (QWidget *w : roots) {
                 if (w->isVisible())
                     arr.append(serializeWidgetTree(w, 0, maxDepth));
             }
