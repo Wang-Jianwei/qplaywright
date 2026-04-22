@@ -32,32 +32,27 @@ class FancyAmountEdit : public QWidget {
 
 public:
     explicit FancyAmountEdit(QWidget *parent = nullptr) : QWidget(parent) {
-        QPlaywrightClassMetadata metadata = QPlaywrightClassMetadata::fromVariantMap(
-            QVariantMap{
-                {"role", "textbox"},
-                {"methods", QVariantList{
-                    QVariantMap{
-                        {"name", "amount"},
-                        {"brief", "Return the current amount string"},
-                        {"returnType", "QString"},
-                        {"args", QVariantList{}},
-                    },
-                    QVariantMap{
-                        {"name", "setAmount"},
-                        {"brief", "Set the current amount string"},
-                        {"returnType", "void"},
-                        {"args", QVariantList{
-                            QVariantMap{
-                                {"name", "value"},
-                                {"type", "QString"},
-                                {"brief", "New amount text"},
-                                {"required", true},
-                            },
-                        }},
-                    },
-                }},
-            }
-        );
+        QPlaywrightClassMetadata metadata;
+        metadata.role("textbox")
+            .addMethod(
+                QPlaywrightClassMethod()
+                    .name("amount")
+                    .returnType("QString")
+                    .brief("Return the current amount string")
+            )
+            .addMethod(
+                QPlaywrightClassMethod()
+                    .name("setAmount")
+                    .addArg(
+                        QPlaywrightMethodArg()
+                            .name("value")
+                            .type("QString")
+                            .brief("New amount text")
+                            .required(true)
+                    )
+                    .returnType("void")
+                    .brief("Set the current amount string")
+            );
 
         setProperty("qplaywrightClassMetadata", QVariant::fromValue(metadata));
     }

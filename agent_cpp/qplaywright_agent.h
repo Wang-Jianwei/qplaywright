@@ -94,15 +94,34 @@ class QPlaywrightMethodArg
 public:
     QPlaywrightMethodArg() = default;
 
-    static QPlaywrightMethodArg fromVariantMap(const QVariantMap &map)
+    QPlaywrightMethodArg &name(const QString &name)
     {
-        QPlaywrightMethodArg arg;
-        arg.m_name = map.value("name").toString().trimmed();
-        arg.m_type = map.value("type", QStringLiteral("QVariant")).toString();
-        arg.m_brief = map.value("brief").toString();
-        arg.m_required = map.value("required", true).toBool();
-        arg.m_defaultValue = map.value("defaultValue");
-        return arg;
+        m_name = name;
+        return *this;
+    }
+
+    QPlaywrightMethodArg &type(const QString &type)
+    {
+        m_type = type;
+        return *this;
+    }
+
+    QPlaywrightMethodArg &brief(const QString &brief)
+    {
+        m_brief = brief;
+        return *this;
+    }
+
+    QPlaywrightMethodArg &required(bool required)
+    {
+        m_required = required;
+        return *this;
+    }
+
+    QPlaywrightMethodArg &defaultValue(const QVariant &defaultValue)
+    {
+        m_defaultValue = defaultValue;
+        return *this;
     }
 
     QString name() const { return m_name; }
@@ -136,17 +155,28 @@ class QPlaywrightClassMethod
 public:
     QPlaywrightClassMethod() = default;
 
-    static QPlaywrightClassMethod fromVariantMap(const QVariantMap &map)
+    QPlaywrightClassMethod &name(const QString &name)
     {
-        QPlaywrightClassMethod method;
-        method.m_name = map.value("name").toString().trimmed();
-        method.m_returnType = map.value("returnType", QStringLiteral("QVariant")).toString();
-        method.m_brief = map.value("brief").toString();
+        m_name = name;
+        return *this;
+    }
 
-        const QVariantList rawArgs = map.value("args").toList();
-        for (const QVariant &rawArg : rawArgs)
-            method.m_args.append(QPlaywrightMethodArg::fromVariantMap(rawArg.toMap()));
-        return method;
+    QPlaywrightClassMethod &addArg(const QPlaywrightMethodArg &arg)
+    {
+        m_args.append(arg);
+        return *this;
+    }
+
+    QPlaywrightClassMethod &returnType(const QString &returnType)
+    {
+        m_returnType = returnType;
+        return *this;
+    }
+
+    QPlaywrightClassMethod &brief(const QString &brief)
+    {
+        m_brief = brief;
+        return *this;
     }
 
     QString name() const { return m_name; }
@@ -216,17 +246,20 @@ class QPlaywrightClassMetadata
 public:
     QPlaywrightClassMetadata() = default;
 
-    static QPlaywrightClassMetadata fromVariantMap(const QVariantMap &map)
+    QPlaywrightClassMetadata &role(const QString &role)
     {
-        QPlaywrightClassMetadata metadata;
-        metadata.m_role = map.value("role").toString().trimmed();
-        const QVariantList rawMethods = map.value("methods").toList();
-        for (const QVariant &rawMethod : rawMethods)
-            metadata.m_methods.append(QPlaywrightClassMethod::fromVariantMap(rawMethod.toMap()));
-        return metadata;
+        m_role = role;
+        return *this;
     }
 
     QString role() const { return m_role; }
+
+    QPlaywrightClassMetadata &addMethod(const QPlaywrightClassMethod &method)
+    {
+        m_methods.append(method);
+        return *this;
+    }
+
     QVector<QPlaywrightClassMethod> methods() const { return m_methods; }
 
     bool hasMethod(const QString &name) const
@@ -672,6 +705,44 @@ private:
     }
 };
 
+namespace QPlaywrightMetadataParsing {
+
+inline QPlaywrightMethodArg parseMethodArg(const QVariantMap &map)
+{
+    return QPlaywrightMethodArg()
+        .name(map.value("name").toString().trimmed())
+        .type(map.value("type", QStringLiteral("QVariant")).toString())
+        .brief(map.value("brief").toString())
+        .required(map.value("required", true).toBool())
+        .defaultValue(map.value("defaultValue"));
+}
+
+inline QPlaywrightClassMethod parseClassMethod(const QVariantMap &map)
+{
+    QPlaywrightClassMethod method;
+    method.name(map.value("name").toString().trimmed())
+        .returnType(map.value("returnType", QStringLiteral("QVariant")).toString())
+        .brief(map.value("brief").toString());
+
+    const QVariantList rawArgs = map.value("args").toList();
+    for (const QVariant &rawArg : rawArgs)
+        method.addArg(parseMethodArg(rawArg.toMap()));
+    return method;
+}
+
+inline QPlaywrightClassMetadata parseClassMetadata(const QVariantMap &map)
+{
+    QPlaywrightClassMetadata metadata;
+    metadata.role(map.value("role").toString().trimmed());
+
+    const QVariantList rawMethods = map.value("methods").toList();
+    for (const QVariant &rawMethod : rawMethods)
+        metadata.addMethod(parseClassMethod(rawMethod.toMap()));
+    return metadata;
+}
+
+} // namespace QPlaywrightMetadataParsing
+
 // -------------------------------------------------------------------------- //
 //  Role mapping                                                               //
 // -------------------------------------------------------------------------- //
@@ -688,7 +759,7 @@ inline QPlaywrightClassMetadata classMetadata(const QObject *object)
         return value.value<QPlaywrightClassMetadata>();
 
     if (value.canConvert<QVariantMap>())
-        return QPlaywrightClassMetadata::fromVariantMap(value.toMap());
+        return QPlaywrightMetadataParsing::parseClassMetadata(value.toMap());
 
     return {};
 }
