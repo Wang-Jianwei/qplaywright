@@ -45,8 +45,9 @@ class FakeWindow:
 
 
 class FakeLocator:
-    def __init__(self, *, count: int):
+    def __init__(self, *, count: int, invoke_result=None):
         self._count = count
+        self._invoke_result = invoke_result
 
     def count(self) -> int:
         return self._count
@@ -97,6 +98,8 @@ class FakeLocator:
         ]
 
     def invoke(self, method_name: str, args: dict[str, object] | None = None):
+        if self._invoke_result is not None:
+            return self._invoke_result
         return {
             "method_name": method_name,
             "args": dict(args or {}),
@@ -193,8 +196,23 @@ def test_invoke_locator_method_uses_first_match():
         "args": {"value": "88.00"},
     }
 
-    with pytest.raises(ValueError, match="No widget found for invoke"):
+    with pytest.raises(ValueError, match="No widget found for invoke.*#objectName"):
         mcp_server._invoke_locator_method(FakeLocator(count=0), method_name="setAmount")
+
+
+def test_invoke_locator_method_raises_detailed_failure_for_structured_invoke_result():
+    locator = FakeLocator(
+        count=1,
+        invoke_result={
+            "ok": False,
+            "value": None,
+            "errorCode": 2,
+            "errorMessage": "Missing required argument: value",
+        },
+    )
+
+    with pytest.raises(ValueError, match=r"Invoke failed for method 'setAmount' \(errorCode=2\): Missing required argument: value"):
+        mcp_server._invoke_locator_method(locator, method_name="setAmount", args={})
 
 
 def test_initialize_active_window_uses_first_visible_window(monkeypatch):
@@ -408,3 +426,37 @@ def test_action_result_with_snapshot_merges_payload(monkeypatch):
     assert result["connection"] == "demo"
     assert result["snapshot"] == "- item [ref=e1]"
     assert result["refs"] == [{"ref": "e1"}]
+
+
+def test_target_not_found_message_suggests_refresh_for_missing_snapshot_ref():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        snapshot_refs={"e1": 42},
+    )
+
+    message = mcp_server._target_not_found_message(connection, "e9")
+
+    assert "Snapshot ref 'e9' is not available" in message
+    assert "Run browser_snapshot to refresh refs" in message
+
+
+def test_target_not_found_message_includes_selector_examples():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+
+    message = mcp_server._target_not_found_message(connection, "#missing_btn")
+
+    assert "No widget found for target '#missing_btn'" in message
+    assert "widget_tree, or inspect_widget" in message
+    assert "#objectName, role=button, text=Submit, has-text=partial, .QLabel" in message

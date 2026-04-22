@@ -10,6 +10,7 @@ import argparse
 import atexit
 import contextlib
 import logging
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -37,6 +38,8 @@ from qplaywright.protocol import (
 from qplaywright.sync_api import QPlaywright
 
 LOGGER = logging.getLogger(__name__)
+
+_SNAPSHOT_REF_PATTERN = re.compile(r"^e\d+$")
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -381,8 +384,36 @@ def _invoke_locator_method(
 ) -> Any:
     count = locator.count()
     if count == 0:
-        raise ValueError("No widget found for invoke")
-    return locator.first().invoke(method_name, args or {})
+        raise ValueError(
+            "No widget found for invoke. Use inspect_widget or widget_tree first, then target with selectors like "
+            "#objectName, role=button, text=Submit, has-text=partial, or .QLabel."
+        )
+
+    result = locator.first().invoke(method_name, args or {})
+    if isinstance(result, dict) and "ok" in result and result.get("ok") is False:
+        error_code = result.get("errorCode")
+        error_message = str(result.get("errorMessage") or "Unknown invoke failure")
+        raise ValueError(f"Invoke failed for method {method_name!r} (errorCode={error_code}): {error_message}")
+    return result
+
+
+def _target_not_found_message(connection: ManagedConnection, target: str | None, *, element: str | None = None) -> str:
+    examples = "#objectName, role=button, text=Submit, has-text=partial, .QLabel"
+    candidate = (target or element or "").strip()
+    if candidate and _SNAPSHOT_REF_PATTERN.match(candidate) and candidate not in connection.snapshot_refs:
+        return (
+            f"No widget found for target {candidate!r}. Snapshot ref {candidate!r} is not available in the current session. "
+            f"Run browser_snapshot to refresh refs, or target a widget with selectors like {examples}."
+        )
+    if candidate:
+        return (
+            f"No widget found for target {candidate!r}. Run browser_snapshot, widget_tree, or inspect_widget to discover the UI, "
+            f"then target a widget with selectors like {examples}."
+        )
+    return (
+        "No widget target was resolved. Run browser_snapshot, widget_tree, or inspect_widget first, then target a widget with "
+        f"selectors like {examples}."
+    )
 
 
 def _selector_help_text() -> str:
@@ -575,7 +606,7 @@ def _compat_snapshot_result(
 
     node = _send_widget_command(managed_connection, METHOD_FIND, target=snapshot_target)
     if node is None:
-        raise ValueError(f"No widget found for target {snapshot_target!r}")
+        raise ValueError(_target_not_found_message(managed_connection, snapshot_target))
     return _snapshot_payload(managed_connection, [node], depth=depth)
 
 
@@ -1326,7 +1357,7 @@ if FastMCP is not None:
                 target=target,
             )
             if node is None:
-                raise ValueError(f"No widget found for target {target!r}")
+                raise ValueError(_target_not_found_message(connection_state, target))
             payload = _snapshot_payload(connection_state, [node], depth=depth)
 
         result = {"connection": connection, "target": target, **payload}
