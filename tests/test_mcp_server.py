@@ -159,6 +159,23 @@ def test_resolve_window_prefers_wid_then_title():
         mcp_server._resolve_window(connection, window_index=5)
 
 
+def test_resolve_window_explicit_index_overrides_active_window():
+    first = FakeWindow(1, "Main Window")
+    second = FakeWindow(2, "Secondary Window")
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([first, second]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=1,
+    )
+
+    assert mcp_server._resolve_window(connection) is first
+    assert mcp_server._resolve_window(connection, window_index=1) is second
+
+
 def test_inspect_locator_handles_empty_and_present_results():
     empty = mcp_server._inspect_locator(FakeLocator(count=0))
     assert empty == {"exists": False, "count": 0}

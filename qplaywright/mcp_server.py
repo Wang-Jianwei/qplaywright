@@ -273,7 +273,7 @@ def _resolve_window(
     *,
     window_wid: int | None = None,
     window_title: str | None = None,
-    window_index: int = 0,
+    window_index: int | None = None,
 ) -> Any:
     windows = connection.app.windows()
     if not windows:
@@ -294,17 +294,19 @@ def _resolve_window(
             f"No window title containing {window_title!r} was found for connection {connection.name!r}"
         )
 
+    if window_index is not None:
+        if window_index < 0 or window_index >= len(windows):
+            raise IndexError(
+                f"Window index {window_index} is out of range for connection {connection.name!r}"
+            )
+        return windows[window_index]
+
     if connection.active_window_wid is not None:
         for window in windows:
             if window.wid == connection.active_window_wid:
                 return window
 
-    if window_index < 0 or window_index >= len(windows):
-        raise IndexError(
-            f"Window index {window_index} is out of range for connection {connection.name!r}"
-        )
-
-    return windows[window_index]
+    return windows[0]
 
 
 def _resolve_locator(
@@ -315,7 +317,7 @@ def _resolve_locator(
     nth: int | None = None,
     window_wid: int | None = None,
     window_title: str | None = None,
-    window_index: int = 0,
+    window_index: int | None = None,
 ) -> Any:
     if not selector.strip():
         raise ValueError("Selector must not be empty")
@@ -750,7 +752,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
         property_name: str | None = None,
         include_methods: bool = False,
     ) -> dict[str, Any]:
@@ -789,7 +791,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
     ) -> dict[str, Any]:
         """Return exposed custom widget methods and any declared argument metadata."""
 
@@ -822,7 +824,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
         double_click: bool = False,
     ) -> dict[str, Any]:
         """Click or double-click the first widget matched by a selector."""
@@ -852,7 +854,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
     ) -> dict[str, Any]:
         """Clear and fill the first matched input-like widget."""
 
@@ -878,7 +880,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
         args: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Invoke one exposed custom widget method by exact name."""
@@ -912,7 +914,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
         delay: int = 0,
     ) -> dict[str, Any]:
         """Type text into the first matched widget without clearing existing content."""
@@ -939,7 +941,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
     ) -> dict[str, Any]:
         """Send a single key press to the first matched widget."""
 
@@ -965,7 +967,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
     ) -> dict[str, Any]:
         """Check or uncheck the first matched checkable widget."""
 
@@ -993,7 +995,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
         value: str | None = None,
         index: int | None = None,
         label: str | None = None,
@@ -1032,7 +1034,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
         state: str = "visible",
         timeout: float | None = None,
     ) -> dict[str, Any]:
@@ -1059,7 +1061,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
         path: str | None = None,
     ) -> dict[str, Any]:
         """Capture a screenshot of a window or a matched widget."""
@@ -1096,7 +1098,7 @@ if FastMCP is not None:
         connection: str = "default",
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
     ) -> dict[str, Any]:
         """Resize one top-level window."""
 
@@ -1115,7 +1117,7 @@ if FastMCP is not None:
         connection: str = "default",
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
     ) -> dict[str, Any]:
         """Close one top-level window."""
 
@@ -1137,7 +1139,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
     ) -> dict[str, Any]:
         """Hover over the first widget matched by a selector."""
 
@@ -1162,7 +1164,7 @@ if FastMCP is not None:
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
-        window_index: int = 0,
+        window_index: int | None = None,
         delta_x: int = 0,
         delta_y: int = 0,
     ) -> dict[str, Any]:

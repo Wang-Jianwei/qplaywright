@@ -128,10 +128,13 @@ Most native widget-oriented tools share the same locator scope parameters:
 | `connection` | MCP-side connection name, default is `default` |
 | `selector` | qplaywright selector such as `#login_btn`, `role=button`, or `.QLabel` |
 | `has_text` | Optional text filter applied after selector resolution |
-| `nth` | Optional zero-based match index |
+| `nth` | Optional zero-based match index inside the selected window scope |
 | `window_wid` | Resolve inside a specific top-level window wid |
 | `window_title` | Resolve inside the first window whose title contains this text |
-| `window_index` | Fallback zero-based top-level window index |
+| `window_index` | Explicit zero-based top-level window index; when provided it overrides the current active window |
+
+Window scope precedence is `window_wid` -> `window_title` -> `window_index` -> current active window -> first visible window.
+`nth` is applied only after the window scope has been resolved.
 
 ### Common Compatibility Parameters
 

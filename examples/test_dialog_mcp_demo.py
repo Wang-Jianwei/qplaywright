@@ -82,7 +82,7 @@ async def main() -> None:
                     {
                         "connection": "demo",
                         "selector": "role=dialog",
-                        "window_title": "Payment Review",
+                        "window_index": 1,
                     },
                 )
                 print(f"Dialog root: {dialog_root}")
@@ -94,7 +94,7 @@ async def main() -> None:
                     {
                         "connection": "demo",
                         "selector": "#dialog_payment_summary",
-                        "window_title": "Payment Review",
+                        "window_index": 1,
                     },
                 )
                 print(f"Dialog summary: {dialog_summary['text']}")
@@ -106,7 +106,7 @@ async def main() -> None:
                     {
                         "connection": "demo",
                         "selector": "#approval_code",
-                        "window_title": "Payment Review",
+                        "window_index": 1,
                         "value": "APR-CNY-001",
                     },
                 )
@@ -116,7 +116,7 @@ async def main() -> None:
                     {
                         "connection": "demo",
                         "selector": "#review_risk",
-                        "window_title": "Payment Review",
+                        "window_index": 1,
                         "label": "High",
                     },
                 )
@@ -126,7 +126,7 @@ async def main() -> None:
                     {
                         "connection": "demo",
                         "selector": "#review_escalate",
-                        "window_title": "Payment Review",
+                        "window_index": 1,
                         "checked": True,
                     },
                 )
@@ -136,7 +136,7 @@ async def main() -> None:
                     {
                         "connection": "demo",
                         "selector": "#review_notes_dialog",
-                        "window_title": "Payment Review",
+                        "window_index": 1,
                         "value": "Escalated because amount exceeds manual threshold.",
                     },
                 )
@@ -146,7 +146,7 @@ async def main() -> None:
                     {
                         "connection": "demo",
                         "selector": "#approve_review_btn",
-                        "window_title": "Payment Review",
+                        "window_index": 1,
                     },
                 )
 
