@@ -11,6 +11,7 @@
  *
  * Then in another terminal:
  *   python examples/test_demo.py
+ *   python examples/test_mcp_cpp_demo.py
  */
 
 #include <QApplication>
@@ -26,6 +27,79 @@
 #include <QGroupBox>
 
 #include "qplaywright_agent.h"
+
+class FancyAmountEdit : public QWidget
+{
+    Q_OBJECT
+
+public:
+    explicit FancyAmountEdit(QWidget *parent = nullptr) : QWidget(parent)
+    {
+        auto *layout = new QHBoxLayout(this);
+        layout->setContentsMargins(8, 6, 8, 6);
+
+        auto *caption = new QLabel("Amount:");
+        m_valueLabel = new QLabel;
+        m_valueLabel->setObjectName("amount_value");
+        m_valueLabel->setMinimumWidth(90);
+
+        layout->addWidget(caption);
+        layout->addWidget(m_valueLabel, 1);
+
+        setAccessibleName("Amount editor");
+
+        QPlaywrightClassMetadata metadata;
+        metadata.role("textbox")
+            .addMethod(
+                QPlaywrightClassMethod()
+                    .name("amount")
+                    .returnType("QString")
+                    .brief("Return the current amount string")
+            )
+            .addMethod(
+                QPlaywrightClassMethod()
+                    .name("setAmount")
+                    .addArg(
+                        QPlaywrightMethodArg()
+                            .name("value")
+                            .type("QString")
+                            .brief("New amount text")
+                            .required(true)
+                    )
+                    .returnType("void")
+                    .brief("Set the current amount string")
+            )
+            .addMethod(
+                QPlaywrightClassMethod()
+                    .name("clearAmount")
+                    .returnType("void")
+                    .brief("Reset the amount to 0.00")
+            );
+
+        setProperty("qplaywrightClassMetadata", QVariant::fromValue(metadata));
+        setAmount("0.00");
+    }
+
+    Q_INVOKABLE QString amount() const
+    {
+        return m_amount;
+    }
+
+    Q_INVOKABLE void setAmount(const QString &value)
+    {
+        m_amount = value.trimmed().isEmpty() ? QStringLiteral("0.00") : value.trimmed();
+        m_valueLabel->setText(m_amount);
+    }
+
+    Q_INVOKABLE void clearAmount()
+    {
+        setAmount(QStringLiteral("0.00"));
+    }
+
+private:
+    QLabel *m_valueLabel = nullptr;
+    QString m_amount;
+};
 
 class DemoWindow : public QMainWindow
 {
@@ -77,6 +151,13 @@ public:
         row3->addWidget(m_role);
         loginLayout->addLayout(row3);
 
+        auto *row4 = new QHBoxLayout;
+        row4->addWidget(new QLabel("Requested amount:"));
+        m_amountEditor = new FancyAmountEdit;
+        m_amountEditor->setObjectName("amount_editor");
+        row4->addWidget(m_amountEditor);
+        loginLayout->addLayout(row4);
+
         // Login button
         m_loginBtn = new QPushButton("Login");
         m_loginBtn->setObjectName("login_btn");
@@ -117,6 +198,7 @@ private slots:
         QString username = m_username->text();
         QString password = m_password->text();
         QString role = m_role->currentText();
+        QString amount = m_amountEditor->amount();
 
         if (username.isEmpty() || password.isEmpty()) {
             m_status->setText("Status: Please fill all fields");
@@ -124,9 +206,9 @@ private slots:
             return;
         }
 
-        m_status->setText(QString("Status: Logged in as %1 (%2)").arg(username, role));
-        m_log->append(QString("[INFO] Login successful: user=%1, role=%2, remember=%3")
-            .arg(username, role, m_remember->isChecked() ? "true" : "false"));
+        m_status->setText(QString("Status: Logged in as %1 (%2) amount=%3").arg(username, role, amount));
+        m_log->append(QString("[INFO] Login successful: user=%1, role=%2, amount=%3, remember=%4")
+            .arg(username, role, amount, m_remember->isChecked() ? "true" : "false"));
     }
 
     void onClearLog()
@@ -140,6 +222,7 @@ private:
     QLineEdit *m_password;
     QCheckBox *m_remember;
     QComboBox *m_role;
+    FancyAmountEdit *m_amountEditor;
     QPushButton *m_loginBtn;
     QLabel *m_status;
     QTextEdit *m_log;
