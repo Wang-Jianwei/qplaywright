@@ -468,21 +468,31 @@ def _render_snapshot_tree(
     *,
     depth: int = 10,
     level: int = 0,
+    seen_wids: set[int] | None = None,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     if level > depth:
         return [], []
+
+    if seen_wids is None:
+        seen_wids = set()
 
     lines: list[str] = []
     refs: list[dict[str, Any]] = []
 
     for node in nodes:
-        ref = _snapshot_ref_for_widget(connection, node.get("wid"))
+        wid = node.get("wid")
+        if wid is not None:
+            if wid in seen_wids:
+                continue
+            seen_wids.add(wid)
+
+        ref = _snapshot_ref_for_widget(connection, wid)
         ref_part = f" [ref={ref}]" if ref else ""
         target_hint = _snapshot_target_hint(node)
         target_part = f" target={target_hint}" if target_hint else ""
         text = node.get("text") or ""
         text_part = f' "{text}"' if text else ""
-        active_part = " [active]" if node.get("wid") == connection.active_window_wid else ""
+        active_part = " [active]" if wid == connection.active_window_wid else ""
         lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{active_part}{ref_part}{target_part}")
         refs.append(_snapshot_entry(node, ref))
 
@@ -491,6 +501,7 @@ def _render_snapshot_tree(
             node.get("children") or [],
             depth=depth,
             level=level + 1,
+            seen_wids=seen_wids,
         )
         lines.extend(child_lines)
         refs.extend(child_refs)
@@ -503,7 +514,6 @@ def _snapshot_payload(
     nodes: list[dict[str, Any]],
     *,
     depth: int = 10,
-    reset_refs: bool = False,
 ) -> dict[str, Any]:
     lines, refs = _render_snapshot_tree(connection, nodes, depth=depth)
     return {
@@ -561,13 +571,12 @@ def _compat_snapshot_result(
             managed_connection,
             _widget_tree_raw(managed_connection, max_depth=depth),
             depth=depth,
-            reset_refs=True,
         )
 
     node = _send_widget_command(managed_connection, METHOD_FIND, target=snapshot_target)
     if node is None:
         raise ValueError(f"No widget found for target {snapshot_target!r}")
-    return _snapshot_payload(managed_connection, [node], depth=depth, reset_refs=False)
+    return _snapshot_payload(managed_connection, [node], depth=depth)
 
 
 def _action_result_with_snapshot(
@@ -1309,7 +1318,6 @@ if FastMCP is not None:
                 connection_state,
                 _widget_tree_raw(connection_state, max_depth=depth),
                 depth=depth,
-                reset_refs=True,
             )
         else:
             node = _send_widget_command(
@@ -1319,7 +1327,7 @@ if FastMCP is not None:
             )
             if node is None:
                 raise ValueError(f"No widget found for target {target!r}")
-            payload = _snapshot_payload(connection_state, [node], depth=depth, reset_refs=False)
+            payload = _snapshot_payload(connection_state, [node], depth=depth)
 
         result = {"connection": connection, "target": target, **payload}
         if filename is not None:

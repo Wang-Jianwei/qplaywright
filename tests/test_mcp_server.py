@@ -280,7 +280,6 @@ def test_snapshot_payload_creates_stable_refs():
                 ],
             }
         ],
-        reset_refs=True,
     )
 
     assert "[ref=e1]" in payload["snapshot"]
@@ -314,13 +313,56 @@ def test_snapshot_payload_creates_stable_refs():
                 ],
             },
         ],
-        reset_refs=True,
     )
 
     refs_by_wid = {entry["wid"]: entry["ref"] for entry in second_payload["refs"]}
     assert refs_by_wid[1] == "e1"
     assert refs_by_wid[2] == "e2"
     assert refs_by_wid[3] == "e3"
+
+
+def test_snapshot_payload_preserves_existing_ref_bindings():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        snapshot_refs={"e1": 99},
+        snapshot_wids={99: "e1"},
+    )
+
+    payload = mcp_server._snapshot_payload(
+        connection,
+        [{"wid": 1, "class": "DemoWindow", "objectName": "", "text": "Title", "children": []}],
+    )
+
+    assert payload["refs"] == [{"ref": "e2", "wid": 1, "target": ".DemoWindow", "class": "DemoWindow", "text": "Title"}]
+    assert connection.snapshot_refs == {"e1": 99, "e2": 1}
+    assert connection.snapshot_wids == {99: "e1", 1: "e2"}
+
+
+def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+
+    payload = mcp_server._snapshot_payload(
+        connection,
+        [
+            {"wid": 1, "class": "DemoWindow", "objectName": "", "text": "Title", "children": []},
+            {"wid": 1, "class": "DemoWindow", "objectName": "", "text": "Title", "children": []},
+        ],
+    )
+
+    assert payload["refs"] == [{"ref": "e1", "wid": 1, "target": ".DemoWindow", "class": "DemoWindow", "text": "Title"}]
+    assert payload["snapshot"].count("[ref=e1]") == 1
 
 
 def test_browser_target_params_accept_snapshot_ref():
