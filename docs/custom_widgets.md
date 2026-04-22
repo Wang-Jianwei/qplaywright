@@ -5,7 +5,10 @@ contract stored in the dynamic property `qplaywrightClassMetadata`.
 
 ## Recommended Contract
 
-`qplaywrightClassMetadata` is a mapping with two top-level fields:
+Public authoring should use the builder objects `QPlaywrightClassMetadata`,
+`QPlaywrightClassMethod`, and `QPlaywrightMethodArg`.
+
+Their serialized shape contains two top-level fields:
 
 - `role`: one Playwright-style role such as `textbox`, `button`, or `combobox`
 - `methods`: a list of raw invoke method declarations
@@ -84,33 +87,26 @@ class FancyAmountEdit(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._amount = ""
-        self.setProperty(
-            "qplaywrightClassMetadata",
-            {
-                "role": "textbox",
-                "methods": [
-                    {
-                        "name": "amount",
-                        "brief": "Return the current amount string",
-                        "returnType": "QString",
-                        "args": [],
-                    },
-                    {
-                        "name": "setAmount",
-                        "brief": "Set the current amount string",
-                        "returnType": "void",
-                        "args": [
-                            {
-                                "name": "value",
-                                "type": "QString",
-                                "brief": "New amount text",
-                                "required": True,
-                            }
-                        ],
-                    },
-                ],
-            },
+        metadata = QPlaywrightClassMetadata()
+        metadata.role("textbox").addMethod(
+            QPlaywrightClassMethod()
+            .name("amount")
+            .returnType("QString")
+            .brief("Return the current amount string")
+        ).addMethod(
+            QPlaywrightClassMethod()
+            .name("setAmount")
+            .addArg(
+                QPlaywrightMethodArg()
+                .name("value")
+                .type("QString")
+                .brief("New amount text")
+                .required(True)
+            )
+            .returnType("void")
+            .brief("Set the current amount string")
         )
+        self.setProperty("qplaywrightClassMetadata", metadata)
 
     def amount(self):
         return self._amount

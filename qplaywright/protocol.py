@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, asdict
-from typing import Any
+from typing import Any, overload
 
 # Default port for the agent server
 DEFAULT_PORT = 19876
@@ -57,6 +57,211 @@ class Response:
             result=d.get("result"),
             error=err["message"] if isinstance(err, dict) else err,
         )
+
+
+class QPlaywrightMethodArg:
+    def __init__(self):
+        self._name = ""
+        self._type = "QVariant"
+        self._brief = ""
+        self._required = True
+        self._default_value = MISSING
+
+    @overload
+    def name(self, value: Any = MISSING):
+        ...
+
+    @overload
+    def name(self) -> str:
+        ...
+
+    @overload
+    def name(self, value: Any) -> QPlaywrightMethodArg:
+        ...
+
+    def name(self, value: Any = MISSING):
+        if value is MISSING:
+            return self._name
+        self._name = str(value)
+        return self
+
+    @overload
+    def type(self) -> str:
+        ...
+
+    @overload
+    def type(self, value: Any) -> QPlaywrightMethodArg:
+        ...
+
+    def type(self, value: Any = MISSING):
+        if value is MISSING:
+            return self._type
+        self._type = str(value)
+        return self
+
+    @overload
+    def brief(self) -> str:
+        ...
+
+    @overload
+    def brief(self, value: Any) -> QPlaywrightMethodArg:
+        ...
+
+    def brief(self, value: Any = MISSING):
+        if value is MISSING:
+            return self._brief
+        self._brief = str(value)
+        return self
+
+    @overload
+    def required(self) -> bool:
+        ...
+
+    @overload
+    def required(self, value: Any) -> QPlaywrightMethodArg:
+        ...
+
+    def required(self, value: Any = MISSING):
+        if value is MISSING:
+            return self._required
+        self._required = bool(value)
+        return self
+
+    @overload
+    def defaultValue(self) -> Any:
+        ...
+
+    @overload
+    def defaultValue(self, value: Any) -> QPlaywrightMethodArg:
+        ...
+
+    def defaultValue(self, value: Any = MISSING):
+        if value is MISSING:
+            return None if self._default_value is MISSING else self._default_value
+        self._default_value = value
+        return self
+
+    def hasDefaultValue(self) -> bool:
+        return self._default_value is not MISSING
+
+    def toVariantMap(self) -> dict[str, Any]:
+        return {
+            "name": self._name,
+            "type": self._type,
+            "brief": self._brief,
+            "required": self._required,
+            "defaultValue": None if self._default_value is MISSING else self._default_value,
+        }
+
+
+class QPlaywrightClassMethod:
+    def __init__(self):
+        self._name = ""
+        self._args: list[QPlaywrightMethodArg] = []
+        self._return_type = "QVariant"
+        self._brief = ""
+
+    @overload
+    def name(self) -> str:
+        ...
+
+    @overload
+    def name(self, value: Any) -> QPlaywrightClassMethod:
+        ...
+
+    def name(self, value: Any = MISSING):
+        if value is MISSING:
+            return self._name
+        self._name = str(value)
+        return self
+
+    def addArg(self, arg: QPlaywrightMethodArg):
+        self._args.append(arg)
+        return self
+
+    def args(self) -> list[QPlaywrightMethodArg]:
+        return list(self._args)
+
+    @overload
+    def returnType(self) -> str:
+        ...
+
+    @overload
+    def returnType(self, value: Any) -> QPlaywrightClassMethod:
+        ...
+
+    def returnType(self, value: Any = MISSING):
+        if value is MISSING:
+            return self._return_type
+        self._return_type = str(value)
+        return self
+
+    @overload
+    def brief(self) -> str:
+        ...
+
+    @overload
+    def brief(self, value: Any) -> QPlaywrightClassMethod:
+        ...
+
+    def brief(self, value: Any = MISSING):
+        if value is MISSING:
+            return self._brief
+        self._brief = str(value)
+        return self
+
+    def signature(self) -> str:
+        return f"{self._name}({', '.join(arg.type() for arg in self._args)})"
+
+    def toVariantMap(self) -> dict[str, Any]:
+        return {
+            "name": self._name,
+            "args": [arg.toVariantMap() for arg in self._args],
+            "returnType": self._return_type,
+            "brief": self._brief,
+        }
+
+
+class QPlaywrightClassMetadata:
+    def __init__(self):
+        self._role = ""
+        self._methods: list[QPlaywrightClassMethod] = []
+
+    @overload
+    def role(self) -> str:
+        ...
+
+    @overload
+    def role(self, value: Any) -> QPlaywrightClassMetadata:
+        ...
+
+    def role(self, value: Any = MISSING):
+        if value is MISSING:
+            return self._role
+        self._role = str(value)
+        return self
+
+    def addMethod(self, method: QPlaywrightClassMethod):
+        self._methods.append(method)
+        return self
+
+    def methods(self) -> list[QPlaywrightClassMethod]:
+        return list(self._methods)
+
+    def hasMethod(self, name: str) -> bool:
+        return any(method.name() == name for method in self._methods)
+
+    def findMethod(self, name: str) -> QPlaywrightClassMethod | None:
+        for method in self._methods:
+            if method.name() == name:
+                return method
+        return None
+
+    def toVariantMap(self) -> dict[str, Any]:
+        return {
+            "role": self._role,
+            "methods": [method.toVariantMap() for method in self._methods],
+        }
 
 
 def decode_line(line: bytes) -> dict:
@@ -127,7 +332,9 @@ METHOD_PING = "ping"
 #   has-text=partial     →  contains text (case-insensitive)
 #
 # Custom widgets declare automation metadata through the Qt dynamic property
-# qplaywrightClassMetadata. The property value is a mapping with:
+# qplaywrightClassMetadata. Public authoring should use the builder objects
+# QPlaywrightClassMetadata / QPlaywrightClassMethod / QPlaywrightMethodArg.
+# Their serialized shape is:
 #
 #   role     → one Playwright-style role such as textbox or button
 #   methods  → list of method declarations used by methods() and invoke()

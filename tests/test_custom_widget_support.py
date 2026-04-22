@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import qplaywright.agent._selector as selector
+from qplaywright.protocol import QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlaywrightMethodArg
 
 
 class FakeMetaObject:
@@ -84,11 +85,26 @@ class FakeValueWidget(FakeWidget):
         return self._properties["value"]
 
 
-def _metadata(*, role: str = "", methods: list[dict] | None = None) -> dict[str, object]:
-    return {
-        "role": role,
-        "methods": list(methods or []),
-    }
+def _metadata(*, role: str = "", methods: list[dict] | None = None) -> QPlaywrightClassMetadata:
+    metadata = QPlaywrightClassMetadata().role(role)
+    for method in methods or []:
+        builder = QPlaywrightClassMethod()
+        builder.name(method.get("name", ""))
+        builder.returnType(method.get("returnType", "QVariant"))
+        builder.brief(method.get("brief", ""))
+        for arg in method.get("args", []):
+            arg_builder = (
+                QPlaywrightMethodArg()
+                .name(arg.get("name", ""))
+                .type(arg.get("type", "QVariant"))
+                .brief(arg.get("brief", ""))
+                .required(arg.get("required", True))
+            )
+            if "defaultValue" in arg:
+                arg_builder.defaultValue(arg["defaultValue"])
+            builder.addArg(arg_builder)
+        metadata.addMethod(builder)
+    return metadata
 
 
 def test_custom_role_metadata_matches_selector():

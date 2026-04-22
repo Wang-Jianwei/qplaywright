@@ -2,68 +2,63 @@ from __future__ import annotations
 
 from qplaywright.agent import _selector as selector
 from qplaywright.agent import _server as server
+from qplaywright.protocol import QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlaywrightMethodArg
 from qplaywright.sync_api._locator import Locator
 
 
 class FakeInvokeWidget:
     def __init__(self):
         self.calls: list[tuple[str, tuple]] = []
+        self._metadata = QPlaywrightClassMetadata().role("textbox")
+        self._metadata.addMethod(
+            QPlaywrightClassMethod()
+            .name("setAmount")
+            .brief("Update the current amount")
+            .returnType("QVariant")
+            .addArg(
+                QPlaywrightMethodArg()
+                .name("value")
+                .type("QString")
+                .brief("Formatted amount text")
+                .required(True)
+            )
+        )
+        self._metadata.addMethod(
+            QPlaywrightClassMethod()
+            .name("summary")
+            .brief("Render a short summary")
+            .returnType("QString")
+            .addArg(
+                QPlaywrightMethodArg()
+                .name("prefix")
+                .type("QString")
+                .brief("Optional output prefix")
+                .required(False)
+                .defaultValue("")
+            )
+        )
+        self._metadata.addMethod(
+            QPlaywrightClassMethod()
+            .name("toggle")
+            .brief("Toggle bool state")
+            .returnType("bool")
+            .addArg(
+                QPlaywrightMethodArg()
+                .name("enabled")
+                .type("bool")
+                .brief("Whether the state should be enabled")
+                .required(True)
+            )
+        )
+        self._metadata.addMethod(
+            QPlaywrightClassMethod().name("snapshot").brief("Return a structured snapshot").returnType("QVariant")
+        )
 
     def property(self, name):
         if isinstance(name, bytes):
             name = name.decode()
         if name == "qplaywrightClassMetadata":
-            return {
-                "role": "textbox",
-                "methods": [
-                    {
-                        "name": "setAmount",
-                        "brief": "Update the current amount",
-                        "returnType": "QVariant",
-                        "args": [
-                            {
-                                "name": "value",
-                                "type": "QString",
-                                "brief": "Formatted amount text",
-                                "required": True,
-                            }
-                        ],
-                    },
-                    {
-                        "name": "summary",
-                        "brief": "Render a short summary",
-                        "returnType": "QString",
-                        "args": [
-                            {
-                                "name": "prefix",
-                                "type": "QString",
-                                "brief": "Optional output prefix",
-                                "required": False,
-                                "defaultValue": "",
-                            }
-                        ],
-                    },
-                    {
-                        "name": "toggle",
-                        "brief": "Toggle bool state",
-                        "returnType": "bool",
-                        "args": [
-                            {
-                                "name": "enabled",
-                                "type": "bool",
-                                "brief": "Whether the state should be enabled",
-                                "required": True,
-                            }
-                        ],
-                    },
-                    {
-                        "name": "snapshot",
-                        "brief": "Return a structured snapshot",
-                        "returnType": "QVariant",
-                        "args": [],
-                    },
-                ],
-            }
+            return self._metadata
         return None
 
     def setAmount(self, value):

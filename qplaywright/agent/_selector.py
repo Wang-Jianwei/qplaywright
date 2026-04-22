@@ -64,11 +64,16 @@ def _normalize_string_list(value) -> list[str]:
 def _normalize_metadata_map(value) -> dict:
     if value in (None, ""):
         return {}
+    to_variant_map = getattr(value, "toVariantMap", None)
+    if callable(to_variant_map):
+        value = to_variant_map()
     if isinstance(value, dict):
         return value
     if hasattr(value, "items"):
         return {str(key): item for key, item in value.items()}
-    raise TypeError(f"qplaywrightClassMetadata must be a mapping, got {type(value).__name__}")
+    raise TypeError(
+        f"qplaywrightClassMetadata must be a QPlaywrightClassMetadata or mapping, got {type(value).__name__}"
+    )
 
 
 def _declared_class_metadata(widget) -> dict:

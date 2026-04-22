@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 # Import QPlaywright agent
 sys.path.insert(0, ".")
-from qplaywright.agent import start_agent
+from qplaywright import QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlaywrightMethodArg, start_agent
 
 
 class FancyAmountEdit(QWidget):
@@ -45,39 +45,25 @@ class FancyAmountEdit(QWidget):
         layout.addWidget(self.value_label, 1)
         layout.addWidget(self.hint_label)
 
-        self.setProperty(
-            "qplaywrightClassMetadata",
-            {
-                "role": "textbox",
-                "methods": [
-                    {
-                        "name": "amount",
-                        "brief": "Return the current amount string",
-                        "returnType": "QString",
-                        "args": [],
-                    },
-                    {
-                        "name": "setAmount",
-                        "brief": "Set the current amount string",
-                        "returnType": "void",
-                        "args": [
-                            {
-                                "name": "value",
-                                "type": "QString",
-                                "brief": "New amount text",
-                                "required": True,
-                            }
-                        ],
-                    },
-                    {
-                        "name": "clearAmount",
-                        "brief": "Reset the amount to 0.00",
-                        "returnType": "void",
-                        "args": [],
-                    },
-                ],
-            },
+        metadata = QPlaywrightClassMetadata()
+        metadata.role("textbox").addMethod(
+            QPlaywrightClassMethod().name("amount").returnType("QString").brief("Return the current amount string")
+        ).addMethod(
+            QPlaywrightClassMethod()
+            .name("setAmount")
+            .addArg(
+                QPlaywrightMethodArg()
+                .name("value")
+                .type("QString")
+                .brief("New amount text")
+                .required(True)
+            )
+            .returnType("void")
+            .brief("Set the current amount string")
+        ).addMethod(
+            QPlaywrightClassMethod().name("clearAmount").returnType("void").brief("Reset the amount to 0.00")
         )
+        self.setProperty("qplaywrightClassMetadata", metadata)
 
     def amount(self):
         return self._amount
