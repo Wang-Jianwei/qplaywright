@@ -6,8 +6,22 @@ build-backend = "setuptools.build_meta"
 name = "qplaywright"
 version = "0.1.0"
 description = "Playwright-compatible automation library for Qt QWidget applications"
+readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
+keywords = ["qt", "playwright", "gui", "automation", "mcp"]
+classifiers = [
+	"Development Status :: 3 - Alpha",
+	"Intended Audience :: Developers",
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3 :: Only",
+	"Programming Language :: Python :: 3.9",
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12",
+	"Topic :: Software Development :: Testing",
+	"Topic :: Software Development :: User Interfaces",
+]
 
 [tool.setuptools.package-data]
 "qplaywright.cpp" = ["qplaywright_agent.h"]
