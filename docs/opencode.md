@@ -201,6 +201,7 @@ D:/Python/Python312/python.exe examples/demo_app.py
 
 - `examples/test_mcp_demo.py`
 - `examples/test_dialog_mcp_demo.py`
+- `examples/test_scroll_mcp_demo.py`
 - `examples/test_playwright_mcp_compat.py`
 - `docs/mcp.md`
 
@@ -208,6 +209,7 @@ D:/Python/Python312/python.exe examples/demo_app.py
 
 - `examples/test_mcp_demo.py` 展示原生 qplaywright MCP 工具流。
 - `examples/test_dialog_mcp_demo.py` 展示真实弹出 `QDialog` 的窗口发现、控件操作和关闭验证。
+- `examples/test_scroll_mcp_demo.py` 展示原生 MCP `scroll` tool 驱动 Qt 滚轮事件并验证滚动状态变化。
 - `examples/test_playwright_mcp_compat.py` 展示 playwright-mcp 风格兼容层的完整调用路径。
 
 ## 推荐测试路径

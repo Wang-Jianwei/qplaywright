@@ -7,7 +7,7 @@ Run this first, then run test_demo.py in another terminal to automate it.
 
 import os
 import sys
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QTextEdit,
     QGroupBox,
+    QListWidget,
 )
 
 # Import QPlaywright agent
@@ -440,11 +441,23 @@ class DemoWindow(QMainWindow):
         self.review_status_label.setWordWrap(True)
         layout.addWidget(self.review_status_label)
 
+        self.scroll_status_label = QLabel("Scroll: top")
+        self.scroll_status_label.setObjectName("scroll_status")
+        self.scroll_status_label.setWordWrap(True)
+        layout.addWidget(self.scroll_status_label)
+
+        self.scroll_list = QListWidget()
+        self.scroll_list.setObjectName("scroll_list")
+        self.scroll_list.setFixedHeight(120)
+        self.scroll_list.addItems([f"Scrollable item {index:03d}" for index in range(1, 101)])
+        layout.addWidget(self.scroll_list)
+
         # --- Log area ---
         self.log_area = QTextEdit()
         self.log_area.setObjectName("log")
         self.log_area.setReadOnly(True)
         self.log_area.setPlaceholderText("Logs will appear here...")
+        self._seed_scroll_log()
         layout.addWidget(self.log_area)
 
         # --- Action buttons ---
@@ -472,7 +485,20 @@ class DemoWindow(QMainWindow):
         self.notify_check.toggled.connect(self._update_summary)
         self.notes_input.textChanged.connect(self._update_summary)
         self.amount_editor.stateChanged.connect(self._update_summary)
+        self.scroll_list.verticalScrollBar().valueChanged.connect(self._update_scroll_status)
+        self._update_scroll_status()
+        QTimer.singleShot(0, self._update_scroll_status)
         self._update_summary()
+
+    def _seed_scroll_log(self):
+        lines = [f"[TRACE] Scroll entry {index:03d}" for index in range(1, 81)]
+        self.log_area.setPlainText("\n".join(lines))
+
+    def _update_scroll_status(self):
+        bar = self.scroll_list.verticalScrollBar()
+        self.scroll_status_label.setText(
+            f"Scroll: value={bar.value()} max={bar.maximum()} visible={bar.isVisible()}"
+        )
 
     def _update_summary(self):
         username = self.username_input.text().strip() or "<empty>"
@@ -553,11 +579,12 @@ class DemoWindow(QMainWindow):
         self.review_dialog = None
 
     def _on_clear_log(self):
-        self.log_area.clear()
+        self._seed_scroll_log()
         self.amount_editor.clearAmount()
         self.notes_input.clear()
         self.status_label.setText("Status: Log cleared")
         self.review_status_label.setText("Review: Not started")
+        self._update_scroll_status()
         self._update_summary()
 
 

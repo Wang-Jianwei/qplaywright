@@ -764,11 +764,12 @@ def _scroll_widget(widget, delta_x: int = 0, delta_y: int = 0):
     """Scroll a widget."""
     _import_qt()
     QWheelEvent = _QtGui.QWheelEvent
-    QEvent = _QtCore.QEvent
     Qt = _QtCore.Qt
 
-    center = widget.rect().center()
-    global_pos = widget.mapToGlobal(center)
+    target = widget.viewport() if hasattr(widget, "viewport") else widget
+
+    center = target.rect().center()
+    global_pos = target.mapToGlobal(center)
 
     try:
         from PySide6.QtCore import QPointF, QPoint
@@ -786,7 +787,7 @@ def _scroll_widget(widget, delta_x: int = 0, delta_y: int = 0):
             delta_y, Qt.NoButton, Qt.NoModifier,
         )
 
-    _QApplication.postEvent(widget, event)
+    _QApplication.postEvent(target, event)
     _process_events()
 
 

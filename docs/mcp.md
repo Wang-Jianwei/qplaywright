@@ -36,7 +36,7 @@ python -m qplaywright.mcp_server --transport streamable-http
 2. `list_windows` to discover the target top-level window.
 3. `widget_tree` or `inspect_widget` to understand the UI structure.
 4. Use action tools like `click`, `fill`, `type_text`, `set_checked`,
-   `press_key`, `select_option`, `wait_for`, and `screenshot`.
+   `press_key`, `scroll`, `select_option`, `wait_for`, and `screenshot`.
 5. `disconnect` when finished.
 
 ## Exposed MCP Interfaces
@@ -73,6 +73,7 @@ These are the primary MCP tools backed directly by the qplaywright sync client:
 | `invoke_widget_method` | Invoke one exposed custom widget method by exact name |
 | `type_text` | Type text without clearing existing content |
 | `press_key` | Send one key press to the matched widget |
+| `scroll` | Send a mouse wheel scroll event to the matched widget |
 | `set_checked` | Check or uncheck the matched widget |
 | `select_option` | Select one combobox option by `value`, `index`, or `label` |
 | `wait_for` | Wait until a widget reaches a supported state |
@@ -160,6 +161,7 @@ Most playwright-mcp compatibility tools use these fields:
 | `invoke_widget_method` | common native locator params, plus `method_name`, `args` | `ok`, `selector`, `method_name`, `args`, `result` |
 | `type_text` | common native locator params, plus `text`, `delay` | `ok`, `selector`, `text`, `delay`, `connection` |
 | `press_key` | common native locator params, plus `key` | `ok`, `selector`, `key`, `connection` |
+| `scroll` | common native locator params, plus `delta_x`, `delta_y` | `ok`, `selector`, `delta_x`, `delta_y`, `connection` |
 | `set_checked` | common native locator params, plus `checked` | `ok`, `selector`, `checked`, `connection` |
 | `select_option` | common native locator params, plus exactly one of `value`, `index`, `label` | `ok`, `selector`, `value`, `index`, `label`, `connection` |
 | `wait_for` | common native locator params, plus `state`, `timeout` | `ok`, `selector`, `state`, `timeout`, `connection` |

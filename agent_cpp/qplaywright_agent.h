@@ -65,6 +65,7 @@
 #include <QToolBar>
 #include <QStatusBar>
 #include <QDialog>
+#include <QAbstractScrollArea>
 #include <QScrollBar>
 #include <QStringList>
 #include <QVariant>
@@ -1541,8 +1542,12 @@ private:
 
     void scrollWidget(QWidget *w, int dx, int dy)
     {
-        QPoint center = w->rect().center();
-        QPoint globalPos = w->mapToGlobal(center);
+        QWidget *target = w;
+        if (auto *scrollArea = qobject_cast<QAbstractScrollArea *>(w)) {
+            target = scrollArea->viewport();
+        }
+        QPoint center = target->rect().center();
+        QPoint globalPos = target->mapToGlobal(center);
 #if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)
         QWheelEvent event(
             QPointF(center), QPointF(globalPos),
@@ -1558,7 +1563,7 @@ private:
             Qt::NoButton, Qt::NoModifier
         );
 #endif
-        QApplication::sendEvent(w, &event);
+        QApplication::sendEvent(target, &event);
         QApplication::processEvents();
     }
 

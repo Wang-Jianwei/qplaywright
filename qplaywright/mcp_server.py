@@ -1114,6 +1114,39 @@ if FastMCP is not None:
         return {"ok": True, "selector": selector, "connection": connection}
 
 
+    @mcp.tool()
+    def scroll(
+        selector: str,
+        connection: str = "default",
+        has_text: str | None = None,
+        nth: int | None = None,
+        window_wid: int | None = None,
+        window_title: str | None = None,
+        window_index: int = 0,
+        delta_x: int = 0,
+        delta_y: int = 0,
+    ) -> dict[str, Any]:
+        """Send a mouse wheel scroll event to the first matched widget."""
+
+        locator = _resolve_locator(
+            _get_connection(_SERVER_STATE, connection),
+            selector=selector,
+            has_text=has_text,
+            nth=nth,
+            window_wid=window_wid,
+            window_title=window_title,
+            window_index=window_index,
+        )
+        locator.scroll(delta_x=delta_x, delta_y=delta_y)
+        return {
+            "ok": True,
+            "selector": selector,
+            "delta_x": delta_x,
+            "delta_y": delta_y,
+            "connection": connection,
+        }
+
+
     @mcp.tool(name="browser_click")
     def browser_click(
         target: str,

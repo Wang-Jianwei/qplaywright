@@ -263,6 +263,10 @@ class Locator:
         """Focus the widget."""
         self._send(METHOD_FOCUS)
 
+    def scroll(self, *, delta_x: int = 0, delta_y: int = 0) -> None:
+        """Send a mouse wheel scroll event to the widget."""
+        self._send(METHOD_SCROLL, delta_x=delta_x, delta_y=delta_y)
+
     def scroll_into_view_if_needed(self) -> None:
         """No-op for Qt (widgets are always in view if visible)."""
         pass
