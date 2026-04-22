@@ -16,9 +16,13 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from examples.test_mcp_demo import _call_tool, _project_root, _python_path_env
 
 
+DEMO_PORT = 29876
+
+
 async def main() -> None:
     root = _project_root()
     env = _python_path_env(root)
+    env["QPLAYWRIGHT_PORT"] = str(DEMO_PORT)
     screenshot_path = root / "demo_playwright_compat_screenshot.png"
 
     demo_process = subprocess.Popen(
@@ -38,7 +42,7 @@ async def main() -> None:
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                await _call_tool(session, "connect", {"name": "demo", "port": 19876, "timeout": 10.0})
+                await _call_tool(session, "connect", {"name": "demo", "port": DEMO_PORT, "timeout": 10.0})
 
                 await _call_tool(
                     session,
@@ -48,6 +52,36 @@ async def main() -> None:
                         "selector": "#amount_editor",
                         "method_name": "setAmount",
                         "args": {"value": "88.50"},
+                    },
+                )
+                await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "setCurrency",
+                        "args": {"code": "JPY"},
+                    },
+                )
+                await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "setPrecision",
+                        "args": {"digits": 1},
+                    },
+                )
+                await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "applyDelta",
+                        "args": {"delta": 2.4},
                     },
                 )
 
@@ -129,7 +163,7 @@ async def main() -> None:
                 await _call_tool(
                     session,
                     "browser_verify_text_visible",
-                    {"connection": "demo", "text": "amount=88.50"},
+                    {"connection": "demo", "text": "payment=JPY 90.9 precision=1 adjustments=on"},
                 )
                 await _call_tool(
                     session,
@@ -154,7 +188,7 @@ async def main() -> None:
                     {"connection": "demo", "target": status_ref, "depth": 0},
                 )
                 print(f"Status snapshot: {status['snapshot']}")
-                assert "amount=88.50" in status["snapshot"]
+                assert "payment=JPY 90.9 precision=1 adjustments=on" in status["snapshot"]
 
                 screenshot = await _call_tool(
                     session,

@@ -18,6 +18,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
+DEMO_PORT = 29876
+
+
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -62,6 +65,7 @@ async def _call_tool(session: ClientSession, name: str, arguments: dict[str, Any
 async def main() -> None:
     root = _project_root()
     env = _python_path_env(root)
+    env["QPLAYWRIGHT_PORT"] = str(DEMO_PORT)
     screenshot_path = root / "demo_mcp_screenshot.png"
 
     demo_process = subprocess.Popen(
@@ -84,7 +88,7 @@ async def main() -> None:
                 connect_result = await _call_tool(
                     session,
                     "connect",
-                    {"name": "demo", "port": 19876, "timeout": 10.0},
+                    {"name": "demo", "port": DEMO_PORT, "timeout": 10.0},
                 )
                 print(f"Connected: {connect_result['windows']}")
 
@@ -105,7 +109,21 @@ async def main() -> None:
                 )
                 method_names = [entry["name"] for entry in methods["methods"]]
                 print(f"Custom methods: {method_names}")
-                assert method_names == ["amount", "setAmount", "clearAmount"]
+                assert method_names == [
+                    "amount",
+                    "setAmount",
+                    "clearAmount",
+                    "currency",
+                    "setCurrency",
+                    "availableCurrencies",
+                    "precision",
+                    "setPrecision",
+                    "adjustmentsEnabled",
+                    "setAdjustmentsEnabled",
+                    "applyDelta",
+                    "summary",
+                    "snapshot",
+                ]
 
                 await _call_tool(
                     session,
@@ -115,6 +133,36 @@ async def main() -> None:
                         "selector": "#amount_editor",
                         "method_name": "setAmount",
                         "args": {"value": "123.45"},
+                    },
+                )
+                await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "setCurrency",
+                        "args": {"code": "EUR"},
+                    },
+                )
+                await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "setPrecision",
+                        "args": {"digits": 3},
+                    },
+                )
+                await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "applyDelta",
+                        "args": {"delta": 1.425},
                     },
                 )
 
@@ -129,7 +177,65 @@ async def main() -> None:
                     },
                 )
                 print(f"Amount result: {amount_result['result']}")
-                assert amount_result["result"]["value"] == "123.45"
+                assert amount_result["result"]["value"] == "124.875"
+
+                currency_result = await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "currency",
+                        "args": {},
+                    },
+                )
+                print(f"Currency result: {currency_result['result']}")
+                assert currency_result["result"]["value"] == "EUR"
+
+                available_result = await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "availableCurrencies",
+                        "args": {},
+                    },
+                )
+                print(f"Available currencies: {available_result['result']}")
+                assert available_result["result"]["value"] == ["USD", "EUR", "CNY", "JPY"]
+
+                summary_result = await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "summary",
+                        "args": {},
+                    },
+                )
+                print(f"Summary result: {summary_result['result']}")
+                assert summary_result["result"]["value"] == "EUR 124.875 precision=3 adjustments=on"
+
+                snapshot_result = await _call_tool(
+                    session,
+                    "invoke_widget_method",
+                    {
+                        "connection": "demo",
+                        "selector": "#amount_editor",
+                        "method_name": "snapshot",
+                        "args": {},
+                    },
+                )
+                print(f"Snapshot result: {snapshot_result['result']}")
+                assert snapshot_result["result"]["value"] == {
+                    "amount": "124.875",
+                    "currency": "EUR",
+                    "precision": 3,
+                    "adjustmentsEnabled": True,
+                    "summary": "EUR 124.875 precision=3 adjustments=on",
+                }
 
                 await _call_tool(
                     session,
@@ -187,7 +293,7 @@ async def main() -> None:
                 )
                 print(f"Status after login: {status['text']}")
                 assert "Logged in as admin" in status["text"]
-                assert "amount=123.45" in status["text"]
+                assert "payment=EUR 124.875 precision=3 adjustments=on" in status["text"]
 
                 summary = await _call_tool(
                     session,
@@ -196,7 +302,7 @@ async def main() -> None:
                 )
                 print(f"Summary after login: {summary['text']}")
                 assert "last-login" in summary["text"]
-                assert "amount=123.45" in summary["text"]
+                assert "payment=EUR 124.875 precision=3 adjustments=on" in summary["text"]
 
                 await _call_tool(
                     session,
@@ -226,7 +332,7 @@ async def main() -> None:
                     },
                 )
                 print(f"Amount after clear: {cleared_amount['result']}")
-                assert cleared_amount["result"]["value"] == "0.00"
+                assert cleared_amount["result"]["value"] == "0.000"
 
                 screenshot = await _call_tool(
                     session,

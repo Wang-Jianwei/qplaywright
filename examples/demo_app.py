@@ -5,7 +5,9 @@ Run this first, then run test_demo.py in another terminal to automate it.
     python examples/demo_app.py
 """
 
+import os
 import sys
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -27,23 +29,50 @@ from qplaywright import QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlayw
 
 
 class FancyAmountEdit(QWidget):
+    stateChanged = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._amount = "0.00"
+        self._amount_value = 0.0
+        self._currency = "USD"
+        self._precision = 2
+        self._adjustments_enabled = True
+        self._available_currencies = ["USD", "EUR", "CNY", "JPY"]
         self.setAccessibleName("Amount editor")
 
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(6)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
 
         caption = QLabel("Amount:")
-        self.value_label = QLabel(self._amount)
+        self.value_label = QLabel()
         self.value_label.setObjectName("amount_value")
         self.value_label.setMinimumWidth(90)
-        self.hint_label = QLabel("Use invoke(setAmount) to update")
+        self.currency_label = QLabel()
+        self.currency_label.setObjectName("amount_currency")
+        self.precision_label = QLabel()
+        self.precision_label.setObjectName("amount_precision")
+        self.mode_label = QLabel()
+        self.mode_label.setObjectName("amount_mode")
 
-        layout.addWidget(caption)
-        layout.addWidget(self.value_label, 1)
+        top_row.addWidget(caption)
+        top_row.addWidget(self.value_label, 1)
+        top_row.addWidget(self.currency_label)
+        top_row.addWidget(self.precision_label)
+        top_row.addWidget(self.mode_label)
+
+        self.hint_label = QLabel("invoke(setCurrency/setPrecision/applyDelta/summary/snapshot)")
+        self.hint_label.setWordWrap(True)
+        self.state_label = QLabel()
+        self.state_label.setObjectName("amount_state")
+        self.state_label.setWordWrap(True)
+
+        layout.addLayout(top_row)
         layout.addWidget(self.hint_label)
+        layout.addWidget(self.state_label)
 
         metadata = QPlaywrightClassMetadata()
         metadata.role("textbox").addMethod(
@@ -62,19 +91,149 @@ class FancyAmountEdit(QWidget):
             .brief("Set the current amount string")
         ).addMethod(
             QPlaywrightClassMethod().name("clearAmount").returnType("void").brief("Reset the amount to 0.00")
+        ).addMethod(
+            QPlaywrightClassMethod().name("currency").returnType("QString").brief("Return the active currency code")
+        ).addMethod(
+            QPlaywrightClassMethod()
+            .name("setCurrency")
+            .addArg(
+                QPlaywrightMethodArg()
+                .name("code")
+                .type("QString")
+                .brief("ISO-like currency code")
+                .required(True)
+            )
+            .returnType("void")
+            .brief("Set the active currency code")
+        ).addMethod(
+            QPlaywrightClassMethod()
+            .name("availableCurrencies")
+            .returnType("QStringList")
+            .brief("Return all supported currency codes")
+        ).addMethod(
+            QPlaywrightClassMethod().name("precision").returnType("int").brief("Return the active precision")
+        ).addMethod(
+            QPlaywrightClassMethod()
+            .name("setPrecision")
+            .addArg(
+                QPlaywrightMethodArg()
+                .name("digits")
+                .type("int")
+                .brief("Number of fractional digits")
+                .required(True)
+            )
+            .returnType("void")
+            .brief("Set the amount precision")
+        ).addMethod(
+            QPlaywrightClassMethod()
+            .name("adjustmentsEnabled")
+            .returnType("bool")
+            .brief("Return whether delta adjustments are enabled")
+        ).addMethod(
+            QPlaywrightClassMethod()
+            .name("setAdjustmentsEnabled")
+            .addArg(
+                QPlaywrightMethodArg()
+                .name("enabled")
+                .type("bool")
+                .brief("Whether delta adjustments are enabled")
+                .required(True)
+            )
+            .returnType("void")
+            .brief("Enable or disable delta adjustments")
+        ).addMethod(
+            QPlaywrightClassMethod()
+            .name("applyDelta")
+            .addArg(
+                QPlaywrightMethodArg()
+                .name("delta")
+                .type("double")
+                .brief("Increment or decrement amount by this delta")
+                .required(True)
+            )
+            .returnType("QString")
+            .brief("Apply a delta to the current amount and return the formatted amount")
+        ).addMethod(
+            QPlaywrightClassMethod().name("summary").returnType("QString").brief("Return a human-readable amount summary")
+        ).addMethod(
+            QPlaywrightClassMethod().name("snapshot").returnType("QVariant").brief("Return a structured snapshot")
         )
         self.setProperty("qplaywrightClassMetadata", metadata)
+        self._refresh_view()
+
+    def _format_amount(self):
+        return f"{self._amount_value:.{self._precision}f}"
+
+    def _refresh_view(self):
+        amount_text = self._format_amount()
+        self.value_label.setText(amount_text)
+        self.currency_label.setText(self._currency)
+        self.precision_label.setText(f"precision={self._precision}")
+        self.mode_label.setText("adjustments=on" if self._adjustments_enabled else "adjustments=off")
+        self.state_label.setText(
+            f"State: {self._currency} {amount_text} | available={', '.join(self._available_currencies)}"
+        )
+        self.stateChanged.emit()
 
     def amount(self):
-        return self._amount
+        return self._format_amount()
 
     def setAmount(self, value):
         text = str(value).strip()
-        self._amount = text or "0.00"
-        self.value_label.setText(self._amount)
+        self._amount_value = 0.0 if not text else float(text)
+        self._refresh_view()
 
     def clearAmount(self):
         self.setAmount("0.00")
+
+    def currency(self):
+        return self._currency
+
+    def setCurrency(self, code):
+        normalized = str(code).strip().upper()
+        if normalized not in self._available_currencies:
+            raise ValueError(f"Unsupported currency: {normalized}")
+        self._currency = normalized
+        self._refresh_view()
+
+    def availableCurrencies(self):
+        return list(self._available_currencies)
+
+    def precision(self):
+        return self._precision
+
+    def setPrecision(self, digits):
+        digits = int(digits)
+        if digits < 0 or digits > 4:
+            raise ValueError("Precision must be between 0 and 4")
+        self._precision = digits
+        self._refresh_view()
+
+    def adjustmentsEnabled(self):
+        return self._adjustments_enabled
+
+    def setAdjustmentsEnabled(self, enabled):
+        self._adjustments_enabled = bool(enabled)
+        self._refresh_view()
+
+    def applyDelta(self, delta):
+        if not self._adjustments_enabled:
+            raise ValueError("Adjustments are disabled")
+        self._amount_value += float(delta)
+        self._refresh_view()
+        return self.amount()
+
+    def summary(self):
+        return f"{self._currency} {self.amount()} precision={self._precision} adjustments={'on' if self._adjustments_enabled else 'off'}"
+
+    def snapshot(self):
+        return {
+            "amount": self.amount(),
+            "currency": self._currency,
+            "precision": self._precision,
+            "adjustmentsEnabled": self._adjustments_enabled,
+            "summary": self.summary(),
+        }
 
 
 class DemoWindow(QMainWindow):
@@ -194,13 +353,14 @@ class DemoWindow(QMainWindow):
         self.remember_check.toggled.connect(self._update_summary)
         self.notify_check.toggled.connect(self._update_summary)
         self.notes_input.textChanged.connect(self._update_summary)
+        self.amount_editor.stateChanged.connect(self._update_summary)
         self._update_summary()
 
     def _update_summary(self):
         username = self.username_input.text().strip() or "<empty>"
         role = self.role_combo.currentText()
         environment = self.environment_combo.currentText()
-        amount = self.amount_editor.amount()
+        payment_summary = self.amount_editor.summary()
         flags = []
         if self.remember_check.isChecked():
             flags.append("remember")
@@ -210,7 +370,7 @@ class DemoWindow(QMainWindow):
         note_state = f"notes={len(notes)} chars" if notes else "notes=empty"
         flag_state = ", ".join(flags) if flags else "no-flags"
         self.summary_label.setText(
-            f"Summary: user={username} role={role} env={environment} amount={amount} {flag_state} {note_state}"
+            f"Summary: user={username} role={role} env={environment} payment={payment_summary} {flag_state} {note_state}"
         )
 
     def _on_login(self):
@@ -220,7 +380,7 @@ class DemoWindow(QMainWindow):
         environment = self.environment_combo.currentText()
         remember = self.remember_check.isChecked()
         notify = self.notify_check.isChecked()
-        amount = self.amount_editor.amount()
+        payment_summary = self.amount_editor.summary()
         notes = self.notes_input.toPlainText().strip()
 
         if not username or not password:
@@ -229,13 +389,13 @@ class DemoWindow(QMainWindow):
             return
 
         self.status_label.setText(
-            f"Status: Logged in as {username} ({role}) env={environment} amount={amount}"
+            f"Status: Logged in as {username} ({role}) env={environment} payment={payment_summary}"
         )
         self.summary_label.setText(
-            f"Summary: last-login user={username} role={role} env={environment} amount={amount} notify={notify}"
+            f"Summary: last-login user={username} role={role} env={environment} payment={payment_summary} notify={notify}"
         )
         self.log_area.append(
-            f"[INFO] Login successful: user={username}, role={role}, env={environment}, amount={amount}, remember={remember}, notify={notify}"
+            f"[INFO] Login successful: user={username}, role={role}, env={environment}, payment={payment_summary}, remember={remember}, notify={notify}"
         )
         if notes:
             self.log_area.append(f"[INFO] Reviewer notes: {notes}")
@@ -250,10 +410,11 @@ class DemoWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    port = int(os.environ.get("QPLAYWRIGHT_PORT", "19876"))
 
-    # Start QPlaywright agent on port 19876
-    server = start_agent(app, port=19876)
-    print("QPlaywright agent started on port 19876")
+    # Start QPlaywright agent on a configurable port for isolated MCP demos.
+    server = start_agent(app, port=port)
+    print(f"QPlaywright agent started on port {port}")
 
     window = DemoWindow()
     window.show()
