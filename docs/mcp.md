@@ -59,7 +59,7 @@ The server can be exposed through:
 These are the primary MCP tools backed directly by the qplaywright sync client:
 
 | Tool | Purpose |
-|---|---|
+| --- | --- |
 | `connect` | Connect to a running Qt app that already embedded the qplaywright agent |
 | `launch` | Launch a Qt executable with agent support and connect to it |
 | `disconnect` | Close one MCP-managed connection |
@@ -87,7 +87,7 @@ These tools provide a compatibility subset for hosts that expect playwright-mcp
 style names and iterative snapshot-driven interaction:
 
 | Tool | Purpose |
-|---|---|
+| --- | --- |
 | `browser_click` | Click a widget using `target` or a snapshot ref |
 | `browser_close` | Close the current top-level Qt window |
 | `browser_fill_form` | Fill multiple fields in one call |
@@ -115,6 +115,106 @@ cleanly match browser semantics:
 - `browser_select_option` currently supports selecting one value at a time
 - `browser_take_screenshot` does not distinguish viewport and full-page capture
 - DOM, network, cookies, storage, JS evaluation, DevTools, PDF, and vision-style browser tools are not exposed
+
+## Common Parameters And Return Shapes
+
+### Common Native Locator Parameters
+
+Most native widget-oriented tools share the same locator scope parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `connection` | MCP-side connection name, default is `default` |
+| `selector` | qplaywright selector such as `#login_btn`, `role=button`, or `.QLabel` |
+| `has_text` | Optional text filter applied after selector resolution |
+| `nth` | Optional zero-based match index |
+| `window_wid` | Resolve inside a specific top-level window wid |
+| `window_title` | Resolve inside the first window whose title contains this text |
+| `window_index` | Fallback zero-based top-level window index |
+
+### Common Compatibility Parameters
+
+Most playwright-mcp compatibility tools use these fields:
+
+| Parameter | Meaning |
+| --- | --- |
+| `connection` | MCP-side connection name, default is `default` |
+| `target` | qplaywright selector or a snapshot ref such as `e12` |
+| `element` | Human-friendly fallback selector text when `target` is omitted |
+| `filename` | Optional output path for text snapshots or screenshots |
+
+### Native Tool Details
+
+| Tool | Main parameters | Key return fields |
+| --- | --- | --- |
+| `connect` | `name`, `host`, `port`, `timeout` | `connection`, `current_window_wid`, `windows`, `replaced` |
+| `launch` | `executable`, `args`, `name`, `host`, `port`, `timeout` | `connection`, `launched_executable`, `current_window_wid`, `windows`, `replaced` |
+| `disconnect` | `name` | `connection`, `closed`, `launched_executable` |
+| `list_live_connections` | none | list entries with `connection`, `host`, `port`, `timeout`, `launched_executable`, `window_count` |
+| `list_windows` | `connection` | list entries with `index`, `wid`, `title`, `class`, `width`, `height` |
+| `widget_tree` | `connection`, `max_depth` | widget tree nodes including `wid`, `class`, `text`, `objectName`, `children` |
+| `inspect_widget` | common native locator params, plus `property_name`, `include_methods` | `exists`, `count`, and when found: `text`, `value`, `is_visible`, `is_enabled`, `is_checked`, `bounding_box`, optional `methods` |
+| `get_widget_methods` | common native locator params | `connection`, `selector`, `methods` where each method includes `name`, `args`, `returnType`, `brief` |
+| `click` | common native locator params, plus `double_click` | `ok`, `selector`, `double_click`, `connection` |
+| `fill` | common native locator params, plus `value` | `ok`, `selector`, `value`, `connection` |
+| `invoke_widget_method` | common native locator params, plus `method_name`, `args` | `ok`, `selector`, `method_name`, `args`, `result` |
+| `type_text` | common native locator params, plus `text`, `delay` | `ok`, `selector`, `text`, `delay`, `connection` |
+| `press_key` | common native locator params, plus `key` | `ok`, `selector`, `key`, `connection` |
+| `set_checked` | common native locator params, plus `checked` | `ok`, `selector`, `checked`, `connection` |
+| `select_option` | common native locator params, plus exactly one of `value`, `index`, `label` | `ok`, `selector`, `value`, `index`, `label`, `connection` |
+| `wait_for` | common native locator params, plus `state`, `timeout` | `ok`, `selector`, `state`, `timeout`, `connection` |
+| `screenshot` | `connection`, optional common native locator params, plus `path` | screenshot payload from qplaywright, plus `connection`, `selector` |
+| `resize_window` | `width`, `height`, `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `width`, `height`, `connection` |
+| `close_window` | `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `connection`, `window_wid` |
+| `hover` | common native locator params | `ok`, `selector`, `connection` |
+
+### Native Invoke Result Shape
+
+`invoke_widget_method` wraps the underlying widget method result in `result`.
+For method-only custom widgets, the common shape is:
+
+```json
+{
+  "ok": true,
+  "connection": "demo",
+  "selector": "#amount_editor",
+  "method_name": "amount",
+  "args": {},
+  "result": {
+    "ok": true,
+    "value": "123.45",
+    "errorCode": 0,
+    "errorMessage": ""
+  }
+}
+```
+
+### Compatibility Tool Details
+
+| Tool | Main parameters | Key return fields |
+| --- | --- | --- |
+| `browser_click` | `target`, `connection`, `element`, `doubleClick`, `button`, `modifiers` | `ok`, `target`, `doubleClick`, plus fresh `snapshot` and `refs` |
+| `browser_close` | `connection` | `ok`, `window_wid`, `remaining_windows` |
+| `browser_fill_form` | `fields`, `connection` | `result`, `fields`, plus fresh `snapshot` and `refs` |
+| `browser_hover` | `target`, `connection`, `element` | `ok`, `target`, plus fresh `snapshot` and `refs` |
+| `browser_press_key` | `key`, `connection`, `target`, `element` | `ok`, `target`, `key`, plus fresh `snapshot` and `refs` |
+| `browser_resize` | `width`, `height`, `connection` | `ok`, `width`, `height`, `connection` |
+| `browser_select_option` | `target`, `values`, `connection`, `element` | `ok`, `target`, `value`, plus fresh `snapshot` and `refs` |
+| `browser_snapshot` | `connection`, `target`, `filename`, `depth` | `snapshot`, `refs`, optional `path`, plus `connection`, `target` |
+| `browser_tabs` | `action`, `connection`, optional `index`, unused `url` placeholder | `result`, plus `windows`, and sometimes `selected` or `closed` |
+| `browser_take_screenshot` | `connection`, `element`, `target`, `type`, `filename`, `fullPage` | screenshot payload with `path`, `width`, `height`, plus `connection`, `selector` |
+| `browser_type` | `target`, `text`, `connection`, `element`, `submit`, `slowly` | `ok`, `target`, `text`, `slowly`, optional `submitted`, plus fresh `snapshot` and `refs` |
+| `browser_wait_for` | `connection`, one of `time`, `text`, `textGone`, plus `timeout` | `ok`, and either `waited` or the waited text fields |
+| `browser_verify_element_visible` | `role`, `accessibleName`, `connection` | `ok`, `role`, `accessibleName`, `snapshot` |
+| `browser_verify_text_visible` | `text`, `connection` | `ok`, `text`, `snapshot`, `refs` |
+| `browser_verify_value` | `type`, `element`, `target`, `value`, `connection` | `ok`, `expected`, `actual`, `target`, plus fresh `snapshot` and `refs` |
+
+### Snapshot Ref Workflow
+
+`browser_snapshot` returns stable refs such as `e1`, `e2`, `e3` within the same
+live connection. Those refs can be fed back into tools like `browser_click`,
+`browser_type`, `browser_select_option`, and `browser_take_screenshot` without
+re-resolving the original selector.
 
 ## End-to-End Demo
 
