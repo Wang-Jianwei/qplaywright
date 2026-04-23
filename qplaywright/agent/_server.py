@@ -372,6 +372,13 @@ def _update_visual_feedback(widget, pos, *, double: bool = False) -> None:
     manager.move_cursor(widget, pos, pulse_count=2 if double else 1)
 
 
+def _move_visual_cursor(widget, pos, *, pulse_count: int = 0) -> None:
+    manager = _ensure_overlay_manager()
+    if manager is None:
+        return
+    manager.move_cursor(widget, pos, pulse_count=pulse_count)
+
+
 # --------------------------------------------------------------------------- #
 #  Widget ID registry — gives each widget a stable numeric ID                  #
 # --------------------------------------------------------------------------- #
@@ -759,19 +766,26 @@ def _handle_command(req: Request) -> Any:
 
     if method == METHOD_HOVER:
         w = _resolve_one(params)
-        center = w.mapToGlobal(w.rect().center())
+        target = _primary_event_target(w)
+        local_pos = target.rect().center()
+        _move_visual_cursor(target, local_pos)
+        center = target.mapToGlobal(local_pos)
         QCursor.setPos(center)
         _process_events()
         return True
 
     if method == METHOD_FOCUS:
         w = _resolve_one(params)
+        target = _primary_event_target(w)
+        _move_visual_cursor(target, target.rect().center())
         w.setFocus()
         _process_events()
         return True
 
     if method == METHOD_SCROLL:
         w = _resolve_one(params)
+        target = _primary_event_target(w)
+        _move_visual_cursor(target, target.rect().center(), pulse_count=1)
         _scroll_widget(w, params.get("delta_x", 0), params.get("delta_y", 0))
         return True
 

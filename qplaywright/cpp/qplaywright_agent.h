@@ -1308,7 +1308,7 @@ private:
         m_overlay->syncToWindow();
     }
 
-    void updateVisualFeedback(QWidget *target, const QPoint &localPos, bool doubleClick)
+    void updateVisualFeedback(QWidget *target, const QPoint &localPos, int pulseCount = 0)
     {
         if (!m_visualFeedbackEnabled || !target)
             return;
@@ -1318,7 +1318,7 @@ private:
         if (!m_overlay)
             return;
 
-        m_overlay->setCursorFromGlobal(target->mapToGlobal(localPos), doubleClick ? 2 : 1);
+        m_overlay->setCursorFromGlobal(target->mapToGlobal(localPos), pulseCount);
         QApplication::processEvents();
     }
 
@@ -1599,13 +1599,18 @@ private:
 
         if (method == "hover") {
             QWidget *w = resolveOne(params);
-            QCursor::setPos(w->mapToGlobal(w->rect().center()));
+            QWidget *target = primaryEventTarget(w);
+            QPoint center = target->rect().center();
+            updateVisualFeedback(target, center, 0);
+            QCursor::setPos(target->mapToGlobal(center));
             QApplication::processEvents();
             return true;
         }
 
         if (method == "focus") {
             QWidget *w = resolveOne(params);
+            QWidget *target = primaryEventTarget(w);
+            updateVisualFeedback(target, target->rect().center(), 0);
             w->setFocus();
             QApplication::processEvents();
             return true;
@@ -1894,7 +1899,7 @@ private:
         QWidget *target = clickTarget.widget;
         target->setFocus(Qt::MouseFocusReason);
         QApplication::processEvents();
-        updateVisualFeedback(target, clickTarget.localPos, doubleClick);
+        updateVisualFeedback(target, clickTarget.localPos, doubleClick ? 2 : 1);
         if (doubleClick)
             QTest::mouseDClick(target, Qt::LeftButton, Qt::NoModifier, clickTarget.localPos);
         else
@@ -1982,6 +1987,7 @@ private:
     {
         QWidget *target = primaryEventTarget(w);
         QPoint center = target->rect().center();
+        updateVisualFeedback(target, center, (dx != 0 || dy != 0) ? 1 : 0);
         QPoint globalPos = target->mapToGlobal(center);
 #if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)
         QWheelEvent event(
