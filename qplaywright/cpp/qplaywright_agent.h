@@ -1056,7 +1056,6 @@ public:
             QObject::connect(&m_overlaySyncTimer, &QTimer::timeout, this, &QPlaywrightHandler::syncAutomationOverlay, Qt::UniqueConnection);
             m_overlaySyncTimer.start();
         }
-        syncAutomationOverlay();
     }
 
 public slots:
@@ -1100,10 +1099,8 @@ private:
     {
     public:
         explicit AutomationOverlay(QWidget *targetWindow)
-            : QWidget(nullptr), m_targetWindow(targetWindow)
+            : QWidget(targetWindow), m_targetWindow(targetWindow)
         {
-            Qt::WindowFlags flags = Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint;
-            setWindowFlags(flags);
             setAttribute(Qt::WA_TransparentForMouseEvents, true);
             setAttribute(Qt::WA_NoSystemBackground, true);
             setAttribute(Qt::WA_TranslucentBackground, true);
@@ -1111,6 +1108,8 @@ private:
             setFocusPolicy(Qt::NoFocus);
             setObjectName(QString::fromLatin1(kAutomationOverlayObjectName));
             setProperty(kAutomationOverlayProperty, true);
+            m_timer.setInterval(16);
+            QObject::connect(&m_timer, &QTimer::timeout, this, &AutomationOverlay::tick);
             m_clock.start();
         }
 
@@ -1121,9 +1120,9 @@ private:
                 return;
             }
 
-            const QPoint topLeft = m_targetWindow->mapToGlobal(m_targetWindow->rect().topLeft());
-            if (geometry().x() != topLeft.x() || geometry().y() != topLeft.y() || width() != m_targetWindow->width() || height() != m_targetWindow->height()) {
-                setGeometry(topLeft.x(), topLeft.y(), m_targetWindow->width(), m_targetWindow->height());
+            const QRect targetRect = m_targetWindow->rect();
+            if (geometry() != targetRect) {
+                setGeometry(targetRect);
             }
 
             if (!m_cursorPosValid)
@@ -1134,6 +1133,9 @@ private:
                 show();
             if (forceRaise)
                 raise();
+            if (!m_timer.isActive())
+                m_timer.start();
+            update();
         }
 
         void setCursorFromGlobal(const QPoint &globalPos, int pulseCount)
@@ -1151,6 +1153,7 @@ private:
 
         void closeOverlay()
         {
+            m_timer.stop();
             hide();
             close();
         }
@@ -1221,10 +1224,36 @@ private:
         }
 
     private:
+        void tick()
+        {
+            const qint64 cutoff = m_clock.elapsed() - 300;
+            int writeIndex = 0;
+            for (int readIndex = 0; readIndex < m_pulses.size(); ++readIndex) {
+                if (m_pulses[readIndex].startedAtMs >= cutoff) {
+                    if (writeIndex != readIndex)
+                        m_pulses[writeIndex] = m_pulses[readIndex];
+                    ++writeIndex;
+                }
+            }
+            if (writeIndex != m_pulses.size())
+                m_pulses.resize(writeIndex);
+
+            if (!m_targetWindow || !m_targetWindow->isVisible()) {
+                hide();
+                if (m_pulses.isEmpty())
+                    m_timer.stop();
+                return;
+            }
+
+            syncToWindow();
+            update();
+        }
+
         QPointer<QWidget> m_targetWindow;
         QPoint m_cursorPos;
         bool m_cursorPosValid = false;
         QVector<PulseRecord> m_pulses;
+        QTimer m_timer;
         QElapsedTimer m_clock;
     };
 
@@ -1254,7 +1283,6 @@ private:
             m_overlay->deleteLater();
             m_overlay = nullptr;
         }
-        m_activeOverlayWindow = nullptr;
     }
 
     void syncAutomationOverlay()
@@ -1265,18 +1293,16 @@ private:
         }
 
         if (!m_activeOverlayWindow || !m_activeOverlayWindow->isVisible()) {
-            const QList<QWidget *> windows = topLevelWidgets();
-            m_activeOverlayWindow = windows.isEmpty() ? nullptr : windows.first();
-        }
-
-        if (!m_activeOverlayWindow) {
+            m_activeOverlayWindow = nullptr;
             closeAutomationOverlay();
             return;
         }
 
         if (!m_overlay || m_overlay->targetWindow() != m_activeOverlayWindow) {
+            QWidget *targetWindow = m_activeOverlayWindow;
             closeAutomationOverlay();
-            m_overlay = new AutomationOverlay(m_activeOverlayWindow);
+            m_activeOverlayWindow = targetWindow;
+            m_overlay = new AutomationOverlay(targetWindow);
         }
 
         m_overlay->syncToWindow();
@@ -1617,6 +1643,14 @@ private:
             const bool hasClipHeight = params.contains("height") && !params.value("height").isNull();
 
             QPixmap pixmap;
+            const bool hideOverlayForCapture =
+                m_overlay &&
+                m_overlay->isVisible() &&
+                m_overlay->targetWindow() == w->window();
+            if (hideOverlayForCapture) {
+                m_overlay->hide();
+                QApplication::processEvents();
+            }
             if (hasClipX || hasClipY || hasClipWidth || hasClipHeight) {
                 if (!(hasClipX && hasClipY && hasClipWidth && hasClipHeight)) {
                     throw std::runtime_error("Screenshot clipping requires x, y, width, and height together");
@@ -1631,6 +1665,12 @@ private:
                 pixmap = w->grab(QRect(clipX, clipY, clipWidth, clipHeight));
             } else {
                 pixmap = w->grab();
+            }
+            if (hideOverlayForCapture) {
+                m_overlay->show();
+                m_overlay->raise();
+                m_overlay->update();
+                QApplication::processEvents();
             }
             QString path = params["path"].toString();
 
