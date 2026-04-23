@@ -60,6 +60,7 @@ class Locator:
         has_text: str | None = None,
         parent_wid: int | None = None,
         nth_index: int | None = None,
+        widget_wid: int | None = None,
         timeout: float = 30.0,
     ):
         self._conn = conn
@@ -67,16 +68,20 @@ class Locator:
         self._has_text = has_text
         self._parent_wid = parent_wid
         self._nth_index = nth_index
+        self._widget_wid = widget_wid
         self._timeout = timeout
 
     def _params(self, **extra) -> dict:
-        p: dict[str, Any] = {"selector": self._selector}
-        if self._has_text is not None:
-            p["has_text"] = self._has_text
-        if self._parent_wid is not None:
-            p["parent_wid"] = self._parent_wid
-        if self._nth_index is not None:
-            p["nth"] = self._nth_index
+        if self._widget_wid is not None:
+            p: dict[str, Any] = {"wid": self._widget_wid}
+        else:
+            p = {"selector": self._selector}
+            if self._has_text is not None:
+                p["has_text"] = self._has_text
+            if self._parent_wid is not None:
+                p["parent_wid"] = self._parent_wid
+            if self._nth_index is not None:
+                p["nth"] = self._nth_index
         p.update(extra)
         return p
 
@@ -107,6 +112,7 @@ class Locator:
             has_text=self._has_text,
             parent_wid=self._parent_wid,
             nth_index=index,
+            widget_wid=self._widget_wid,
             timeout=self._timeout,
         )
 
@@ -311,7 +317,10 @@ class Locator:
     # -- Repr ----------------------------------------------------------------
 
     def __repr__(self) -> str:
-        parts = [f"Locator({self._selector!r}"]
+        if self._widget_wid is not None:
+            parts = [f"Locator(wid={self._widget_wid}"]
+        else:
+            parts = [f"Locator({self._selector!r}"]
         if self._has_text:
             parts.append(f", has_text={self._has_text!r}")
         if self._nth_index is not None:

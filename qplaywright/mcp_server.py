@@ -40,6 +40,7 @@ from qplaywright.protocol import (
     METHOD_UNCHECK,
 )
 from qplaywright.sync_api import QPlaywright
+from qplaywright.sync_api._locator import Locator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -385,6 +386,12 @@ def _resolve_locator(
 ) -> Any:
     if not selector.strip():
         raise ValueError("Selector must not be empty")
+
+    if _SNAPSHOT_REF_PATTERN.match(selector):
+        ref_wid = connection.snapshot_refs.get(selector)
+        if ref_wid is None:
+            raise ValueError(_target_not_found_message(connection, selector))
+        return Locator(connection.app._conn, "", widget_wid=ref_wid, timeout=connection.timeout)
 
     window = _resolve_window(
         connection,

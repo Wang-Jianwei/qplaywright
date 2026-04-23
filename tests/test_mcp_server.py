@@ -24,7 +24,7 @@ class FakeApp:
     def __init__(self, windows):
         self._windows = windows
         self.closed = False
-        self._conn = None
+        self._conn: FakeTransportConn | None = None
 
     def windows(self):
         return self._windows
@@ -293,6 +293,41 @@ def test_resolve_window_explicit_index_overrides_active_window():
 
     assert mcp_server._resolve_window(connection) is first
     assert mcp_server._resolve_window(connection, window_index=1) is second
+
+
+def test_resolve_locator_accepts_snapshot_ref_as_widget_id():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        snapshot_refs={"e2": 42},
+    )
+    connection.app._conn = FakeTransportConn()
+
+    locator = mcp_server._resolve_locator(connection, selector="e2")
+    locator.click()
+
+    assert connection.app._conn.calls == [
+        {"method": mcp_server.METHOD_CLICK, "params": {"wid": 42}, "timeout": 30.0}
+    ]
+
+
+def test_resolve_locator_rejects_missing_snapshot_ref_with_refresh_hint():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        snapshot_refs={"e1": 41},
+    )
+
+    with pytest.raises(ValueError, match="Snapshot ref 'e9' is not available"):
+        mcp_server._resolve_locator(connection, selector="e9")
 
 
 def test_inspect_locator_handles_empty_and_present_results():

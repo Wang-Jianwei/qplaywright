@@ -155,7 +155,7 @@ Most native widget-oriented tools share the same locator scope parameters:
 | Parameter | Meaning |
 | --- | --- |
 | `connection` | MCP-side connection name, default is `default` |
-| `selector` | qplaywright selector such as `#login_btn`, `role=button`, or `.QLabel` |
+| `selector` | qplaywright selector such as `#login_btn`, `role=button`, or `.QLabel`, and native action tools also accept snapshot refs such as `e12` |
 | `has_text` | Optional text filter applied after selector resolution |
 | `nth` | Optional zero-based match index inside the selected window scope |
 | `window_wid` | Resolve inside a specific top-level window wid |

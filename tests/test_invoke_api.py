@@ -240,6 +240,24 @@ def test_locator_methods_requests_method_schema():
     ]
 
 
+def test_locator_can_send_direct_widget_id_params():
+    conn = FakeConnection()
+    locator = Locator(conn, "", widget_wid=42, timeout=9.0)
+
+    result = locator.click()
+
+    assert result is None
+    assert conn.calls == [
+        (
+            "click",
+            {
+                "wid": 42,
+            },
+            9.0,
+        )
+    ]
+
+
 def test_window_screenshot_passes_clip_region():
     conn = FakeConnection()
     window = Window(conn, wid=7, timeout=6.0)
