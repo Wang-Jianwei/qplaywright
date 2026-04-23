@@ -57,6 +57,7 @@ class FakeWindow:
         self._title = title
         self.closed = False
         self.resized_to = None
+        self.screenshot_calls = []
 
     def title(self) -> str:
         return self._title
@@ -67,13 +68,22 @@ class FakeWindow:
     def close(self) -> None:
         self.closed = True
 
+    def locator(self, target: str):
+        return FakeLocator(count=1, target=target)
+
+    def screenshot(self, **kwargs):
+        self.screenshot_calls.append(kwargs)
+        return {"path": kwargs.get("path"), "width": 320, "height": 240}
+
 
 class FakeLocator:
-    def __init__(self, *, count: int, invoke_result=None):
+    def __init__(self, *, count: int, invoke_result=None, target: str | None = None):
         self._count = count
         self._invoke_result = invoke_result
+        self._target = target
         self.action_calls = []
         self.wait_calls = []
+        self.screenshot_calls = []
 
     def count(self) -> int:
         return self._count
@@ -168,6 +178,10 @@ class FakeLocator:
     def wait_for(self, *, state: str, timeout: float | None = None):
         self.wait_calls.append({"state": state, "timeout": timeout})
 
+    def screenshot(self, **kwargs):
+        self.screenshot_calls.append(kwargs)
+        return {"path": kwargs.get("path"), "width": 120, "height": 40}
+
 
 def test_connect_connection_replaces_existing(monkeypatch):
     created: list[FakeQPlaywright] = []
@@ -182,29 +196,26 @@ def test_connect_connection_replaces_existing(monkeypatch):
     existing_qplaywright = FakeQPlaywright()
     existing_app = FakeApp([])
     state = mcp_server.ServerState(
-        connections={
-            "default": mcp_server.ManagedConnection(
-                name="default",
-                qplaywright=existing_qplaywright,
-                app=existing_app,
-                host="127.0.0.1",
-                port=19876,
-                timeout=30.0,
-            )
-        }
+        connection=mcp_server.ManagedConnection(
+            name="default",
+            qplaywright=existing_qplaywright,
+            app=existing_app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+        )
     )
 
-    result = mcp_server.connect_connection(state, name="default", host="127.0.0.1", port=19877, timeout=5.0)
+    result = mcp_server.connect_connection(state, host="127.0.0.1", port=19877, timeout=5.0)
 
-    assert result["replaced"] is True
-    assert state.connections["default"].port == 19877
+    assert result.port == 19877
+    assert state.connection is result
     assert existing_qplaywright.closed is True
     assert existing_app.closed is True
     assert created[0].connected == ("127.0.0.1", 19877, 5.0)
 
 
-def test_legacy_connect_and_launch_preserve_response_shape(monkeypatch):
-    state = mcp_server.ServerState()
+def test_launch_connection_tracks_executable(monkeypatch):
     created: list[FakeQPlaywright] = []
 
     def fake_factory():
@@ -213,100 +224,42 @@ def test_legacy_connect_and_launch_preserve_response_shape(monkeypatch):
         return instance
 
     monkeypatch.setattr(mcp_server, "QPlaywright", fake_factory)
-    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
 
-    connected = mcp_server.connect(name="demo", port=19877, timeout=5.0)
-    launched = mcp_server.launch("demo_app.exe", args=["--flag"], name="demo2", port=19878, timeout=6.0)
+    state = mcp_server.ServerState()
+    result = mcp_server.launch_connection(
+        state,
+        executable="demo_app.exe",
+        args=["--flag"],
+        host="127.0.0.1",
+        port=19878,
+        timeout=6.0,
+    )
 
-    assert connected == {
-        "connection": "demo",
-        "host": "127.0.0.1",
-        "port": 19877,
-        "timeout": 5.0,
-        "replaced": False,
-        "current_window_wid": None,
-        "windows": [],
-    }
-    assert launched == {
-        "connection": "demo2",
-        "host": "127.0.0.1",
-        "port": 19878,
-        "timeout": 6.0,
-        "replaced": False,
-        "launched_executable": "demo_app.exe",
-        "current_window_wid": None,
-        "windows": [],
-    }
-    assert created[0].connected == ("127.0.0.1", 19877, 5.0)
-    assert created[1].launched == ("demo_app.exe", ["--flag"], "127.0.0.1", 19878, 6.0)
+    assert result.launched_executable == "demo_app.exe"
+    assert created[0].launched == ("demo_app.exe", ["--flag"], "127.0.0.1", 19878, 6.0)
 
 
-def test_get_connection_removes_stale_connection_from_state():
+def test_get_connection_removes_stale_session_from_state():
     app = FakeApp([])
     app._conn = FakeTransportConn(error=ConnectionError("Agent closed connection"))
     qplaywright = FakeQPlaywright()
     state = mcp_server.ServerState(
-        connections={
-            "default": mcp_server.ManagedConnection(
-                name="default",
-                qplaywright=qplaywright,
-                app=app,
-                host="127.0.0.1",
-                port=19876,
-                timeout=30.0,
-            )
-        }
+        connection=mcp_server.ManagedConnection(
+            name="default",
+            qplaywright=qplaywright,
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+        )
     )
 
-    with pytest.raises(ConnectionError, match="Call connect again to establish a fresh session"):
-        mcp_server._get_connection(state, "default")
+    with pytest.raises(ConnectionError, match="Call session attach again"):
+        mcp_server._get_connection(state)
 
-    assert "default" not in state.connections
+    assert state.connection is None
     assert app.closed is True
     assert qplaywright.closed is True
-
-
-def test_list_connections_reports_dead_connection_without_raising():
-    live_app = FakeApp([FakeWindow(1, "Main")])
-    live_app._conn = FakeTransportConn(
-        responses={
-            mcp_server.METHOD_LIST_WINDOWS: [
-                {"wid": 1, "title": "Main", "class": "", "width": None, "height": None, "index": 0}
-            ]
-        }
-    )
-    dead_app = FakeApp([FakeWindow(2, "Restarted")])
-    dead_app._conn = FakeTransportConn(error=ConnectionError("Agent closed connection"))
-
-    state = mcp_server.ServerState(
-        connections={
-            "alive": mcp_server.ManagedConnection(
-                name="alive",
-                qplaywright=FakeQPlaywright(),
-                app=live_app,
-                host="127.0.0.1",
-                port=19876,
-                timeout=30.0,
-            ),
-            "dead": mcp_server.ManagedConnection(
-                name="dead",
-                qplaywright=FakeQPlaywright(),
-                app=dead_app,
-                host="127.0.0.1",
-                port=19877,
-                timeout=30.0,
-            ),
-        }
-    )
-
-    result = {entry["connection"]: entry for entry in mcp_server.list_connections(state)}
-
-    assert result["alive"]["alive"] is True
-    assert result["alive"]["window_count"] == 1
-    assert result["alive"]["error"] is None
-    assert result["dead"]["alive"] is False
-    assert result["dead"]["window_count"] is None
-    assert "Call connect again to establish a fresh session" in result["dead"]["error"]
 
 
 def test_resolve_window_prefers_wid_then_title():
@@ -361,7 +314,7 @@ def test_resolve_locator_accepts_snapshot_ref_as_widget_id():
     locator.click()
 
     assert connection.app._conn.calls == [
-        {"method": mcp_server.METHOD_CLICK, "params": {"wid": 42}, "timeout": 30.0}
+        {"method": "click", "params": {"wid": 42}, "timeout": 30.0}
     ]
 
 
@@ -380,20 +333,19 @@ def test_resolve_locator_rejects_missing_snapshot_ref_with_refresh_hint():
         mcp_server._resolve_locator(connection, target="e9")
 
 
-def test_inspect_widget_uses_target_payload(monkeypatch):
+def test_inspect_target_uses_target_payload(monkeypatch):
     locator = FakeLocator(count=1)
 
-    monkeypatch.setattr(mcp_server, "_get_connection", lambda state, name: object())
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: object())
     monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
 
-    result = mcp_server.inspect_widget(target="#amount", connection="demo", include_methods=True)
+    result = mcp_server.inspect(target="#amount", include_methods=True)
 
     assert result["target"] == "#amount"
-    assert result["include_methods"] is True
     assert result["methods"][0]["name"] == "setAmount"
 
 
-def test_session_attach_status_and_close(monkeypatch):
+def test_session_attach_status_launch_and_close(monkeypatch):
     state = mcp_server.ServerState()
     created: list[FakeQPlaywright] = []
 
@@ -405,7 +357,7 @@ def test_session_attach_status_and_close(monkeypatch):
     monkeypatch.setattr(mcp_server, "QPlaywright", fake_factory)
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
 
-    attached = mcp_server.session(action="attach", connection="demo", port=19877, timeout=5.0)
+    attached = mcp_server.session(action="attach", port=19877, timeout=5.0)
 
     assert attached["ok"] is True
     assert attached["action"] == "attach"
@@ -418,48 +370,25 @@ def test_session_attach_status_and_close(monkeypatch):
     assert attached["active_window"] is None
     assert created[0].connected == ("127.0.0.1", 19877, 5.0)
 
-    status = mcp_server.session(action="status", connection="demo")
-
-    assert status["ok"] is True
+    status = mcp_server.session(action="status")
     assert status["action"] == "status"
     assert status["session"]["port"] == 19877
 
-    closed = mcp_server.session(action="close", connection="demo")
+    launched = mcp_server.session(action="launch", executable="demo_app.exe", args=["--flag"], port=19878, timeout=6.0)
+    assert launched["action"] == "launch"
+    assert launched["session"]["launched_executable"] == "demo_app.exe"
+    assert created[1].launched == ("demo_app.exe", ["--flag"], "127.0.0.1", 19878, 6.0)
 
+    closed = mcp_server.session(action="close")
     assert closed == {"ok": True, "action": "close", "closed": True}
-    assert state.connections == {}
+    assert state.connection is None
 
 
-def test_legacy_disconnect_preserves_launched_executable(monkeypatch):
-    state = mcp_server.ServerState(
-        connections={
-            "demo": mcp_server.ManagedConnection(
-                name="demo",
-                qplaywright=FakeQPlaywright(),
-                app=FakeApp([]),
-                host="127.0.0.1",
-                port=19876,
-                timeout=30.0,
-                launched_executable="demo_app.exe",
-            )
-        }
-    )
-    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
-
-    result = mcp_server.disconnect("demo")
-
-    assert result == {
-        "connection": "demo",
-        "closed": True,
-        "launched_executable": "demo_app.exe",
-    }
-
-
-def test_window_tool_selects_and_closes_windows(monkeypatch):
+def test_window_tool_lists_selects_resizes_and_closes(monkeypatch):
     state = mcp_server.ServerState()
     first = FakeWindow(11, "First")
     second = FakeWindow(22, "Second")
-    state.connections["demo"] = mcp_server.ManagedConnection(
+    state.connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
         app=FakeApp([first, second]),
@@ -470,50 +399,25 @@ def test_window_tool_selects_and_closes_windows(monkeypatch):
     )
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
 
-    selected = mcp_server.window(action="select", connection="demo", wid=22)
+    listed = mcp_server.window(action="list")
+    selected = mcp_server.window(action="select", wid=22)
+    resized = mcp_server.window(action="resize", wid=22, width=800, height=600)
+    closed = mcp_server.window(action="close", wid=22)
 
-    assert selected["ok"] is True
-    assert selected["action"] == "select"
+    assert [window["wid"] for window in listed["windows"]] == [11, 22]
+    assert listed["windows"][0]["is_active"] is True
     assert selected["active_window"]["wid"] == 22
     assert selected["refs_cleared"] is True
-
-    closed = mcp_server.window(action="close", connection="demo", wid=22)
-
-    assert closed["ok"] is True
-    assert closed["action"] == "close"
+    assert resized["active_window"]["wid"] == 22
+    assert first.resized_to is None
+    assert second.resized_to == (800, 600)
     assert closed["active_window"]["wid"] == 11
-
-
-def test_legacy_window_tools_wrap_window_actions(monkeypatch):
-    state = mcp_server.ServerState()
-    first = FakeWindow(11, "First")
-    second = FakeWindow(22, "Second")
-    state.connections["demo"] = mcp_server.ManagedConnection(
-        name="demo",
-        qplaywright=FakeQPlaywright(),
-        app=FakeApp([first, second]),
-        host="127.0.0.1",
-        port=19876,
-        timeout=30.0,
-        active_window_wid=22,
-    )
-    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
-
-    windows = mcp_server.list_windows(connection="demo")
-    resized = mcp_server.resize_window(width=800, height=600, connection="demo", window_wid=11)
-    closed = mcp_server.close_window(connection="demo", window_wid=22)
-
-    assert [window["wid"] for window in windows] == [11, 22]
-    assert resized == {"ok": True, "width": 800, "height": 600, "connection": "demo"}
-    assert first.resized_to == (800, 600)
-    assert closed == {"ok": True, "connection": "demo", "window_wid": 22}
     assert second.closed is True
-    assert state.connections["demo"].active_window_wid == 11
 
 
 def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
     state = mcp_server.ServerState()
-    state.connections["demo"] = mcp_server.ManagedConnection(
+    state.connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
         app=FakeApp([FakeWindow(11, "Main")]),
@@ -529,12 +433,12 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
         return {"snapshot": "- Main [ref=e1]", "refs": [{"ref": "e1"}]}
 
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
-    monkeypatch.setattr(mcp_server, "_compat_snapshot_result", fake_snapshot_result)
+    monkeypatch.setattr(mcp_server, "_snapshot_result", fake_snapshot_result)
     monkeypatch.setattr(mcp_server, "_write_text_file", lambda path, content: path)
 
-    result = mcp_server.snapshot(connection="demo", depth=4, save_to="snapshot.txt")
+    result = mcp_server.snapshot(depth=4, save_to="snapshot.txt")
 
-    assert captured["kwargs"] == {"snapshot_target": None, "depth": 4, "window_wid": 11}
+    assert captured["kwargs"] == {"target": None, "depth": 4}
     assert result["ok"] is True
     assert result["window"]["wid"] == 11
     assert result["save_to"] == "snapshot.txt"
@@ -542,7 +446,7 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
 
 def test_inspect_without_target_returns_active_window_tree(monkeypatch):
     state = mcp_server.ServerState()
-    state.connections["demo"] = mcp_server.ManagedConnection(
+    state.connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
         app=FakeApp([FakeWindow(11, "Main")]),
@@ -560,7 +464,7 @@ def test_inspect_without_target_returns_active_window_tree(monkeypatch):
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
     monkeypatch.setattr(mcp_server, "_widget_tree_raw", fake_widget_tree_raw)
 
-    result = mcp_server.inspect(connection="demo", depth=6)
+    result = mcp_server.inspect(depth=6)
 
     assert captured["kwargs"] == {"max_depth": 6, "window_wid": 11}
     assert result == {
@@ -586,16 +490,6 @@ def test_inspect_locator_handles_empty_and_present_results():
     assert with_methods["methods"][0]["name"] == "setAmount"
 
 
-def test_locator_methods_returns_first_match_methods():
-    methods = mcp_server._locator_methods(FakeLocator(count=1))
-
-    assert methods[0]["args"][0]["name"] == "value"
-    assert methods[0]["returnType"] == "QVariant"
-
-    with pytest.raises(ValueError, match="No widget found for method introspection"):
-        mcp_server._locator_methods(FakeLocator(count=0))
-
-
 def test_invoke_locator_method_uses_first_match():
     result = mcp_server._invoke_locator_method(
         FakeLocator(count=1),
@@ -608,7 +502,7 @@ def test_invoke_locator_method_uses_first_match():
         "args": {"value": "88.00"},
     }
 
-    with pytest.raises(ValueError, match="No widget found for invoke.*#objectName"):
+    with pytest.raises(ValueError, match="No widget found for invoke.*snapshot or inspect"):
         mcp_server._invoke_locator_method(FakeLocator(count=0), method_name="setAmount")
 
 
@@ -639,12 +533,12 @@ def test_wait_can_include_snapshot(monkeypatch):
     )
     locator = FakeLocator(count=1)
 
-    monkeypatch.setattr(mcp_server, "_get_connection", lambda state, name: connection)
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
     monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
     monkeypatch.setattr(
         mcp_server,
         "_window_summary",
-        lambda managed_connection: [{"wid": 11, "title": "Main", "class": "DemoWindow", "index": 0, "width": 640, "height": 720}],
+        lambda managed_connection: [{"wid": 11, "title": "Main", "class": "DemoWindow", "index": 0, "width": 640, "height": 720, "is_active": True, "is_modal": False}],
     )
     monkeypatch.setattr(
         mcp_server,
@@ -652,13 +546,7 @@ def test_wait_can_include_snapshot(monkeypatch):
         lambda managed_connection, **payload: payload | {"snapshot": "- DemoWindow [ref=e1]", "refs": [{"ref": "e1"}]},
     )
 
-    result = mcp_server.wait(
-        target="#status_label",
-        connection="demo",
-        state="visible",
-        timeout=5.0,
-        include_snapshot=True,
-    )
+    result = mcp_server.wait(target="#status_label", state="visible", timeout=5.0, include_snapshot=True)
 
     assert locator.wait_calls == [{"state": "visible", "timeout": 5.0}]
     assert result["ok"] is True
@@ -669,95 +557,20 @@ def test_wait_can_include_snapshot(monkeypatch):
     assert result["refs"] == [{"ref": "e1"}]
 
 
-def test_browser_wait_for_time_can_include_snapshot(monkeypatch):
-    connection = mcp_server.ManagedConnection(
-        name="demo",
-        qplaywright=FakeQPlaywright(),
-        app=FakeApp([]),
-        host="127.0.0.1",
-        port=19876,
-        timeout=30.0,
-    )
-
-    monkeypatch.setattr(mcp_server, "_get_connection", lambda state, name: connection)
-    monkeypatch.setattr(
-        mcp_server,
-        "_action_result_with_snapshot",
-        lambda managed_connection, **payload: payload | {"snapshot": "- DemoWindow [ref=e1]", "refs": [{"ref": "e1"}]},
-    )
-
-    result = mcp_server.browser_wait_for(connection="demo", time=0, include_snapshot=True)
-
-    assert result["ok"] is True
-    assert result["waited"] == 0
-    assert result["snapshot"] == "- DemoWindow [ref=e1]"
-    assert result["refs"] == [{"ref": "e1"}]
-
-
 @pytest.mark.parametrize(
     ("tool_name", "call_kwargs", "expected_calls", "expected_payload"),
     [
         ("click", {"target": "#submit", "include_snapshot": True}, [("click", {})], {"target": "#submit", "count": 1}),
-        (
-            "click",
-            {"target": "#submit", "count": 2, "include_snapshot": True},
-            [("dblclick", {})],
-            {"target": "#submit", "count": 2},
-        ),
-        (
-            "input",
-            {"target": "#amount", "text": "123.45", "include_snapshot": True},
-            [("fill", {"value": "123.45"})],
-            {"target": "#amount", "text": "123.45", "mode": "replace", "delay": 0, "submitted": False},
-        ),
-        (
-            "invoke",
-            {"target": "#amount", "method": "setAmount", "args": {"value": "88.00"}, "include_snapshot": True},
-            [("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}})],
-            {"target": "#amount", "method": "setAmount", "args": {"value": "88.00"}},
-        ),
-        (
-            "input",
-            {"target": "#amount", "text": "abc", "mode": "append", "delay": 25, "submit": True, "include_snapshot": True},
-            [("type", {"text": "abc", "delay": 25}), ("press", {"key": "Enter"})],
-            {"target": "#amount", "text": "abc", "mode": "append", "delay": 25, "submitted": True},
-        ),
-        (
-            "press_key",
-            {"target": "#amount", "key": "Enter", "include_snapshot": True},
-            [("press", {"key": "Enter"})],
-            {"target": "#amount", "key": "Enter"},
-        ),
-        (
-            "set_checked",
-            {"target": "#remember", "checked": True, "include_snapshot": True},
-            [("check", {})],
-            {"target": "#remember", "checked": True},
-        ),
-        (
-            "set_checked",
-            {"target": "#remember", "checked": False, "include_snapshot": True},
-            [("uncheck", {})],
-            {"target": "#remember", "checked": False},
-        ),
-        (
-            "choose",
-            {"target": "#currency", "label": "CNY", "include_snapshot": True},
-            [("select_option", {"value": None, "index": None, "label": "CNY"})],
-            {"target": "#currency", "label": "CNY", "value": None, "index": None},
-        ),
-        (
-            "hover",
-            {"target": "#item", "include_snapshot": True},
-            [("hover", {})],
-            {"target": "#item"},
-        ),
-        (
-            "scroll",
-            {"target": "#item", "delta_x": 5, "delta_y": 10, "include_snapshot": True},
-            [("scroll", {"delta_x": 5, "delta_y": 10})],
-            {"target": "#item", "delta_x": 5, "delta_y": 10},
-        ),
+        ("click", {"target": "#submit", "count": 2, "include_snapshot": True}, [("dblclick", {})], {"target": "#submit", "count": 2}),
+        ("input", {"target": "#amount", "text": "123.45", "include_snapshot": True}, [("fill", {"value": "123.45"})], {"target": "#amount", "text": "123.45", "mode": "replace", "delay": 0, "submitted": False}),
+        ("invoke", {"target": "#amount", "method": "setAmount", "args": {"value": "88.00"}, "include_snapshot": True}, [("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}})], {"target": "#amount", "method": "setAmount", "args": {"value": "88.00"}}),
+        ("input", {"target": "#amount", "text": "abc", "mode": "append", "delay": 25, "submit": True, "include_snapshot": True}, [("type", {"text": "abc", "delay": 25}), ("press", {"key": "Enter"})], {"target": "#amount", "text": "abc", "mode": "append", "delay": 25, "submitted": True}),
+        ("press_key", {"target": "#amount", "key": "Enter", "include_snapshot": True}, [("press", {"key": "Enter"})], {"target": "#amount", "key": "Enter"}),
+        ("set_checked", {"target": "#remember", "checked": True, "include_snapshot": True}, [("check", {})], {"target": "#remember", "checked": True}),
+        ("set_checked", {"target": "#remember", "checked": False, "include_snapshot": True}, [("uncheck", {})], {"target": "#remember", "checked": False}),
+        ("choose", {"target": "#currency", "label": "CNY", "include_snapshot": True}, [("select_option", {"value": None, "index": None, "label": "CNY"})], {"target": "#currency", "label": "CNY", "value": None, "index": None}),
+        ("hover", {"target": "#item", "include_snapshot": True}, [("hover", {})], {"target": "#item"}),
+        ("scroll", {"target": "#item", "delta_x": 5, "delta_y": 10, "include_snapshot": True}, [("scroll", {"delta_x": 5, "delta_y": 10})], {"target": "#item", "delta_x": 5, "delta_y": 10}),
     ],
 )
 def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_kwargs, expected_calls, expected_payload):
@@ -772,12 +585,12 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
     )
     locator = FakeLocator(count=1)
 
-    monkeypatch.setattr(mcp_server, "_get_connection", lambda state, name: connection)
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
     monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
     monkeypatch.setattr(
         mcp_server,
         "_window_summary",
-        lambda managed_connection: [{"wid": 11, "title": "Main", "class": "DemoWindow", "index": 0, "width": 640, "height": 720}],
+        lambda managed_connection: [{"wid": 11, "title": "Main", "class": "DemoWindow", "index": 0, "width": 640, "height": 720, "is_active": True, "is_modal": False}],
     )
     monkeypatch.setattr(
         mcp_server,
@@ -785,7 +598,7 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
         lambda managed_connection, **payload: payload | {"snapshot": "- DemoWindow [ref=e1]", "refs": [{"ref": "e1"}]},
     )
 
-    result = getattr(mcp_server, tool_name)(connection="demo", **call_kwargs)
+    result = getattr(mcp_server, tool_name)(**call_kwargs)
 
     assert locator.action_calls == expected_calls
     assert result["ok"] is True
@@ -812,11 +625,11 @@ def test_finalize_action_result_switches_active_window_and_uses_window_snapshot(
     monkeypatch.setattr(
         mcp_server,
         "_window_summary",
-        lambda managed_connection: [{"wid": 22, "title": "Dialog", "class": "QDialog", "index": 0, "width": 480, "height": 320}],
+        lambda managed_connection: [{"wid": 22, "title": "Dialog", "class": "QDialog", "index": 0, "width": 480, "height": 320, "is_active": True, "is_modal": False}],
     )
 
-    def fake_action_result_with_snapshot(managed_connection, *, snapshot_target=None, **payload):
-        captured["snapshot_target"] = snapshot_target
+    def fake_action_result_with_snapshot(managed_connection, *, target=None, **payload):
+        captured["target"] = target
         return payload | {"snapshot": "- QDialog [ref=e1]", "refs": [{"ref": "e1"}]}
 
     monkeypatch.setattr(mcp_server, "_action_result_with_snapshot", fake_action_result_with_snapshot)
@@ -832,7 +645,7 @@ def test_finalize_action_result_switches_active_window_and_uses_window_snapshot(
     assert result["window_changed"] is True
     assert result["active_window"]["wid"] == 22
     assert connection.active_window_wid == 22
-    assert captured["snapshot_target"] is None
+    assert captured["target"] is None
 
 
 def test_configure_stdio_for_mcp_reconfigures_utf8_streams(monkeypatch):
@@ -874,7 +687,7 @@ def test_configure_stdio_for_mcp_skips_non_stdio(monkeypatch):
     assert fake_stdout.calls == []
 
 
-def test_initialize_active_window_uses_first_visible_window(monkeypatch):
+def test_initialize_active_window_uses_first_visible_window():
     first = FakeWindow(11, "First")
     second = FakeWindow(22, "Second")
     connection = mcp_server.ManagedConnection(
@@ -890,25 +703,7 @@ def test_initialize_active_window_uses_first_visible_window(monkeypatch):
 
     assert connection.active_window_wid == 11
     assert windows[0]["wid"] == 11
-
-
-def test_browser_tabs_markdown_marks_current_window():
-    first = FakeWindow(11, "First")
-    second = FakeWindow(22, "Second")
-    connection = mcp_server.ManagedConnection(
-        name="demo",
-        qplaywright=FakeQPlaywright(),
-        app=FakeApp([first, second]),
-        host="127.0.0.1",
-        port=19876,
-        timeout=30.0,
-        active_window_wid=22,
-    )
-
-    listing = mcp_server._browser_tabs_markdown(connection)
-
-    assert "- 0: [First](qt://window/11)" in listing
-    assert "- 1: (current) [Second](qt://window/22)" in listing
+    assert windows[0]["is_active"] is True
 
 
 def test_format_widget_snapshot_includes_selector_hints():
@@ -964,39 +759,6 @@ def test_snapshot_payload_creates_stable_refs():
     assert connection.snapshot_refs == {"e1": 1, "e2": 2}
     assert payload["refs"][1]["target"] == "#login_btn"
 
-    second_payload = mcp_server._snapshot_payload(
-        connection,
-        [
-            {
-                "wid": 3,
-                "class": "QComboBoxPrivateContainer",
-                "objectName": "",
-                "text": "",
-                "children": [],
-            },
-            {
-                "wid": 1,
-                "class": "DemoWindow",
-                "objectName": "",
-                "text": "Title",
-                "children": [
-                    {
-                        "wid": 2,
-                        "class": "QPushButton",
-                        "objectName": "login_btn",
-                        "text": "Login",
-                        "children": [],
-                    }
-                ],
-            },
-        ],
-    )
-
-    refs_by_wid = {entry["wid"]: entry["ref"] for entry in second_payload["refs"]}
-    assert refs_by_wid[1] == "e1"
-    assert refs_by_wid[2] == "e2"
-    assert refs_by_wid[3] == "e3"
-
 
 def test_snapshot_payload_preserves_existing_ref_bindings():
     connection = mcp_server.ManagedConnection(
@@ -1045,15 +807,15 @@ def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
 def test_run_cli_invokes_tool_and_prints_json(monkeypatch, capsys):
     monkeypatch.setattr(
         mcp_server,
-        "connect",
-        lambda name="default", port=19876, **_: {"ok": True, "name": name, "port": port},
+        "session",
+        lambda action="status", port=19876, **_: {"ok": True, "action": action, "port": port},
     )
 
-    exit_code = mcp_server._run_cli(["connect", '{"name": "probe", "port": 19877}'])
+    exit_code = mcp_server._run_cli(["session", '{"action": "attach", "port": 19877}'])
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload == {"ok": True, "name": "probe", "port": 19877}
+    assert payload == {"ok": True, "action": "attach", "port": 19877}
 
 
 def test_main_cli_dispatches_to_cli_runner(monkeypatch):
@@ -1066,10 +828,10 @@ def test_main_cli_dispatches_to_cli_runner(monkeypatch):
     monkeypatch.setattr(mcp_server, "_run_cli", fake_run_cli)
 
     with pytest.raises(SystemExit) as exc_info:
-        mcp_server.main(["cli", "list_windows", '{"connection": "probe"}'])
+        mcp_server.main(["cli", "window", '{"action": "list"}'])
 
     assert exc_info.value.code == 0
-    assert called["argv"] == ["list_windows", '{"connection": "probe"}']
+    assert called["argv"] == ["window", '{"action": "list"}']
 
 
 def test_main_serve_mode_keeps_existing_transport_flow(monkeypatch):
@@ -1098,7 +860,7 @@ def test_screenshot_clip_kwargs_validates_required_fields():
         mcp_server._screenshot_clip_kwargs(x=-1, y=2, width=3, height=4)
 
 
-def test_browser_target_params_accept_snapshot_ref():
+def test_target_params_accept_snapshot_ref():
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -1109,7 +871,7 @@ def test_browser_target_params_accept_snapshot_ref():
         snapshot_refs={"e2": 42},
     )
 
-    params = mcp_server._browser_target_params(connection, "e2")
+    params = mcp_server._target_params(connection, "e2")
 
     assert params == {"wid": 42}
 
@@ -1126,24 +888,22 @@ def test_action_result_with_snapshot_merges_payload(monkeypatch):
 
     monkeypatch.setattr(
         mcp_server,
-        "_compat_snapshot_result",
+        "_snapshot_result",
         lambda managed_connection, **kwargs: {"snapshot": "- item [ref=e1]", "refs": [{"ref": "e1"}]},
     )
 
     result = mcp_server._action_result_with_snapshot(
         connection,
-        snapshot_target="e1",
+        target="e1",
         ok=True,
-        connection="demo",
     )
 
     assert result["ok"] is True
-    assert result["connection"] == "demo"
     assert result["snapshot"] == "- item [ref=e1]"
     assert result["refs"] == [{"ref": "e1"}]
 
 
-def test_widget_tree_raw_includes_optional_window_wid(monkeypatch):
+def test_widget_tree_raw_includes_optional_window_wid():
     captured = {}
 
     class FakeConn:
@@ -1167,7 +927,7 @@ def test_widget_tree_raw_includes_optional_window_wid(monkeypatch):
     assert captured == {"method": mcp_server.METHOD_WIDGET_TREE, "params": {"max_depth": 4, "wid": 12}}
 
 
-def test_compat_snapshot_result_scopes_to_explicit_window(monkeypatch):
+def test_snapshot_result_scopes_to_active_window(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -1175,17 +935,19 @@ def test_compat_snapshot_result_scopes_to_explicit_window(monkeypatch):
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
-        active_window_wid=11,
+        active_window_wid=22,
     )
+    captured = {}
 
-    monkeypatch.setattr(
-        mcp_server,
-        "_widget_tree_raw",
-        lambda managed_connection, **kwargs: [{"wid": kwargs.get("window_wid"), "class": "DialogWindow", "objectName": "", "text": "Dialog", "children": []}],
-    )
+    def fake_widget_tree_raw(managed_connection, **kwargs):
+        captured["kwargs"] = kwargs
+        return [{"wid": 22, "class": "DialogWindow", "objectName": "", "text": "Dialog", "children": []}]
 
-    payload = mcp_server._compat_snapshot_result(connection, depth=3, window_index=1)
+    monkeypatch.setattr(mcp_server, "_widget_tree_raw", fake_widget_tree_raw)
 
+    payload = mcp_server._snapshot_result(connection, depth=3)
+
+    assert captured["kwargs"] == {"max_depth": 3, "window_wid": 22}
     assert 'DialogWindow "Dialog"' in payload["snapshot"]
     assert payload["refs"][0]["wid"] == 22
 
@@ -1204,7 +966,7 @@ def test_target_not_found_message_suggests_refresh_for_missing_snapshot_ref():
     message = mcp_server._target_not_found_message(connection, "e9")
 
     assert "Snapshot ref 'e9' is not available" in message
-    assert "Run browser_snapshot to refresh refs" in message
+    assert "Run snapshot to refresh refs" in message
 
 
 def test_target_not_found_message_includes_selector_examples():
@@ -1220,5 +982,5 @@ def test_target_not_found_message_includes_selector_examples():
     message = mcp_server._target_not_found_message(connection, "#missing_btn")
 
     assert "No widget found for target '#missing_btn'" in message
-    assert "widget_tree, or inspect_widget" in message
+    assert "snapshot or inspect" in message
     assert "#objectName, role=button, text=Submit, has-text=partial, .QLabel" in message

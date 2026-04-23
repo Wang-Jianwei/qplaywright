@@ -4,6 +4,9 @@ QPlaywright can run as an MCP server on top of the existing Python sync client.
 The Qt-side integration does not change: your target app still embeds the
 qplaywright agent and exposes the same TCP protocol.
 
+本文件描述当前已经落地的终态 MCP 接口。
+不再讨论兼容层、过渡别名或 playwright-mcp 风格工具。
+
 ## Install
 
 ```bash
@@ -40,10 +43,10 @@ qplaywright-mcp cli
 Inside the REPL, use one tool call per line:
 
 ```text
-qplaywright> session {"action": "attach", "connection": "probe", "port": 19877}
-qplaywright> window {"action": "list", "connection": "probe"}
-qplaywright> snapshot {"connection": "probe", "depth": 4}
-qplaywright> click {"connection": "probe", "target": "text=Start"}
+qplaywright> session {"action": "attach", "port": 19877}
+qplaywright> window {"action": "list"}
+qplaywright> snapshot {"depth": 4}
+qplaywright> click {"target": "text=Start"}
 qplaywright> exit
 ```
 
@@ -56,17 +59,17 @@ Useful REPL meta commands:
 You can also execute one tool directly without entering the REPL:
 
 ```bash
-qplaywright-mcp cli snapshot '{"connection": "probe", "depth": 4}'
+qplaywright-mcp cli snapshot '{"depth": 4}'
 ```
 
 ## Typical Tool Flow
 
 1. `session` with `action="attach"` or `action="launch"` to establish the active session.
-2. `window` with `action="list"` to discover the target top-level window.
-3. `snapshot` or `inspect` to understand the current UI. When multiple top-level windows are visible, use `window` with `action="select"` first.
-4. Use action tools like `click`, `input`, `set_checked`,
-   `press_key`, `scroll`, `choose`, `wait`, and `screenshot`.
-5. `session` with `action="close"` when finished.
+2. `window` with `action="list"` to discover visible top-level windows.
+3. `window` with `action="select"` when the desired scope is not the current active window.
+4. `snapshot` or `inspect` to understand the current UI and obtain stable refs.
+5. Use action tools like `click`, `input`, `invoke`, `set_checked`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and `screenshot`.
+6. `session` with `action="close"` when finished.
 
 ## Exposed MCP Interfaces
 
@@ -83,13 +86,7 @@ The server can be exposed through:
 - `stdio`
 - `streamable-http`
 
-### Native qplaywright Tools
-
-These are the primary MCP tools backed directly by the qplaywright sync client:
-
-Preferred end-state entry points are `session`, `window`, `snapshot`, and `inspect`.
-Older native tools such as `connect`, `launch`, `disconnect`, `list_windows`,
-`resize_window`, and `close_window` remain available as transitional aliases.
+### Tool Surface
 
 | Tool | Purpose |
 | --- | --- |
@@ -97,192 +94,186 @@ Older native tools such as `connect`, `launch`, `disconnect`, `list_windows`,
 | `window` | List, select, resize, or close one top-level Qt window |
 | `snapshot` | Return a text snapshot and stable refs for the active window or one target |
 | `inspect` | Inspect one target or return the active window widget tree in debug mode |
-| `connect` | Connect to a running Qt app that already embedded the qplaywright agent |
-| `launch` | Launch a Qt executable with agent support and connect to it |
-| `disconnect` | Close one MCP-managed connection |
-| `list_live_connections` | List all live connections tracked by the MCP server |
-| `list_windows` | List visible top-level windows |
-| `widget_tree` | Return the current visible widget tree |
-| `inspect_widget` | Inspect target match state such as text, value, visibility, checked state, and optional methods |
-| `get_widget_methods` | Return custom widget method metadata from `qplaywrightClassMetadata` |
 | `click` | Click or double-click the first matched widget |
 | `input` | Replace or append text, optionally submitting with Enter |
 | `invoke` | Invoke one exposed custom widget method by exact name |
 | `press_key` | Send one key press to the matched widget |
-| `scroll` | Send a mouse wheel scroll event to the matched widget |
 | `set_checked` | Check or uncheck the matched widget |
 | `choose` | Select one combobox option by `value`, `index`, or `label` |
 | `wait` | Wait until a widget reaches a supported state |
-| `screenshot` | Capture a screenshot of a window or matched widget |
-| `resize_window` | Resize a top-level window |
-| `close_window` | Close a top-level window |
+| `screenshot` | Capture a screenshot of the active window or a matched widget |
 | `hover` | Hover over the first matched widget |
+| `scroll` | Send a mouse wheel scroll event to the matched widget |
 
-### Legacy Native Aliases
+## Core Model
 
-These legacy native tools still exist, but they now delegate to the newer
-resource-style tools where possible:
+### Single Active Session
 
-- `connect` and `launch` delegate to `session`
-- `disconnect` delegates to `session` with `action="close"`
-- `list_windows`, `resize_window`, and `close_window` delegate to `window`
+One MCP server instance manages one active qplaywright session.
+There is no per-tool `connection` routing anymore.
+If you need to automate multiple targets in parallel, start multiple MCP server instances.
 
-### playwright-mcp Compatibility Tools
+### Single Active Window Scope
 
-These tools provide a compatibility subset for hosts that expect playwright-mcp
-style names and iterative snapshot-driven interaction:
+Most tools operate inside the current active window scope.
+Use `window` with `action="select"` to change that scope explicitly.
+After actions, the server updates the active window tracking automatically.
 
-| Tool | Purpose |
-| --- | --- |
-| `browser_click` | Click a widget using `target` or a snapshot ref |
-| `browser_close` | Close the current top-level Qt window |
-| `browser_fill_form` | Fill multiple fields in one call |
-| `browser_hover` | Hover over a widget |
-| `browser_press_key` | Press a key on a widget |
-| `browser_resize` | Resize the current window |
-| `browser_select_option` | Select one combobox option |
-| `browser_snapshot` | Return a text snapshot of the widget tree or a targeted widget |
-| `browser_tabs` | List, select, or close top-level Qt windows through a tabs-like API |
-| `browser_take_screenshot` | Capture a screenshot of the current window or a targeted widget |
-| `browser_type` | Fill or type into an editable widget and optionally submit |
-| `browser_wait_for` | Wait by time or wait for text to appear or disappear in the snapshot |
-| `browser_verify_element_visible` | Assert that a visible widget exists for a role plus accessible/displayed name |
-| `browser_verify_text_visible` | Assert that a text fragment is visible in the current snapshot |
-| `browser_verify_value` | Assert the current widget value equals the expected value |
+### Unified Target
 
-### Current Compatibility Constraints
+Widget-oriented tools accept a single `target` value.
+That value may be either:
 
-The compatibility layer is intentionally narrow where QWidget semantics do not
-cleanly match browser semantics:
+- a qplaywright selector such as `#amount_editor`, `role=button`, `text=Submit`, or `.QLabel`
+- a snapshot ref such as `e12`
 
-- `browser_click` currently supports left click only
-- `browser_click` does not support modifier-assisted clicks yet
-- `browser_tabs` supports `list`, `select`, and `close`, but not `new`
-- `browser_select_option` currently supports selecting one value at a time
-- `browser_take_screenshot` does not distinguish viewport and full-page capture
-- DOM, network, cookies, storage, JS evaluation, DevTools, PDF, and vision-style browser tools are not exposed
+### Optional Post-Action Observation
 
-## Common Parameters And Return Shapes
+Action tools support `include_snapshot=false` by default.
+When `include_snapshot=true`, the response also includes:
 
-### Common Native Target Parameters
+- `window_changed`
+- `active_window`
+- `snapshot`
+- `refs`
 
-Most native widget-oriented tools share the same target scope parameters:
+## Tool Details
 
-| Parameter | Meaning |
-| --- | --- |
-| `connection` | MCP-side connection name, default is `default` |
-| `target` | qplaywright selector such as `#login_btn`, `role=button`, or `.QLabel`, or a snapshot ref such as `e12` |
-| `has_text` | Optional text filter applied after target resolution when `target` is a selector |
-| `nth` | Optional zero-based match index inside the selected window scope |
-| `window_wid` | Resolve inside a specific top-level window wid |
-| `window_title` | Resolve inside the first window whose title contains this text |
-| `window_index` | Explicit zero-based top-level window index; when provided it overrides the current active window |
+### session
 
-Window scope precedence is `window_wid` -> `window_title` -> `window_index` -> current active window -> first visible window.
-`nth` is applied only after the window scope has been resolved.
-
-### Common Compatibility Parameters
-
-Most playwright-mcp compatibility tools use these fields:
-
-| Parameter | Meaning |
-| --- | --- |
-| `connection` | MCP-side connection name, default is `default` |
-| `target` | qplaywright selector or a snapshot ref such as `e12` |
-| `element` | Human-friendly fallback selector text when `target` is omitted |
-| `filename` | Optional output path for text snapshots or screenshots |
-
-### Native Tool Details
-
-| Tool | Main parameters | Key return fields |
-| --- | --- | --- |
-| `session` | `action`, optional `connection`, plus attach/launch parameters such as `host`, `port`, `timeout`, `executable`, `args` | `ok`, `action`, and usually `session`, optional `active_window`, or `closed` for `action="close"` |
-| `window` | `action`, optional `connection`, optional one of `wid`, `title`, `index`, plus `width`, `height` for `action="resize"` | `ok`, `action`, and either `windows`, `active_window`, or `refs_cleared` depending on the action |
-| `snapshot` | optional `connection`, optional `target`, plus `depth`, `save_to` | `ok`, `session`, `window`, `target`, `snapshot`, `refs`, optional `save_to` |
-| `inspect` | optional `connection`, optional `target`, plus `property`, `include_methods`, `depth` | target mode returns `ok`, `target`, `exists`, `count`, widget state fields; debug mode returns `ok`, `target=null`, `depth`, `tree` |
-| `connect` | `name`, `host`, `port`, `timeout` | `connection`, `current_window_wid`, `windows`, `replaced` |
-| `launch` | `executable`, `args`, `name`, `host`, `port`, `timeout` | `connection`, `launched_executable`, `current_window_wid`, `windows`, `replaced` |
-| `disconnect` | `name` | `connection`, `closed`, `launched_executable` |
-| `list_live_connections` | none | list entries with `connection`, `host`, `port`, `timeout`, `launched_executable`, `window_count` |
-| `list_windows` | `connection` | list entries with `index`, `wid`, `title`, `class`, `width`, `height` |
-| `widget_tree` | `connection`, `max_depth`, optional `window_wid` or `window_title` or `window_index` | widget tree nodes including `wid`, `class`, `text`, `objectName`, `children` |
-| `inspect_widget` | common native target params, plus `property_name`, `include_methods` | `exists`, `count`, `target`, and when found: `text`, `value`, `is_visible`, `is_enabled`, `is_checked`, `bounding_box`, optional `methods` |
-| `get_widget_methods` | common native target params | `connection`, `target`, `methods` where each method includes `name`, `args`, `returnType`, `brief` |
-| `click` | common native target params, plus `count`, `include_snapshot` | `ok`, `target`, `count`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
-| `input` | common native target params, plus `text`, `mode`, `delay`, `submit`, `include_snapshot` | `ok`, `target`, `text`, `mode`, `delay`, `submitted`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
-| `invoke` | common native target params, plus `method`, `args`, `include_snapshot` | `ok`, `target`, `method`, `args`, `result`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
-| `press_key` | common native target params, plus `key`, `include_snapshot` | `ok`, `target`, `key`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
-| `scroll` | common native target params, plus `delta_x`, `delta_y`, `include_snapshot` | `ok`, `target`, `delta_x`, `delta_y`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
-| `set_checked` | common native target params, plus `checked`, `include_snapshot` | `ok`, `target`, `checked`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
-| `choose` | common native target params, plus exactly one of `value`, `index`, `label`, `include_snapshot` | `ok`, `target`, `value`, `index`, `label`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
-| `wait` | common native target params, plus `state`, `timeout`, `include_snapshot` | `ok`, `target`, `state`, `timeout`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
-| `screenshot` | `connection`, optional common native target params, plus `path` and optional `x`, `y`, `width`, `height` clip rectangle | screenshot payload from qplaywright, plus `connection`, `target` |
-| `resize_window` | `width`, `height`, `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `width`, `height`, `connection` |
-| `close_window` | `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `connection`, `window_wid` |
-| `hover` | common native target params, plus `include_snapshot` | `ok`, `target`, `connection`, optional `snapshot`, `refs` |
-
-### Native Invoke Result Shape
-
-`invoke` wraps the underlying widget method result in `result`.
-For method-only custom widgets, the common shape is:
+Request:
 
 ```json
 {
-  "ok": true,
-  "connection": "demo",
-  "target": "#amount_editor",
-  "active_window": {
-    "wid": 1,
-    "title": "QPlaywright Demo App",
-    "class": "DemoWindow",
-    "index": 0,
-    "width": 640,
-    "height": 720,
-    "is_active": true
-  },
-  "window_changed": false,
-  "method": "amount",
-  "args": {},
-  "result": {
-    "ok": true,
-    "value": "123.45",
-    "errorCode": 0,
-    "errorMessage": ""
-  }
+  "action": "attach",
+  "port": 19876,
+  "host": "127.0.0.1",
+  "timeout": 30.0
 }
 ```
 
-### Compatibility Tool Details
+Supported actions:
 
-| Tool | Main parameters | Key return fields |
-| --- | --- | --- |
-| `browser_click` | `target`, `connection`, `element`, `doubleClick`, `button`, `modifiers` | `ok`, `target`, `doubleClick`, plus fresh `snapshot` and `refs` |
-| `browser_close` | `connection` | `ok`, `window_wid`, `remaining_windows` |
-| `browser_fill_form` | `fields`, `connection` | `result`, `fields`, plus fresh `snapshot` and `refs` |
-| `browser_hover` | `target`, `connection`, `element` | `ok`, `target`, plus fresh `snapshot` and `refs` |
-| `browser_press_key` | `key`, `connection`, `target`, `element` | `ok`, `target`, `key`, plus fresh `snapshot` and `refs` |
-| `browser_resize` | `width`, `height`, `connection` | `ok`, `width`, `height`, `connection` |
-| `browser_select_option` | `target`, `values`, `connection`, `element` | `ok`, `target`, `value`, plus fresh `snapshot` and `refs` |
-| `browser_snapshot` | `connection`, `target`, `filename`, `depth`, optional `window_wid` or `window_title` or `window_index` when `target` is omitted | `snapshot`, `refs`, optional `path`, plus `connection`, `target` |
-| `browser_tabs` | `action`, `connection`, optional `index`, unused `url` placeholder | `result`, plus `windows`, and sometimes `selected` or `closed` |
-| `browser_take_screenshot` | `connection`, `element`, `target`, `type`, `filename`, `fullPage`, optional `x`, `y`, `width`, `height` clip rectangle | screenshot payload with `path`, `width`, `height`, plus `connection`, `selector` |
-| `browser_type` | `target`, `text`, `connection`, `element`, `submit`, `slowly` | `ok`, `target`, `text`, `slowly`, optional `submitted`, plus fresh `snapshot` and `refs` |
-| `browser_wait_for` | `connection`, one of `time`, `text`, `textGone`, plus `timeout`, optional `include_snapshot` | `ok`, and either `waited` or the waited text fields, optional `snapshot`, `refs` |
-| `browser_verify_element_visible` | `role`, `accessibleName`, `connection` | `ok`, `role`, `accessibleName`, `snapshot` |
-| `browser_verify_text_visible` | `text`, `connection` | `ok`, `text`, `snapshot`, `refs` |
-| `browser_verify_value` | `type`, `element`, `target`, `value`, `connection` | `ok`, `expected`, `actual`, `target`, plus fresh `snapshot` and `refs` |
+- `attach`
+- `launch`
+- `status`
+- `close`
 
-### Snapshot Ref Workflow
+`launch` additionally accepts:
 
-`browser_snapshot` returns stable refs such as `e1`, `e2`, `e3` within the same
-live connection. Those refs can be fed back into tools like `browser_click`,
-`browser_type`, `browser_select_option`, and `browser_take_screenshot` without
-re-resolving the original selector.
+```json
+{
+  "action": "launch",
+  "executable": "D:/path/to/app.exe",
+  "args": []
+}
+```
 
-When you pass `x`, `y`, `width`, and `height` to `screenshot` or `browser_take_screenshot`,
-the rectangle is interpreted relative to the selected window or widget.
+### window
 
-When you only need one top-level window, prefer passing `window_wid`, `window_title`, or `window_index` to `widget_tree` or `browser_snapshot`. This reduces snapshot cost by avoiding traversal of unrelated visible windows, while keeping the target Qt application stateless from the MCP side.
+Request:
+
+```json
+{
+  "action": "select",
+  "index": 1
+}
+```
+
+Supported actions:
+
+- `list`
+- `select`
+- `resize`
+- `close`
+
+Selection fields:
+
+- `wid`
+- `title`
+- `index`
+
+Resize also requires:
+
+- `width`
+- `height`
+
+### snapshot
+
+Request:
+
+```json
+{
+  "target": null,
+  "depth": 10,
+  "save_to": "snapshot.txt"
+}
+```
+
+Response includes:
+
+- `session`
+- `window`
+- `target`
+- `snapshot`
+- `refs`
+- optional `save_to`
+
+### inspect
+
+Request:
+
+```json
+{
+  "target": "#amount_editor",
+  "include_methods": true,
+  "property": "placeholderText"
+}
+```
+
+When `target` is omitted, `inspect` returns the active window tree in debug mode.
+When `target` is provided, `inspect` returns widget state and optional method metadata.
+
+### Action Tools
+
+Common action request shape:
+
+```json
+{
+  "target": "e12",
+  "include_snapshot": true
+}
+```
+
+Tool-specific fields:
+
+- `click`: optional `count`
+- `input`: `text`, optional `mode`, `delay`, `submit`
+- `invoke`: `method`, optional `args`
+- `press_key`: `key`
+- `set_checked`: `checked`
+- `choose`: exactly one of `value`, `index`, or `label`
+- `wait`: optional `state`, `timeout`
+- `hover`: no extra fields
+- `scroll`: optional `delta_x`, `delta_y`
+
+### screenshot
+
+Request:
+
+```json
+{
+  "target": "#chart_view",
+  "path": "chart.png",
+  "x": 10,
+  "y": 20,
+  "width": 300,
+  "height": 200
+}
+```
+
+When `target` is omitted, the current active window is captured.
+When clipping fields are provided, all of `x`, `y`, `width`, and `height` must be present.
 
 ## End-to-End Demo
 
@@ -324,50 +315,3 @@ Supported selectors match the existing qplaywright syntax:
 - `#objectName`
 - `name=objectName`
 - `.QLabel`
-
-## Playwright MCP Compatibility
-
-QPlaywright now exposes a compatibility subset using playwright-mcp style tool
-names for the overlap that makes sense in a Qt widget application.
-
-Important differences from browser automation:
-
-- `target` expects a qplaywright selector such as `#login_btn` or `role=button`.
-- `browser_snapshot` now returns stable snapshot refs such as `e1`, `e2`. These
-  refs can be passed back into `browser_click`, `browser_type`,
-  `browser_select_option`, `browser_take_screenshot`, and other compatibility
-  tools on the same live connection.
-- `browser_click`, `browser_fill_form`, `browser_hover`, `browser_press_key`,
-  `browser_select_option`, and `browser_type` now return a fresh snapshot after
-  the action, which is closer to playwright-mcp's iterative tool loop.
-- `browser_tabs` is backed by top-level Qt windows, not browser tabs.
-- Actions tied to web navigation, network inspection, DOM evaluation, cookies,
-  storage, DevTools, PDF, or coordinate-based vision tools are intentionally not
-  exposed because they do not map cleanly to a QWidget application.
-
-## Playwright-Style Demo
-
-You can also run the compatibility layer against the sample Qt app:
-
-```bash
-python examples/test_playwright_mcp_compat.py
-```
-
-## Claude Desktop Example
-
-```json
-{
-  "mcpServers": {
-    "qplaywright": {
-      "command": "python",
-      "args": [
-        "-m",
-        "qplaywright.mcp_server"
-      ]
-    }
-  }
-}
-```
-
-If your Python environment is not on PATH, replace `python` with the absolute
-path to the interpreter that has `qplaywright[mcp]` installed.
