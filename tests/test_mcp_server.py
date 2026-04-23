@@ -119,6 +119,12 @@ class FakeLocator:
     def get_attribute(self, name: str) -> str:
         return f"attr:{name}"
 
+    def properties(self) -> dict[str, object]:
+        return {
+            "objectName": self._target or "amount_editor",
+            "myText": "pressme",
+        }
+
     def methods(self) -> list[dict[str, object]]:
         return [
             {
@@ -353,10 +359,11 @@ def test_inspect_target_uses_target_payload(monkeypatch):
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: object())
     monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
 
-    result = mcp_server.inspect(target="#amount", include_methods=True)
+    result = mcp_server.inspect(target="#amount", include_methods=True, include_properties=True)
 
     assert result["target"] == "#amount"
     assert result["methods"][0]["name"] == "setAmount"
+    assert result["properties"]["myText"] == "pressme"
 
 
 def test_session_attach_status_launch_and_close(monkeypatch):
@@ -546,8 +553,9 @@ def test_inspect_locator_handles_empty_and_present_results():
     assert present["value"] == "ready"
     assert present["property_value"] == "attr:placeholderText"
 
-    with_methods = mcp_server._inspect_locator(FakeLocator(count=1), include_methods=True)
+    with_methods = mcp_server._inspect_locator(FakeLocator(count=1), include_methods=True, include_properties=True)
     assert with_methods["methods"][0]["name"] == "setAmount"
+    assert with_methods["properties"]["myText"] == "pressme"
 
 
 def test_invoke_locator_method_uses_first_match():

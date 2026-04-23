@@ -33,6 +33,7 @@ from qplaywright.protocol import (
     METHOD_FIND_ALL,
     METHOD_WIDGET_TREE,
     METHOD_GET_PROPERTY,
+    METHOD_GET_PROPERTIES,
     METHOD_GET_TEXT,
     METHOD_GET_VALUE,
     METHOD_GET_METHODS,
@@ -70,6 +71,9 @@ from qplaywright.agent._selector import (
     _widget_text,
     _widget_class_name,
     _widget_value,
+    _qt_property,
+    _normalize_property_value,
+    _widget_properties,
     _declared_method_schema,
     _invoke_method,
 )
@@ -408,10 +412,11 @@ def _handle_command(req: Request) -> Any:
     if method == METHOD_GET_PROPERTY:
         w = _resolve_one(params)
         prop_name = params["property"]
-        fn = getattr(w, prop_name, None)
-        if callable(fn):
-            return fn()
-        return None
+        return _normalize_property_value(_qt_property(w, prop_name))
+
+    if method == METHOD_GET_PROPERTIES:
+        w = _resolve_one(params)
+        return _widget_properties(w)
 
     if method == METHOD_IS_VISIBLE:
         w = _resolve_one(params)

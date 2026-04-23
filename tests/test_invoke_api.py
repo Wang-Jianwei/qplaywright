@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from qplaywright.agent import _selector as selector
 from qplaywright.agent import _server as server
-from qplaywright.protocol import QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlaywrightMethodArg
+from qplaywright.protocol import QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlaywrightMethodArg, Request
 from qplaywright.sync_api._api import Window
 from qplaywright.sync_api._locator import Locator
 
@@ -254,6 +256,78 @@ def test_locator_methods_requests_method_schema():
             8.0,
         )
     ]
+
+
+def test_locator_properties_requests_all_property_map():
+    conn = FakeConnection()
+    locator = Locator(conn, "#amount", timeout=8.0)
+
+    result = locator.properties()
+
+    assert result == {
+        "method": "get_properties",
+        "params": {
+            "selector": "#amount",
+        },
+    }
+    assert conn.calls == [
+        (
+            "get_properties",
+            {
+                "selector": "#amount",
+            },
+            8.0,
+        )
+    ]
+
+
+def test_server_get_property_and_get_properties_use_qt_property_storage(monkeypatch):
+    class FakeMetaProperty:
+        def __init__(self, name: str):
+            self._name = name
+
+        def name(self) -> str:
+            return self._name
+
+    class FakeMetaObject:
+        def propertyCount(self) -> int:
+            return 2
+
+        def property(self, index: int):
+            return [FakeMetaProperty("text"), FakeMetaProperty("qplaywrightClassMetadata")][index]
+
+    class PropertyWidget(FakeInvokeWidget):
+        def metaObject(self):
+            return FakeMetaObject()
+
+        def dynamicPropertyNames(self):
+            return [b"myText"]
+
+        def property(self, name):
+            if isinstance(name, bytes):
+                name = name.decode()
+            if name == "qplaywrightClassMetadata":
+                return self._metadata
+            if name == "text":
+                return "Painter text"
+            if name == "myText":
+                return "pressme"
+            return None
+
+    widget = PropertyWidget()
+
+    monkeypatch.setattr(server, "_import_qt", lambda: None)
+    monkeypatch.setattr(server, "_QtCore", SimpleNamespace(Qt=object()))
+    monkeypatch.setattr(server, "_QtGui", SimpleNamespace(QCursor=object()))
+    monkeypatch.setattr(server, "_resolve_one", lambda params: widget)
+
+    single = server._handle_command(Request(id=1, method="get_property", params={"wid": 1, "property": "myText"}))
+    all_properties = server._handle_command(Request(id=2, method="get_properties", params={"wid": 1}))
+
+    assert single == "pressme"
+    assert all_properties["text"] == "Painter text"
+    assert all_properties["myText"] == "pressme"
+    assert all_properties["qplaywrightClassMetadata"]["methods"][0]["name"] == "setAmount"
 
 
 def test_locator_can_send_direct_widget_id_params():

@@ -24,6 +24,20 @@ class FakeMetaObject:
         except ValueError:
             return -1
 
+    def propertyCount(self) -> int:
+        return len(self._properties)
+
+    def property(self, index: int):
+        return FakeMetaProperty(self._properties[index])
+
+
+class FakeMetaProperty:
+    def __init__(self, name: str):
+        self._name = name
+
+    def name(self) -> str:
+        return self._name
+
 
 class FakeWidget:
     def __init__(
@@ -33,10 +47,12 @@ class FakeWidget:
         object_name: str = "",
         properties: dict[str, object] | None = None,
         qt_properties: list[str] | None = None,
+        dynamic_properties: list[str] | None = None,
         super_class=None,
     ):
         self._meta = FakeMetaObject(class_name, super_class=super_class, properties=qt_properties)
         self._properties = dict(properties or {})
+        self._dynamic_properties = list(dynamic_properties or [])
         self._object_name = object_name
 
     def metaObject(self):
@@ -46,6 +62,9 @@ class FakeWidget:
         if isinstance(name, bytes):
             name = name.decode()
         return self._properties.get(name)
+
+    def dynamicPropertyNames(self):
+        return [name.encode() for name in self._dynamic_properties]
 
     def objectName(self) -> str:
         return self._object_name
@@ -175,3 +194,21 @@ def test_widget_text_still_uses_standard_accessors():
     widget = FakeTextWidget(properties={"text": "Fancy Value"})
 
     assert selector._widget_text(widget) == "Fancy Value"
+
+
+def test_widget_properties_include_qt_and_dynamic_properties():
+    widget = FakeWidget(
+        properties={
+            "text": "Painter label",
+            "myText": "pressme",
+            "qplaywrightClassMetadata": _metadata(role="button"),
+        },
+        qt_properties=["text", "qplaywrightClassMetadata"],
+        dynamic_properties=["myText"],
+    )
+
+    payload = selector._widget_properties(widget)
+
+    assert payload["text"] == "Painter label"
+    assert payload["myText"] == "pressme"
+    assert payload["qplaywrightClassMetadata"]["role"] == "button"

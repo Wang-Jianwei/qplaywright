@@ -350,6 +350,7 @@ def _inspect_locator(
     *,
     property_name: str | None = None,
     include_methods: bool = False,
+    include_properties: bool = False,
 ) -> dict[str, Any]:
     count = locator.count()
     result: dict[str, Any] = {
@@ -378,6 +379,9 @@ def _inspect_locator(
 
     if include_methods:
         result["methods"] = first.methods()
+
+    if include_properties:
+        result["properties"] = first.properties()
 
     return result
 
@@ -854,6 +858,7 @@ if FastMCP is not None:
         target: str | None = None,
         property: str | None = None,
         include_methods: bool = False,
+        include_properties: bool = False,
         depth: int = 10,
     ) -> dict[str, Any]:
         """Inspect one target or return the current active window tree in debug mode."""
@@ -872,7 +877,12 @@ if FastMCP is not None:
             }
 
         locator = _resolve_locator(connection_state, target=target)
-        result = _inspect_locator(locator, property_name=property, include_methods=include_methods)
+        result = _inspect_locator(
+            locator,
+            property_name=property,
+            include_methods=include_methods,
+            include_properties=include_properties,
+        )
         return {
             "ok": True,
             "target": target,

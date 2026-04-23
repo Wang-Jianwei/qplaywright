@@ -13,6 +13,7 @@ from qplaywright.protocol import (
     METHOD_GET_VALUE,
     METHOD_GET_METHODS,
     METHOD_GET_PROPERTY,
+    METHOD_GET_PROPERTIES,
     METHOD_IS_VISIBLE,
     METHOD_IS_ENABLED,
     METHOD_IS_CHECKED,
@@ -153,6 +154,10 @@ class Locator:
     def get_attribute(self, name: str) -> Any:
         """Get a Qt property value."""
         return self._send(METHOD_GET_PROPERTY, property=name)
+
+    def properties(self) -> dict[str, Any]:
+        """Return all readable Qt properties exposed by the widget."""
+        return self._send(METHOD_GET_PROPERTIES)
 
     def is_visible(self) -> bool:
         """Check if the widget is visible."""

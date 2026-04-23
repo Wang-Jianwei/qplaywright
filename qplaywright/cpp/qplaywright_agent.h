@@ -1079,6 +1079,35 @@ private:
         return executeResult.toJsonObject();
     }
 
+    QJsonValue jsonValueFromVariant(const QVariant &value)
+    {
+        const QJsonValue jsonValue = QJsonValue::fromVariant(value);
+        if (!jsonValue.isUndefined())
+            return jsonValue;
+        if (!value.isValid() || value.isNull())
+            return QJsonValue();
+        return value.toString();
+    }
+
+    QJsonObject serializeWidgetProperties(QWidget *w)
+    {
+        QJsonObject properties;
+        const QMetaObject *meta = w->metaObject();
+        if (meta) {
+            for (int index = 0; index < meta->propertyCount(); ++index) {
+                const QMetaProperty property = meta->property(index);
+                const QString name = QString::fromLatin1(property.name());
+                properties[name] = jsonValueFromVariant(w->property(property.name()));
+            }
+        }
+
+        const QList<QByteArray> dynamicNames = w->dynamicPropertyNames();
+        for (const QByteArray &name : dynamicNames)
+            properties[QString::fromLatin1(name)] = jsonValueFromVariant(w->property(name.constData()));
+
+        return properties;
+    }
+
     QJsonObject serializeWidgetTree(QWidget *w, int depth = 0, int maxDepth = 10)
     {
         auto &reg = QPlaywrightRegistry::instance();
@@ -1214,7 +1243,12 @@ private:
             QWidget *w = resolveOne(params);
             QString prop = params["property"].toString();
             QVariant val = w->property(prop.toLatin1().constData());
-            return QJsonValue::fromVariant(val);
+            return jsonValueFromVariant(val);
+        }
+
+        if (method == "get_properties") {
+            QWidget *w = resolveOne(params);
+            return serializeWidgetProperties(w);
         }
 
         if (method == "is_visible") {

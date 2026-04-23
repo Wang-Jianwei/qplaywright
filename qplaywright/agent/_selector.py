@@ -38,6 +38,70 @@ def _qt_property_exists(widget, name: str) -> bool:
         return meta.indexOfProperty(name.encode()) >= 0
 
 
+def _normalize_property_name(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return str(value)
+
+
+def _normalize_property_value(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode(errors="replace")
+
+    to_variant_map = getattr(value, "toVariantMap", None)
+    if callable(to_variant_map):
+        value = to_variant_map()
+    to_variant_list = getattr(value, "toVariantList", None)
+    if callable(to_variant_list):
+        value = to_variant_list()
+
+    if isinstance(value, dict):
+        return {str(key): _normalize_property_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_normalize_property_value(item) for item in value]
+    return str(value)
+
+
+def _qt_property_names(widget) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+
+    meta_object = getattr(widget, "metaObject", None)
+    if callable(meta_object):
+        meta = meta_object()
+        property_count = getattr(meta, "propertyCount", None)
+        meta_property = getattr(meta, "property", None)
+        if callable(property_count) and callable(meta_property):
+            for index in range(int(property_count())):
+                descriptor = meta_property(index)
+                name_fn = getattr(descriptor, "name", None)
+                if not callable(name_fn):
+                    continue
+                name = _normalize_property_name(name_fn())
+                if name and name not in seen:
+                    seen.add(name)
+                    names.append(name)
+
+    dynamic_property_names = getattr(widget, "dynamicPropertyNames", None)
+    if callable(dynamic_property_names):
+        for raw_name in dynamic_property_names() or []:
+            name = _normalize_property_name(raw_name)
+            if name and name not in seen:
+                seen.add(name)
+                names.append(name)
+
+    return names
+
+
+def _widget_properties(widget) -> dict[str, object]:
+    properties: dict[str, object] = {}
+    for name in _qt_property_names(widget):
+        properties[name] = _normalize_property_value(_qt_property(widget, name))
+    return properties
+
+
 def _invoke_named_method(widget, name: str, *args):
     fn = getattr(widget, name, None)
     if callable(fn):

@@ -393,6 +393,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "target": "#amount_editor",
   "property": "placeholderText",
   "include_methods": true,
+  "include_properties": true,
   "depth": 6
 }
 ```
@@ -402,6 +403,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 - `target` 可选
 - 当 `target` 为空时，进入 debug-only 全量模式
 - `include_methods` 默认为 `false`
+- `include_properties` 默认为 `false`，用于返回目标当前全部 Qt properties
 - `depth` 只在 `target=null` 时有意义
 
 ### Inspect Response: Target Mode
@@ -424,6 +426,10 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "height": 80
   },
   "property_value": null,
+  "properties": {
+    "objectName": "amount_editor",
+    "myText": "pressme"
+  },
   "methods": []
 }
 ```
