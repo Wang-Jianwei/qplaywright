@@ -19,7 +19,7 @@ from mcp.client.stdio import stdio_client
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from examples.test_mcp_demo import _call_tool, _project_root, _python_path_env
+from examples.test_mcp_demo import _attach_session, _call_tool, _close_session, _project_root, _python_path_env
 
 
 def _find_cpp_demo_executable(root: Path) -> Path:
@@ -76,24 +76,19 @@ async def main() -> None:
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                await _call_tool(session, "connect", {"name": "cpp-demo", "port": 19876, "timeout": 10.0})
+                await _attach_session(session, port=19876, timeout=10.0)
 
-                methods = await _call_tool(
-                    session,
-                    "get_widget_methods",
-                    {"connection": "cpp-demo", "selector": "#amount_editor"},
-                )
+                methods = await _call_tool(session, "inspect", {"target": "#amount_editor", "include_methods": True})
                 method_names = [entry["name"] for entry in methods["methods"]]
                 print(f"Custom methods: {method_names}")
                 assert method_names == ["amount", "setAmount", "clearAmount"]
 
                 set_result = await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "cpp-demo",
-                        "selector": "#amount_editor",
-                        "method_name": "setAmount",
+                        "target": "#amount_editor",
+                        "method": "setAmount",
                         "args": {"value": "123.45"},
                     },
                 )
@@ -102,11 +97,10 @@ async def main() -> None:
 
                 amount_result = await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "cpp-demo",
-                        "selector": "#amount_editor",
-                        "method_name": "amount",
+                        "target": "#amount_editor",
+                        "method": "amount",
                         "args": {},
                     },
                 )
@@ -120,40 +114,35 @@ async def main() -> None:
 
                 await _call_tool(
                     session,
-                    "fill",
-                    {"connection": "cpp-demo", "selector": "#username", "value": "admin"},
+                    "input",
+                    {"target": "#username", "text": "admin"},
                 )
                 await _call_tool(
                     session,
-                    "fill",
-                    {"connection": "cpp-demo", "selector": "#password", "value": "secret123"},
+                    "input",
+                    {"target": "#password", "text": "secret123"},
                 )
                 await _call_tool(
                     session,
-                    "select_option",
-                    {"connection": "cpp-demo", "selector": "#role", "label": "Admin"},
+                    "choose",
+                    {"target": "#role", "label": "Admin"},
                 )
                 await _call_tool(
                     session,
                     "click",
-                    {"connection": "cpp-demo", "selector": "#login_btn"},
+                    {"target": "#login_btn"},
                 )
 
-                status = await _call_tool(
-                    session,
-                    "inspect_widget",
-                    {"connection": "cpp-demo", "selector": "#status"},
-                )
+                status = await _call_tool(session, "inspect", {"target": "#status"})
                 print(f"Status after login: {status['text']}")
                 assert "amount=123.45" in status["text"]
 
                 clear_result = await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "cpp-demo",
-                        "selector": "#amount_editor",
-                        "method_name": "clearAmount",
+                        "target": "#amount_editor",
+                        "method": "clearAmount",
                         "args": {},
                     },
                 )
@@ -162,17 +151,16 @@ async def main() -> None:
 
                 reset_amount = await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "cpp-demo",
-                        "selector": "#amount_editor",
-                        "method_name": "amount",
+                        "target": "#amount_editor",
+                        "method": "amount",
                         "args": {},
                     },
                 )
                 assert reset_amount["result"]["value"] == "0.00"
 
-                await _call_tool(session, "disconnect", {"name": "cpp-demo"})
+                await _close_session(session)
                 print("C++ MCP demo flow completed")
     finally:
         demo_process.terminate()

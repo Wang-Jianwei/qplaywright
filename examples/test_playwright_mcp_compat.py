@@ -1,4 +1,4 @@
-"""Manual end-to-end test for the playwright-mcp style compatibility tools."""
+"""Manual end-to-end test for a snapshot-ref driven MCP flow."""
 
 from __future__ import annotations
 
@@ -13,7 +13,15 @@ from mcp.client.stdio import stdio_client
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from examples.test_mcp_demo import _call_tool, _project_root, _python_path_env
+from examples.test_mcp_demo import (
+    _attach_session,
+    _call_tool,
+    _close_session,
+    _list_windows,
+    _project_root,
+    _python_path_env,
+    _refs_by_target,
+)
 
 
 DEMO_PORT = 29876
@@ -42,60 +50,52 @@ async def main() -> None:
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                await _call_tool(session, "connect", {"name": "demo", "port": DEMO_PORT, "timeout": 10.0})
+                await _attach_session(session, port=DEMO_PORT, timeout=10.0)
 
                 await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "setAmount",
+                        "target": "#amount_editor",
+                        "method": "setAmount",
                         "args": {"value": "88.50"},
                     },
                 )
                 await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "setCurrency",
+                        "target": "#amount_editor",
+                        "method": "setCurrency",
                         "args": {"code": "JPY"},
                     },
                 )
                 await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "setPrecision",
+                        "target": "#amount_editor",
+                        "method": "setPrecision",
                         "args": {"digits": 1},
                     },
                 )
                 await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "applyDelta",
+                        "target": "#amount_editor",
+                        "method": "applyDelta",
                         "args": {"delta": 2.4},
                     },
                 )
 
-                tabs = await _call_tool(session, "browser_tabs", {"action": "list", "connection": "demo"})
-                print(f"Tabs: {tabs['result']}")
+                tabs = await _list_windows(session)
+                print(f"Tabs: {tabs}")
 
-                snapshot = await _call_tool(session, "browser_snapshot", {"connection": "demo", "depth": 3})
+                snapshot = await _call_tool(session, "snapshot", {"depth": 3})
                 print(snapshot["snapshot"])
 
-                refs_by_target = {
-                    entry["target"]: entry["ref"]
-                    for entry in snapshot["refs"]
-                    if entry.get("target") and entry.get("ref")
-                }
+                refs_by_target = _refs_by_target(snapshot)
                 username_ref = refs_by_target["#username"]
                 password_ref = refs_by_target["#password"]
                 remember_ref = refs_by_target["#remember"]
@@ -107,98 +107,69 @@ async def main() -> None:
 
                 await _call_tool(
                     session,
-                    "browser_fill_form",
-                    {
-                        "connection": "demo",
-                        "fields": [
-                            {"target": username_ref, "value": "admin"},
-                            {"target": password_ref, "value": "secret123"},
-                            {"target": notes_ref, "value": "Reviewed by playwright compat flow"},
-                        ],
-                    },
+                    "input",
+                    {"target": username_ref, "text": "admin"},
                 )
                 await _call_tool(
                     session,
-                    "browser_verify_value",
-                    {
-                        "connection": "demo",
-                        "type": "textbox",
-                        "element": "Username field",
-                        "target": username_ref,
-                        "value": "admin",
-                    },
+                    "input",
+                    {"target": password_ref, "text": "secret123"},
                 )
                 await _call_tool(
                     session,
-                    "browser_select_option",
-                    {"connection": "demo", "target": role_ref, "values": ["Admin"]},
+                    "input",
+                    {"target": notes_ref, "text": "Reviewed by snapshot ref flow"},
+                )
+
+                username_value = await _call_tool(session, "inspect", {"target": username_ref})
+                assert username_value["value"] == "admin"
+
+                await _call_tool(
+                    session,
+                    "choose",
+                    {"target": role_ref, "label": "Admin"},
                 )
                 await _call_tool(
                     session,
-                    "browser_select_option",
-                    {"connection": "demo", "target": environment_ref, "values": ["Production"]},
+                    "choose",
+                    {"target": environment_ref, "label": "Production"},
                 )
                 await _call_tool(
                     session,
-                    "browser_click",
-                    {"connection": "demo", "target": remember_ref},
+                    "click",
+                    {"target": remember_ref},
                 )
-                await _call_tool(
-                    session,
-                    "browser_click",
-                    {"connection": "demo", "target": notify_ref},
-                )
+                await _call_tool(session, "click", {"target": notify_ref})
                 login_result = await _call_tool(
                     session,
-                    "browser_click",
-                    {"connection": "demo", "target": login_ref},
+                    "click",
+                    {"target": login_ref, "include_snapshot": True},
                 )
                 print(f"Login click snapshot: {login_result['snapshot']}")
 
-                await _call_tool(
-                    session,
-                    "browser_wait_for",
-                    {"connection": "demo", "text": "Logged in as admin", "timeout": 5.0},
-                )
-                await _call_tool(
-                    session,
-                    "browser_verify_text_visible",
-                    {"connection": "demo", "text": "payment=JPY 90.9 precision=1 adjustments=on"},
-                )
-                await _call_tool(
-                    session,
-                    "browser_verify_element_visible",
-                    {
-                        "connection": "demo",
-                        "role": "button",
-                        "accessibleName": "Login",
-                    },
-                )
+                status_text = await _call_tool(session, "inspect", {"target": "#status"})
+                assert "Logged in as admin" in status_text["text"]
+                assert "payment=JPY 90.9 precision=1 adjustments=on" in status_text["text"]
 
-                status_snapshot = await _call_tool(session, "browser_snapshot", {"connection": "demo", "depth": 3})
-                status_ref = {
-                    entry["target"]: entry["ref"]
-                    for entry in status_snapshot["refs"]
-                    if entry.get("target") and entry.get("ref")
-                }["#status"]
+                login_button = await _call_tool(session, "inspect", {"target": "#login_btn"})
+                assert login_button["exists"] is True
 
-                status = await _call_tool(
-                    session,
-                    "browser_snapshot",
-                    {"connection": "demo", "target": status_ref, "depth": 0},
-                )
+                status_snapshot = await _call_tool(session, "snapshot", {"depth": 3})
+                status_ref = _refs_by_target(status_snapshot)["#status"]
+
+                status = await _call_tool(session, "snapshot", {"target": status_ref, "depth": 0})
                 print(f"Status snapshot: {status['snapshot']}")
                 assert "payment=JPY 90.9 precision=1 adjustments=on" in status["snapshot"]
 
                 screenshot = await _call_tool(
                     session,
-                    "browser_take_screenshot",
-                    {"connection": "demo", "filename": str(screenshot_path)},
+                    "screenshot",
+                    {"path": str(screenshot_path)},
                 )
                 print(f"Screenshot: {screenshot}")
 
-                await _call_tool(session, "disconnect", {"name": "demo"})
-                print("Playwright-style compatibility flow completed")
+                await _close_session(session)
+                print("Snapshot-ref flow completed")
     finally:
         demo_process.terminate()
         try:

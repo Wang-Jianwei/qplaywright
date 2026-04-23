@@ -384,6 +384,30 @@ def test_session_attach_status_launch_and_close(monkeypatch):
     assert state.connection is None
 
 
+def test_session_close_clears_stale_connection(monkeypatch):
+    state = mcp_server.ServerState()
+    app = FakeApp([])
+    app._conn = FakeTransportConn(error=ConnectionError("Agent closed connection"))
+    qplaywright = FakeQPlaywright()
+    state.connection = mcp_server.ManagedConnection(
+        name="default",
+        qplaywright=qplaywright,
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    closed = mcp_server.session(action="close")
+
+    assert closed == {"ok": True, "action": "close", "closed": True}
+    assert state.connection is None
+    assert app.closed is True
+    assert qplaywright.closed is True
+
+
 def test_window_tool_lists_selects_resizes_and_closes(monkeypatch):
     state = mcp_server.ServerState()
     first = FakeWindow(11, "First")
@@ -802,6 +826,36 @@ def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
 
     assert payload["refs"] == [{"ref": "e1", "wid": 1, "target": ".DemoWindow", "class": "DemoWindow", "text": "Title"}]
     assert payload["snapshot"].count("[ref=e1]") == 1
+
+
+def test_screenshot_returns_schema_fields(monkeypatch):
+    state = mcp_server.ServerState()
+    window = FakeWindow(11, "Main")
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([window]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    locator = FakeLocator(count=1)
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+
+    result = mcp_server.screenshot(target="#amount", path="amount.png")
+
+    assert locator.screenshot_calls == [{"path": "amount.png"}]
+    assert result["ok"] is True
+    assert result["target"] == "#amount"
+    assert result["path"] == "amount.png"
+    assert result["width"] == 120
+    assert result["height"] == 40
+    assert result["active_window"]["wid"] == 11
+    assert result["active_window"]["title"] == "Main"
+    assert result["active_window"]["is_active"] is True
 
 
 def test_run_cli_invokes_tool_and_prints_json(monkeypatch, capsys):

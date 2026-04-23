@@ -13,7 +13,15 @@ from mcp.client.stdio import stdio_client
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from examples.test_mcp_demo import _call_tool, _project_root, _python_path_env
+from examples.test_mcp_demo import (
+    _attach_session,
+    _call_tool,
+    _close_session,
+    _list_windows,
+    _project_root,
+    _python_path_env,
+    _select_window,
+)
 
 
 DEMO_PORT = 29877
@@ -41,91 +49,65 @@ async def main() -> None:
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                await _call_tool(session, "connect", {"name": "demo", "port": DEMO_PORT, "timeout": 10.0})
+                await _attach_session(session, port=DEMO_PORT, timeout=10.0)
 
                 await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "setCurrency",
+                        "target": "#amount_editor",
+                        "method": "setCurrency",
                         "args": {"code": "CNY"},
                     },
                 )
                 await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "setAmount",
+                        "target": "#amount_editor",
+                        "method": "setAmount",
                         "args": {"value": "66.50"},
                     },
                 )
 
-                before_windows = await _call_tool(session, "list_windows", {"connection": "demo"})
-                before_windows = before_windows["result"] if isinstance(before_windows, dict) else before_windows
+                before_windows = await _list_windows(session)
                 assert len(before_windows) == 1
 
-                await _call_tool(session, "click", {"connection": "demo", "selector": "#review_btn"})
+                await _call_tool(session, "click", {"target": "#review_btn"})
 
-                dialog_windows = await _call_tool(session, "list_windows", {"connection": "demo"})
-                dialog_windows = dialog_windows["result"] if isinstance(dialog_windows, dict) else dialog_windows
+                dialog_windows = await _list_windows(session)
                 print(f"Windows after dialog open: {dialog_windows}")
                 assert len(dialog_windows) == 2
                 assert any("Payment Review" in window["title"] for window in dialog_windows)
 
-                dialog_snapshot = await _call_tool(
-                    session,
-                    "browser_snapshot",
-                    {"connection": "demo", "window_index": 1, "depth": 6},
-                )
+                await _select_window(session, index=1)
+
+                dialog_snapshot = await _call_tool(session, "snapshot", {"depth": 6})
                 print(f"Dialog scoped snapshot: {dialog_snapshot['snapshot']}")
                 assert "Payment Review" in dialog_snapshot["snapshot"]
                 assert "QPlaywright Demo App" not in dialog_snapshot["snapshot"]
 
-                dialog_root = await _call_tool(
-                    session,
-                    "inspect_widget",
-                    {
-                        "connection": "demo",
-                        "selector": "role=dialog",
-                        "window_index": 1,
-                    },
-                )
+                dialog_root = await _call_tool(session, "inspect", {"target": "role=dialog"})
                 print(f"Dialog root: {dialog_root}")
                 assert dialog_root["exists"] is True
 
-                dialog_summary = await _call_tool(
-                    session,
-                    "inspect_widget",
-                    {
-                        "connection": "demo",
-                        "selector": "#dialog_payment_summary",
-                        "window_index": 1,
-                    },
-                )
+                dialog_summary = await _call_tool(session, "inspect", {"target": "#dialog_payment_summary"})
                 print(f"Dialog summary: {dialog_summary['text']}")
                 assert "CNY 66.50 precision=2 adjustments=on" in dialog_summary["text"]
 
                 await _call_tool(
                     session,
-                    "fill",
+                    "input",
                     {
-                        "connection": "demo",
-                        "selector": "#approval_code",
-                        "window_index": 1,
-                        "value": "APR-CNY-001",
+                        "target": "#approval_code",
+                        "text": "APR-CNY-001",
                     },
                 )
                 await _call_tool(
                     session,
-                    "select_option",
+                    "choose",
                     {
-                        "connection": "demo",
-                        "selector": "#review_risk",
-                        "window_index": 1,
+                        "target": "#review_risk",
                         "label": "High",
                     },
                 )
@@ -133,57 +115,42 @@ async def main() -> None:
                     session,
                     "set_checked",
                     {
-                        "connection": "demo",
-                        "selector": "#review_escalate",
-                        "window_index": 1,
+                        "target": "#review_escalate",
                         "checked": True,
                     },
                 )
                 await _call_tool(
                     session,
-                    "fill",
+                    "input",
                     {
-                        "connection": "demo",
-                        "selector": "#review_notes_dialog",
-                        "window_index": 1,
-                        "value": "Escalated because amount exceeds manual threshold.",
+                        "target": "#review_notes_dialog",
+                        "text": "Escalated because amount exceeds manual threshold.",
                     },
                 )
                 await _call_tool(
                     session,
                     "click",
-                    {
-                        "connection": "demo",
-                        "selector": "#approve_review_btn",
-                        "window_index": 1,
-                    },
+                    {"target": "#approve_review_btn"},
                 )
 
-                after_windows = await _call_tool(session, "list_windows", {"connection": "demo"})
-                after_windows = after_windows["result"] if isinstance(after_windows, dict) else after_windows
+                after_windows = await _list_windows(session)
                 print(f"Windows after dialog close: {after_windows}")
                 assert len(after_windows) == 1
 
-                review_status = await _call_tool(
-                    session,
-                    "inspect_widget",
-                    {"connection": "demo", "selector": "#review_status"},
-                )
+                await _select_window(session, index=0)
+
+                review_status = await _call_tool(session, "inspect", {"target": "#review_status"})
                 print(f"Review status: {review_status['text']}")
                 assert "approved" in review_status["text"]
                 assert "APR-CNY-001" in review_status["text"]
                 assert "High" in review_status["text"]
 
-                status = await _call_tool(
-                    session,
-                    "inspect_widget",
-                    {"connection": "demo", "selector": "#status"},
-                )
+                status = await _call_tool(session, "inspect", {"target": "#status"})
                 print(f"Main status: {status['text']}")
                 assert "Review approved" in status["text"]
                 assert "CNY 66.50 precision=2 adjustments=on" in status["text"]
 
-                await _call_tool(session, "disconnect", {"name": "demo"})
+                await _close_session(session)
                 print("Dialog MCP demo flow completed")
     finally:
         demo_process.terminate()

@@ -260,7 +260,9 @@ def launch_connection(
 
 
 def disconnect_connection(state: ServerState) -> dict[str, Any]:
-    connection = _get_connection(state)
+    connection = state.connection
+    if connection is None:
+        raise ValueError("No active session. Call session with action='attach' or action='launch' first")
     connection.close()
     state.connection = None
     return {
@@ -1068,7 +1070,9 @@ if FastMCP is not None:
                 result = locator.screenshot(path=path)
             else:
                 result = locator.screenshot()
+        result["ok"] = True
         result["target"] = target
+        result["active_window"] = _active_window_summary(live_connection)
         return result
 
 

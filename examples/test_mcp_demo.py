@@ -62,6 +62,54 @@ async def _call_tool(session: ClientSession, name: str, arguments: dict[str, Any
     return _structured(result)
 
 
+async def _attach_session(
+    session: ClientSession,
+    *,
+    port: int,
+    timeout: float = 10.0,
+    host: str = "127.0.0.1",
+) -> dict[str, Any]:
+    return await _call_tool(
+        session,
+        "session",
+        {"action": "attach", "host": host, "port": port, "timeout": timeout},
+    )
+
+
+async def _close_session(session: ClientSession) -> dict[str, Any]:
+    return await _call_tool(session, "session", {"action": "close"})
+
+
+async def _list_windows(session: ClientSession) -> list[dict[str, Any]]:
+    result = await _call_tool(session, "window", {"action": "list"})
+    return result["windows"]
+
+
+async def _select_window(
+    session: ClientSession,
+    *,
+    index: int | None = None,
+    wid: int | None = None,
+    title: str | None = None,
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {"action": "select"}
+    if index is not None:
+        arguments["index"] = index
+    if wid is not None:
+        arguments["wid"] = wid
+    if title is not None:
+        arguments["title"] = title
+    return await _call_tool(session, "window", arguments)
+
+
+def _refs_by_target(snapshot: dict[str, Any]) -> dict[str, str]:
+    return {
+        entry["target"]: entry["ref"]
+        for entry in snapshot.get("refs", [])
+        if entry.get("target") and entry.get("ref")
+    }
+
+
 async def main() -> None:
     root = _project_root()
     env = _python_path_env(root)
@@ -85,28 +133,16 @@ async def main() -> None:
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                connect_result = await _call_tool(
-                    session,
-                    "connect",
-                    {"name": "demo", "port": DEMO_PORT, "timeout": 10.0},
-                )
-                print(f"Connected: {connect_result['windows']}")
+                connect_result = await _attach_session(session, port=DEMO_PORT, timeout=10.0)
+                print(f"Connected: {connect_result['active_window']}")
 
-                windows = await _call_tool(session, "list_windows", {"connection": "demo"})
+                windows = await _list_windows(session)
                 print(f"Windows: {windows}")
 
-                tree = await _call_tool(
-                    session,
-                    "widget_tree",
-                    {"connection": "demo", "max_depth": 3},
-                )
-                print(f"Widget tree roots: {len(tree)}")
+                tree = await _call_tool(session, "inspect", {"depth": 3})
+                print(f"Widget tree roots: {len(tree['tree'])}")
 
-                methods = await _call_tool(
-                    session,
-                    "get_widget_methods",
-                    {"connection": "demo", "selector": "#amount_editor"},
-                )
+                methods = await _call_tool(session, "inspect", {"target": "#amount_editor", "include_methods": True})
                 method_names = [entry["name"] for entry in methods["methods"]]
                 print(f"Custom methods: {method_names}")
                 assert method_names == [
@@ -127,52 +163,47 @@ async def main() -> None:
 
                 await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "setAmount",
+                        "target": "#amount_editor",
+                        "method": "setAmount",
                         "args": {"value": "123.45"},
                     },
                 )
                 await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "setCurrency",
+                        "target": "#amount_editor",
+                        "method": "setCurrency",
                         "args": {"code": "EUR"},
                     },
                 )
                 await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "setPrecision",
+                        "target": "#amount_editor",
+                        "method": "setPrecision",
                         "args": {"digits": 3},
                     },
                 )
                 await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "applyDelta",
+                        "target": "#amount_editor",
+                        "method": "applyDelta",
                         "args": {"delta": 1.425},
                     },
                 )
 
                 amount_result = await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "amount",
+                        "target": "#amount_editor",
+                        "method": "amount",
                         "args": {},
                     },
                 )
@@ -181,11 +212,10 @@ async def main() -> None:
 
                 currency_result = await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "currency",
+                        "target": "#amount_editor",
+                        "method": "currency",
                         "args": {},
                     },
                 )
@@ -194,11 +224,10 @@ async def main() -> None:
 
                 available_result = await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "availableCurrencies",
+                        "target": "#amount_editor",
+                        "method": "availableCurrencies",
                         "args": {},
                     },
                 )
@@ -207,11 +236,10 @@ async def main() -> None:
 
                 summary_result = await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "summary",
+                        "target": "#amount_editor",
+                        "method": "summary",
                         "args": {},
                     },
                 )
@@ -220,11 +248,10 @@ async def main() -> None:
 
                 snapshot_result = await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "snapshot",
+                        "target": "#amount_editor",
+                        "method": "snapshot",
                         "args": {},
                     },
                 )
@@ -239,67 +266,54 @@ async def main() -> None:
 
                 await _call_tool(
                     session,
-                    "fill",
-                    {"connection": "demo", "selector": "#username", "value": "admin"},
+                    "input",
+                    {"target": "#username", "text": "admin"},
                 )
                 await _call_tool(
                     session,
-                    "fill",
-                    {"connection": "demo", "selector": "#password", "value": "secret123"},
-                )
-                await _call_tool(
-                    session,
-                    "set_checked",
-                    {"connection": "demo", "selector": "#remember", "checked": True},
-                )
-                await _call_tool(
-                    session,
-                    "select_option",
-                    {"connection": "demo", "selector": "#role", "label": "Admin"},
-                )
-                await _call_tool(
-                    session,
-                    "select_option",
-                    {"connection": "demo", "selector": "#environment", "label": "Production"},
+                    "input",
+                    {"target": "#password", "text": "secret123"},
                 )
                 await _call_tool(
                     session,
                     "set_checked",
-                    {"connection": "demo", "selector": "#notify", "checked": True},
+                    {"target": "#remember", "checked": True},
                 )
                 await _call_tool(
                     session,
-                    "fill",
+                    "choose",
+                    {"target": "#role", "label": "Admin"},
+                )
+                await _call_tool(
+                    session,
+                    "choose",
+                    {"target": "#environment", "label": "Production"},
+                )
+                await _call_tool(
+                    session,
+                    "set_checked",
+                    {"target": "#notify", "checked": True},
+                )
+                await _call_tool(
+                    session,
+                    "input",
                     {
-                        "connection": "demo",
-                        "selector": "#notes",
-                        "value": "Escalate to finance reviewer",
+                        "target": "#notes",
+                        "text": "Escalate to finance reviewer",
                     },
                 )
                 await _call_tool(
                     session,
                     "click",
-                    {
-                        "connection": "demo",
-                        "selector": "role=button",
-                        "has_text": "Login",
-                    },
+                    {"target": "#login_btn"},
                 )
 
-                status = await _call_tool(
-                    session,
-                    "inspect_widget",
-                    {"connection": "demo", "selector": "#status"},
-                )
+                status = await _call_tool(session, "inspect", {"target": "#status"})
                 print(f"Status after login: {status['text']}")
                 assert "Logged in as admin" in status["text"]
                 assert "payment=EUR 124.875 precision=3 adjustments=on" in status["text"]
 
-                summary = await _call_tool(
-                    session,
-                    "inspect_widget",
-                    {"connection": "demo", "selector": "#summary"},
-                )
+                summary = await _call_tool(session, "inspect", {"target": "#summary"})
                 print(f"Summary after login: {summary['text']}")
                 assert "last-login" in summary["text"]
                 assert "payment=EUR 124.875 precision=3 adjustments=on" in summary["text"]
@@ -307,27 +321,18 @@ async def main() -> None:
                 await _call_tool(
                     session,
                     "click",
-                    {
-                        "connection": "demo",
-                        "selector": "role=button",
-                        "has_text": "Clear Log",
-                    },
+                    {"target": "#clear_btn"},
                 )
-                cleared = await _call_tool(
-                    session,
-                    "inspect_widget",
-                    {"connection": "demo", "selector": "#status"},
-                )
+                cleared = await _call_tool(session, "inspect", {"target": "#status"})
                 print(f"Status after clear: {cleared['text']}")
                 assert "cleared" in cleared["text"].lower()
 
                 cleared_amount = await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "demo",
-                        "selector": "#amount_editor",
-                        "method_name": "amount",
+                        "target": "#amount_editor",
+                        "method": "amount",
                         "args": {},
                     },
                 )
@@ -337,11 +342,11 @@ async def main() -> None:
                 screenshot = await _call_tool(
                     session,
                     "screenshot",
-                    {"connection": "demo", "path": str(screenshot_path)},
+                    {"path": str(screenshot_path)},
                 )
                 print(f"Screenshot: {screenshot}")
 
-                await _call_tool(session, "disconnect", {"name": "demo"})
+                await _close_session(session)
                 print("MCP demo flow completed")
     finally:
         demo_process.terminate()
