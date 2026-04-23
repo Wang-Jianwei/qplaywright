@@ -76,7 +76,7 @@ async def main() -> None:
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                await _attach_session(session, port=19876, timeout=10.0)
+                await _attach_session(session, port=19876, timeout=30.0)
 
                 methods = await _call_tool(session, "inspect", {"target": "#amount_editor", "include_methods": True})
                 method_names = [entry["name"] for entry in methods["methods"]]

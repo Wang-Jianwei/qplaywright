@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -66,9 +67,21 @@ async def _attach_session(
     session: ClientSession,
     *,
     port: int,
-    timeout: float = 10.0,
+    timeout: float = 30.0,
     host: str = "127.0.0.1",
 ) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        try:
+            probe = socket.create_connection((host, port), timeout=0.5)
+            probe.close()
+            break
+        except OSError:
+            if loop.time() >= deadline:
+                break
+            await asyncio.sleep(0.25)
+
     return await _call_tool(
         session,
         "session",
@@ -133,7 +146,7 @@ async def main() -> None:
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                connect_result = await _attach_session(session, port=DEMO_PORT, timeout=10.0)
+                connect_result = await _attach_session(session, port=DEMO_PORT, timeout=30.0)
                 print(f"Connected: {connect_result['active_window']}")
 
                 windows = await _list_windows(session)
