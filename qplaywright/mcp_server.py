@@ -630,7 +630,7 @@ def _action_result_with_snapshot(
     managed_connection: ManagedConnection,
     *,
     target: str | None = None,
-    depth: int = 10,
+    depth: int = 3,
     **payload: Any,
 ) -> dict[str, Any]:
     result = dict(payload)
@@ -659,6 +659,7 @@ def _finalize_action_result(
     *,
     include_snapshot: bool = False,
     snapshot_target: str | None = None,
+    snapshot_depth: int = 3,
     **payload: Any,
 ) -> dict[str, Any]:
     result = dict(payload)
@@ -666,7 +667,7 @@ def _finalize_action_result(
     if not include_snapshot:
         return result
     effective_target = None if result["window_changed"] else snapshot_target
-    result.update(_action_result_with_snapshot(managed_connection, target=effective_target))
+    result.update(_action_result_with_snapshot(managed_connection, target=effective_target, depth=snapshot_depth))
     return result
 
 
