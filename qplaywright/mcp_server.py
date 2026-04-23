@@ -35,6 +35,7 @@ from qplaywright.sync_api._locator import Locator
 LOGGER = logging.getLogger(__name__)
 
 _SNAPSHOT_REF_PATTERN = re.compile(r"^e\d+$")
+_ACTION_POSTPROCESS_TIMEOUT = 2.0
 
 SessionAction = Literal["attach", "launch", "close", "status"]
 WindowAction = Literal["list", "select", "resize", "close"]
@@ -90,10 +91,10 @@ _SERVER_STATE = ServerState()
 atexit.register(_SERVER_STATE.close_all)
 
 
-def _list_windows_raw(connection: ManagedConnection) -> list[dict[str, Any]]:
+def _list_windows_raw(connection: ManagedConnection, *, timeout: float | None = None) -> list[dict[str, Any]]:
     client = getattr(connection.app, "_conn", None)
     if client is not None:
-        return client.send(METHOD_LIST_WINDOWS)
+        return client.send(METHOD_LIST_WINDOWS, timeout=timeout)
 
     windows = []
     for index, window in enumerate(connection.app.windows()):
@@ -116,11 +117,12 @@ def _widget_tree_raw(
     *,
     max_depth: int,
     window_wid: int | None = None,
+    timeout: float | None = None,
 ) -> list[dict[str, Any]]:
     params: dict[str, Any] = {"max_depth": max_depth}
     if window_wid is not None:
         params["wid"] = window_wid
-    return connection.app._conn.send(METHOD_WIDGET_TREE, params)
+    return connection.app._conn.send(METHOD_WIDGET_TREE, params, timeout=timeout)
 
 
 def _window_summary(connection: ManagedConnection) -> list[dict[str, Any]]:
@@ -590,6 +592,7 @@ def _snapshot_result(
     *,
     target: str | None = None,
     depth: int = 10,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
     target_params = _target_params(managed_connection, target, max_depth=depth) if target is not None else None
     managed_connection.clear_snapshot_refs()
@@ -601,6 +604,7 @@ def _snapshot_result(
                 managed_connection,
                 max_depth=depth,
                 window_wid=managed_connection.active_window_wid,
+                timeout=timeout,
             ),
             depth=depth,
         )
@@ -608,7 +612,7 @@ def _snapshot_result(
     node = managed_connection.app._conn.send(
         METHOD_FIND,
         target_params,
-        timeout=managed_connection.timeout,
+        timeout=timeout if timeout is not None else managed_connection.timeout,
     )
     if node is None:
         raise ValueError(_target_not_found_message(managed_connection, target))
@@ -631,16 +635,21 @@ def _action_result_with_snapshot(
     *,
     target: str | None = None,
     depth: int = 3,
+    timeout: float | None = None,
     **payload: Any,
 ) -> dict[str, Any]:
     result = dict(payload)
-    result.update(_snapshot_result(managed_connection, target=target, depth=depth))
+    result.update(_snapshot_result(managed_connection, target=target, depth=depth, timeout=timeout))
     return result
 
 
-def _observe_action_window_state(managed_connection: ManagedConnection) -> dict[str, Any]:
+def _observe_action_window_state(
+    managed_connection: ManagedConnection,
+    *,
+    timeout: float | None = None,
+) -> dict[str, Any]:
     previous_active_window_wid = managed_connection.active_window_wid
-    windows = _window_summary(managed_connection)
+    windows = _window_summary(managed_connection) if timeout is None else _list_windows_raw(managed_connection, timeout=timeout)
 
     active_window = _active_window_summary(managed_connection, windows=windows)
 
@@ -663,11 +672,36 @@ def _finalize_action_result(
     **payload: Any,
 ) -> dict[str, Any]:
     result = dict(payload)
-    result.update(_observe_action_window_state(managed_connection))
+    post_action_warnings: list[str] = []
+    postprocess_timeout = min(managed_connection.timeout, _ACTION_POSTPROCESS_TIMEOUT)
+
+    try:
+        result.update(_observe_action_window_state(managed_connection, timeout=postprocess_timeout))
+    except Exception as exc:
+        result.setdefault("window_changed", False)
+        result.setdefault("active_window", None)
+        post_action_warnings.append(f"post-action window state unavailable: {exc}")
+
     if not include_snapshot:
+        if post_action_warnings:
+            result["warnings"] = post_action_warnings
         return result
-    effective_target = None if result["window_changed"] else snapshot_target
-    result.update(_action_result_with_snapshot(managed_connection, target=effective_target, depth=snapshot_depth))
+
+    effective_target = None if result.get("window_changed") else snapshot_target
+    try:
+        result.update(
+            _action_result_with_snapshot(
+                managed_connection,
+                target=effective_target,
+                depth=snapshot_depth,
+                timeout=postprocess_timeout,
+            )
+        )
+    except Exception as exc:
+        post_action_warnings.append(f"post-action snapshot unavailable: {exc}")
+
+    if post_action_warnings:
+        result["warnings"] = post_action_warnings
     return result
 
 
