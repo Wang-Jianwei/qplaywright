@@ -5,7 +5,7 @@
 适用场景：
 
 - 你希望在 OpenCode 里把 qplaywright 当作一个本地 MCP 服务器使用。
-- 你希望让 OpenCode 连接一个正在运行的 Qt QWidget 应用，然后调用 `connect`、`browser_snapshot`、`browser_click` 等工具。
+- 你希望让 OpenCode 连接一个正在运行的 Qt QWidget 应用，然后调用 `session`、`window`、`snapshot`、`click` 等终态工具。
 
 ## 前提
 
@@ -128,16 +128,16 @@ opencode
 
 ```text
 use qplaywright
-连接本地 demo 应用，connection name 用 demo，端口 19876。
-然后列出窗口并执行一次 browser_snapshot。
+执行 session attach，端口 19876。
+然后执行 window list 和 snapshot。
 ```
 
 ### Playwright 风格兼容层测试
 
 ```text
 use qplaywright
-连接到 127.0.0.1:19876，connection name 用 demo。
-调用 browser_snapshot。
+连接到 127.0.0.1:19876。
+调用 snapshot。
 填写用户名 admin 和密码 secret123。
 选择角色 Admin。
 勾选 Remember me。
@@ -149,12 +149,17 @@ use qplaywright
 
 对 OpenCode 来说，下面这条路径最稳定：
 
-1. `connect`
-2. `browser_tabs` 或 `list_windows`
-3. `browser_snapshot`
-4. 使用 snapshot 返回的 `ref` 继续调用 `browser_fill_form`、`browser_click`、`browser_select_option`
-5. 使用 `browser_verify_text_visible` 或 `browser_verify_value` 做断言
-6. `disconnect`
+1. `session {"action": "attach", ...}`
+2. `window {"action": "list"}` 或 `window {"action": "select", ...}`
+3. `snapshot`
+4. 使用 snapshot 返回的 `ref` 继续调用 `input`、`click`、`choose`、`set_checked`
+5. 使用 `inspect` 或附带 `include_snapshot=true` 的动作结果做断言
+6. `session {"action": "close"}`
+
+补充说明：
+
+- OpenCode 当前应面向终态工具面，不应再假设存在 `connect`、`browser_snapshot`、`browser_click` 这类旧兼容工具
+- 如果提示词仍然强行引用旧工具名，表现出来通常不是“工具选错”而是“qplaywright MCP 不可用”
 
 ## 故障排查
 
@@ -179,11 +184,18 @@ opencode mcp debug qplaywright
 - `command` 中的 Python 路径是否真实存在。
 - 当前仓库路径是否正确。
 - `qplaywright.mcp_server` 是否可以被导入。
+- 是否已经安装 `.[mcp]`；否则 `python -m qplaywright.mcp_server` 会在启动时直接退出。
 - `timeout` 是否过小。
 
-### 3. connect 失败
+当前实现里，`qplaywright.mcp_server` 对启动依赖非常直接：
 
-如果 `connect` 失败，通常不是 OpenCode 本身的问题，而是目标 Qt 应用没有运行，或者没有监听默认地址端口。
+- 缺少 `mcp` 可选依赖时，进程会立即 `SystemExit`
+- Python 找不到 `qplaywright` 包时，进程也会直接退出
+- 因此 OpenCode 侧看到的通常只是“本地 MCP 启动失败”这一层表象
+
+### 3. session attach 失败
+
+如果 `session attach` 失败，通常不是 OpenCode 本身的问题，而是目标 Qt 应用没有运行，或者没有监听默认地址端口。
 
 先确认示例应用是否已经单独启动：
 
@@ -191,9 +203,17 @@ opencode mcp debug qplaywright
 D:/Python/Python312/python.exe examples/demo_app.py
 ```
 
-### 4. browser_snapshot 有结果，但后续操作找不到控件
+### 4. snapshot 有结果，但后续操作找不到控件
 
-优先使用 `browser_snapshot` 返回的 `ref` 继续做后续操作，而不是重新猜 selector。当前兼容层已经支持稳定 ref，可以直接把 `e1`、`e2` 这类 ref 传回给动作工具。
+优先使用 `snapshot` 返回的 `ref` 继续做后续操作，而不是重新猜 selector。当前终态工具面已经支持稳定 ref，可以直接把 `e1`、`e2` 这类 ref 传回给动作工具。
+
+### 5. OpenCode 看起来像“启动了 MCP”，但一调用就失败
+
+这通常有三类原因：
+
+1. OpenCode 或提示词还在调用旧工具名，例如 `connect`、`browser_snapshot`、`browser_click`
+2. Qt demo 没有先启动，导致后续第一条 `session attach` 就失败
+3. session 已建立，但远端 qplaywright agent 断开了；当前服务端会在下一次工具调用时把该 session 直接判定为 stale，并要求重新 attach
 
 ## 仓库内的现成参考
 
@@ -221,5 +241,5 @@ D:/Python/Python312/python.exe examples/demo_app.py
 3. 在项目根目录加入 `opencode.json`
 4. 启动 `opencode`
 5. 在提示词里明确写上 `use qplaywright`
-6. 先跑 `connect + browser_snapshot`
+6. 先跑 `session attach + snapshot`
 7. 再跑登录动作和断言
