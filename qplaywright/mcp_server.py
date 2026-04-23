@@ -126,8 +126,15 @@ def _widget_tree_raw(
 
 
 def _window_summary(connection: ManagedConnection) -> list[dict[str, Any]]:
+    return _summarize_windows(connection, _list_windows_raw(connection))
+
+
+def _summarize_windows(
+    connection: ManagedConnection,
+    windows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     summaries: list[dict[str, Any]] = []
-    for index, window in enumerate(_list_windows_raw(connection)):
+    for index, window in enumerate(windows):
         if connection.active_window_wid is None:
             is_active = index == 0
         else:
@@ -649,7 +656,10 @@ def _observe_action_window_state(
     timeout: float | None = None,
 ) -> dict[str, Any]:
     previous_active_window_wid = managed_connection.active_window_wid
-    windows = _window_summary(managed_connection) if timeout is None else _list_windows_raw(managed_connection, timeout=timeout)
+    windows = _summarize_windows(
+        managed_connection,
+        _list_windows_raw(managed_connection, timeout=timeout),
+    )
 
     active_window = _active_window_summary(managed_connection, windows=windows)
 
@@ -678,16 +688,19 @@ def _finalize_action_result(
     try:
         result.update(_observe_action_window_state(managed_connection, timeout=postprocess_timeout))
     except Exception as exc:
-        result.setdefault("window_changed", False)
-        result.setdefault("active_window", None)
-        post_action_warnings.append(f"post-action window state unavailable: {exc}")
+        result["window_changed"] = None
+        result["active_window"] = None
+        post_action_warnings.append(
+            f"post-action window state unavailable: {exc}. Window state is unknown; retry snapshot if you need to confirm focus or modal changes."
+        )
 
     if not include_snapshot:
         if post_action_warnings:
             result["warnings"] = post_action_warnings
         return result
 
-    effective_target = None if result.get("window_changed") else snapshot_target
+    window_changed = result.get("window_changed")
+    effective_target = snapshot_target if window_changed is False else None
     try:
         result.update(
             _action_result_with_snapshot(
