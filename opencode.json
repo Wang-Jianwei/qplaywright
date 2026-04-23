@@ -5,12 +5,12 @@
       "type": "local",
       "enabled": true,
       "command": [
-        "D:/workdir/wangjianwei/projects/bot/qt-use/.venv/Scripts/python.exe",
+        "./.venv/Scripts/python.exe",
         "-m",
         "qplaywright.mcp_server"
       ],
       "environment": {
-        "PYTHONPATH": "D:/workdir/wangjianwei/projects/bot/qt-use"
+        "PYTHONPATH": "./"
       },
       "timeout": 15000
     }
