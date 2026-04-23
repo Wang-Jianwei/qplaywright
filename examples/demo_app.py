@@ -593,7 +593,7 @@ def main():
     port = int(os.environ.get("QPLAYWRIGHT_PORT", "19876"))
 
     # Start QPlaywright agent on a configurable port for isolated MCP demos.
-    server = start_agent(app, port=port)
+    server = start_agent(app, port=port, visual_feedback=True)
     print(f"QPlaywright agent started on port {port}")
 
     window = DemoWindow()

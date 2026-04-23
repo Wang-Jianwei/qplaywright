@@ -16,6 +16,7 @@ import base64
 import io
 import json
 import logging
+import os
 import socket
 import struct
 import threading
@@ -93,6 +94,9 @@ _QtCore = None
 _QtGui = None
 _QtTest = None
 _QApplication = None
+_VISUAL_FEEDBACK_OVERLAYS: dict[int, Any] = {}
+_VISUAL_FEEDBACK_ENABLED = False
+_VisualClickOverlay = None
 
 
 def _import_qt():
@@ -116,6 +120,122 @@ def _import_qt():
         except ImportError:
             continue
     raise ImportError("No Qt binding found. Install PySide6, PyQt6, PySide2, or PyQt5.")
+
+
+def _create_visual_click_overlay_class():
+    _import_qt()
+    assert _QtWidgets is not None
+    assert _QtCore is not None
+    assert _QtGui is not None
+    QWidget = _QtWidgets.QWidget
+    Qt = _QtCore.Qt
+    QTimer = _QtCore.QTimer
+    QPainter = _QtGui.QPainter
+    QColor = _QtGui.QColor
+    QPen = _QtGui.QPen
+
+    class _VisualClickOverlay(QWidget):
+        def __init__(self, parent, center, *, pulse_count: int = 1):
+            super().__init__(parent)
+            self._center = center
+            self._pulse_count = max(1, pulse_count)
+            self._pulse_span = 0.12
+            self._pulse_gap = 0.05
+            self._duration = self._pulse_span + self._pulse_gap * (self._pulse_count - 1)
+            self._started = time.monotonic()
+            self._timer = QTimer(self)
+            self._timer.timeout.connect(self._tick)
+
+            self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            self.setAttribute(Qt.WA_NoSystemBackground, True)
+            if hasattr(Qt, "WA_TranslucentBackground"):
+                self.setAttribute(Qt.WA_TranslucentBackground, True)
+            self.setFocusPolicy(Qt.NoFocus)
+            self.setGeometry(parent.rect())
+
+        @property
+        def duration(self) -> float:
+            return self._duration
+
+        def start(self) -> None:
+            self.show()
+            self.raise_()
+            self._timer.start(16)
+
+        def _tick(self) -> None:
+            if time.monotonic() - self._started >= self._duration:
+                self._timer.stop()
+                self.close()
+                return
+            self.update()
+
+        def paintEvent(self, _event) -> None:
+            elapsed = time.monotonic() - self._started
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+
+            core_color = QColor(20, 132, 255, 180)
+            ring_base = QColor(20, 132, 255, 220)
+
+            for pulse_index in range(self._pulse_count):
+                local_elapsed = elapsed - pulse_index * self._pulse_gap
+                if local_elapsed < 0 or local_elapsed > self._pulse_span:
+                    continue
+
+                progress = local_elapsed / self._pulse_span
+                radius = 6 + progress * 20
+                alpha = max(0, int(ring_base.alpha() * (1.0 - progress)))
+                ring_color = QColor(ring_base)
+                ring_color.setAlpha(alpha)
+                painter.setPen(QPen(ring_color, 2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(self._center, int(radius), int(radius))
+
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(core_color)
+            painter.drawEllipse(self._center, 4, 4)
+
+    return _VisualClickOverlay
+
+
+def _ensure_visual_click_overlay_class():
+    global _VisualClickOverlay
+    if _VisualClickOverlay is None:
+        _VisualClickOverlay = _create_visual_click_overlay_class()
+    return _VisualClickOverlay
+
+
+def _show_click_feedback(widget, pos, *, double: bool = False):
+    if not _VISUAL_FEEDBACK_ENABLED:
+        return None
+
+    window = widget.window() if hasattr(widget, "window") else None
+    if window is None or not hasattr(window, "mapFromGlobal"):
+        return None
+
+    overlay_cls = _ensure_visual_click_overlay_class()
+    center = window.mapFromGlobal(widget.mapToGlobal(pos))
+    overlay = overlay_cls(window, center, pulse_count=2 if double else 1)
+    overlay_id = id(overlay)
+    _VISUAL_FEEDBACK_OVERLAYS[overlay_id] = overlay
+    overlay.destroyed.connect(lambda *_args, oid=overlay_id: _VISUAL_FEEDBACK_OVERLAYS.pop(oid, None))
+    overlay.start()
+    _process_events()
+    return overlay
+
+
+def _drain_click_feedback(overlay) -> None:
+    if overlay is None:
+        return
+
+    deadline = time.monotonic() + overlay.duration + 0.1
+    while overlay.isVisible() and time.monotonic() < deadline:
+        _process_events()
+        time.sleep(0.01)
+
+    if overlay.isVisible():
+        overlay.close()
+        _process_events()
 
 
 # --------------------------------------------------------------------------- #
@@ -696,6 +816,8 @@ def _click_widget(widget, *, double: bool = False):
         event_target.setFocus()
     _process_events()
 
+    overlay = _show_click_feedback(event_target, local_pos, double=double)
+
     if QTest and hasattr(QTest, "mouseClick"):
         try:
             if double:
@@ -712,6 +834,7 @@ def _click_widget(widget, *, double: bool = False):
         _post_mouse_event(event_target, local_pos, double=double)
 
     _process_events()
+    _drain_click_feedback(overlay)
 
 
 def _post_mouse_event(widget, pos, *, double: bool = False):
@@ -1079,6 +1202,7 @@ def start_agent(
     *,
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
+    visual_feedback: bool | None = None,
 ) -> _AgentServer:
     """Start the QPlaywright agent inside a running Qt application.
 
@@ -1088,12 +1212,19 @@ def start_agent(
         app:  The QApplication instance (auto-detected if None).
         host: Host to bind the TCP server to.
         port: Port to bind the TCP server to.
+        visual_feedback: Whether to show visual click feedback in the UI. Defaults to
+            the QPLAYWRIGHT_VISUAL_FEEDBACK environment variable when omitted.
 
     Returns:
         The server thread (call ``server.stop()`` to shut down).
     """
-    global _agent_server
+    global _agent_server, _VISUAL_FEEDBACK_ENABLED
     _import_qt()
+
+    if visual_feedback is None:
+        env_value = os.environ.get("QPLAYWRIGHT_VISUAL_FEEDBACK", "").strip().lower()
+        visual_feedback = env_value in {"1", "true", "yes", "on"}
+    _VISUAL_FEEDBACK_ENABLED = bool(visual_feedback)
 
     if app is None:
         app = _QApplication.instance()

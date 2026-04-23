@@ -7,7 +7,7 @@
  *
  *   int main(int argc, char *argv[]) {
  *       QApplication app(argc, argv);
- *       QPlaywrightAgent::start(19876);  // one line to enable
+ *       QPlaywrightAgent::start(19876, "127.0.0.1", true);  // one line to enable
  *       // ... your UI setup ...
  *       return app.exec();
  *   }
@@ -34,6 +34,9 @@
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QMutex>
+#include <QPainter>
+#include <QPen>
+#include <QPointer>
 #include <QWaitCondition>
 #include <QMouseEvent>
 #include <QKeyEvent>
@@ -1037,6 +1040,11 @@ class QPlaywrightHandler : public QObject
 public:
     explicit QPlaywrightHandler(QObject *parent = nullptr) : QObject(parent) {}
 
+    void setVisualFeedbackEnabled(bool enabled)
+    {
+        m_visualFeedbackEnabled = enabled;
+    }
+
 public slots:
     /**
      * @brief Handle a JSON command and return a JSON result.
@@ -1064,6 +1072,79 @@ public slots:
     }
 
 private:
+    class ClickOverlay : public QWidget
+    {
+    public:
+        ClickOverlay(QWidget *parent, const QPoint &center, int pulseCount)
+            : QWidget(parent), m_center(center), m_pulseCount(pulseCount > 0 ? pulseCount : 1)
+        {
+            setAttribute(Qt::WA_TransparentForMouseEvents, true);
+            setAttribute(Qt::WA_NoSystemBackground, true);
+            setAttribute(Qt::WA_TranslucentBackground, true);
+            setFocusPolicy(Qt::NoFocus);
+            setGeometry(parent->rect());
+
+            m_timer.setInterval(16);
+            QObject::connect(&m_timer, &QTimer::timeout, this, [this] {
+                if (m_started.elapsed() >= durationMs()) {
+                    m_timer.stop();
+                    close();
+                    return;
+                }
+                update();
+            });
+        }
+
+        void start()
+        {
+            show();
+            raise();
+            m_started.start();
+            m_timer.start();
+        }
+
+        int durationMs() const
+        {
+            return 120 + 50 * (m_pulseCount - 1);
+        }
+
+    protected:
+        void paintEvent(QPaintEvent *) override
+        {
+            const int elapsed = int(m_started.elapsed());
+            QPainter painter(this);
+            painter.setRenderHint(QPainter::Antialiasing, true);
+
+            const QColor coreColor(20, 132, 255, 180);
+            const QColor ringColor(20, 132, 255, 220);
+
+            for (int pulseIndex = 0; pulseIndex < m_pulseCount; ++pulseIndex) {
+                const int localElapsed = elapsed - pulseIndex * 50;
+                if (localElapsed < 0 || localElapsed > 120)
+                    continue;
+
+                const qreal progress = qreal(localElapsed) / 120.0;
+                const int radius = int(6 + progress * 20.0);
+                QColor pulseColor = ringColor;
+                pulseColor.setAlpha(qMax(0, int(ringColor.alpha() * (1.0 - progress))));
+
+                painter.setPen(QPen(pulseColor, 2));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawEllipse(m_center, radius, radius);
+            }
+
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(coreColor);
+            painter.drawEllipse(m_center, 4, 4);
+        }
+
+    private:
+        QPoint m_center;
+        int m_pulseCount;
+        QElapsedTimer m_started;
+        QTimer m_timer;
+    };
+
     QJsonValue invokeWidgetMethod(QWidget *widget, const QJsonObject &requestObject)
     {
         const QPlaywrightClassMetadata metadata = QPlaywrightMetadata::classMetadata(widget);
@@ -1617,10 +1698,48 @@ private:
         QWidget *target = clickTarget.widget;
         target->setFocus(Qt::MouseFocusReason);
         QApplication::processEvents();
+        QPointer<ClickOverlay> overlay = showClickFeedback(target, clickTarget.localPos, doubleClick);
         if (doubleClick)
             QTest::mouseDClick(target, Qt::LeftButton, Qt::NoModifier, clickTarget.localPos);
         else
             QTest::mouseClick(target, Qt::LeftButton, Qt::NoModifier, clickTarget.localPos);
+        QApplication::processEvents();
+        drainClickFeedback(overlay);
+    }
+
+    QPointer<ClickOverlay> showClickFeedback(QWidget *target, const QPoint &localPos, bool doubleClick)
+    {
+        if (!m_visualFeedbackEnabled)
+            return nullptr;
+
+        QWidget *window = target->window();
+        if (!window)
+            return nullptr;
+
+        const QPoint center = window->mapFromGlobal(target->mapToGlobal(localPos));
+        auto *overlay = new ClickOverlay(window, center, doubleClick ? 2 : 1);
+        overlay->start();
+        QApplication::processEvents();
+        return overlay;
+    }
+
+    void drainClickFeedback(QPointer<ClickOverlay> overlay)
+    {
+        if (!overlay)
+            return;
+
+        QElapsedTimer timer;
+        timer.start();
+        const int timeoutMs = overlay->durationMs() + 100;
+        while (overlay && overlay->isVisible() && timer.elapsed() < timeoutMs) {
+            QApplication::processEvents();
+            QThread::msleep(10);
+        }
+
+        if (overlay) {
+            overlay->close();
+            overlay->deleteLater();
+        }
         QApplication::processEvents();
     }
 
@@ -1772,6 +1891,8 @@ private:
 
         throw std::runtime_error(("Timed out waiting for " + selector + " to be " + state).toStdString());
     }
+
+    bool m_visualFeedbackEnabled = false;
 };
 
 // -------------------------------------------------------------------------- //
@@ -1867,7 +1988,7 @@ private:
  *
  * Usage:
  * @code
- *   QPlaywrightAgent::start(19876);
+ *   QPlaywrightAgent::start(19876, "127.0.0.1", true);
  * @endcode
  *
  * The agent runs a TCP server on the specified port. Each client connection
@@ -1882,15 +2003,17 @@ public:
      * @brief Start the agent on the given port.
      * @param port TCP port to listen on (default: 19876)
      * @param host Host to bind to (default: 127.0.0.1)
+     * @param visualFeedback Whether to show click feedback rings in the UI.
      * @return Pointer to the agent instance (owned by QApplication)
      */
-    static QPlaywrightAgent *start(int port = 19876, const QString &host = "127.0.0.1")
+    static QPlaywrightAgent *start(int port = 19876, const QString &host = "127.0.0.1", bool visualFeedback = false)
     {
         auto *app = QApplication::instance();
         Q_ASSERT(app && "QApplication must be created before calling QPlaywrightAgent::start()");
 
         auto *agent = new QPlaywrightAgent(app);
         agent->m_handler = new QPlaywrightHandler(agent);
+        agent->m_handler->setVisualFeedbackEnabled(visualFeedback);
 
         agent->m_server = new QTcpServer(agent);
         QObject::connect(agent->m_server, &QTcpServer::newConnection, agent, &QPlaywrightAgent::onNewConnection);

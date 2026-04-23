@@ -237,7 +237,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
 
     // ★ One line to enable QPlaywright automation ★
-    QPlaywrightAgent::start(19876);
+    QPlaywrightAgent::start(19876, "127.0.0.1", true);
 
     DemoWindow window;
     window.show();
