@@ -302,6 +302,16 @@ def test_resolve_window_explicit_index_overrides_active_window():
     assert mcp_server._resolve_window(connection, window_index=1) is second
 
 
+def test_require_exactly_one_window_selector_rejects_missing_or_multiple_values():
+    with pytest.raises(ValueError, match="exactly one of index, wid, or title"):
+        mcp_server._require_exactly_one_window_selector(index=None, wid=None, title=None)
+
+    with pytest.raises(ValueError, match="exactly one of index, wid, or title"):
+        mcp_server._require_exactly_one_window_selector(index=0, wid=11, title=None)
+
+    mcp_server._require_exactly_one_window_selector(index=0, wid=None, title=None)
+
+
 def test_resolve_locator_accepts_snapshot_ref_as_widget_id():
     connection = mcp_server.ManagedConnection(
         name="demo",
@@ -443,6 +453,26 @@ def test_window_tool_lists_selects_resizes_and_closes(monkeypatch):
     assert second.resized_to == (800, 600)
     assert closed["active_window"]["wid"] == 11
     assert second.closed is True
+
+
+def test_window_select_requires_explicit_selector(monkeypatch):
+    state = mcp_server.ServerState()
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "First")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    with pytest.raises(ValueError, match="exactly one of index, wid, or title"):
+        mcp_server.window(action="select")
+
+    with pytest.raises(ValueError, match="exactly one of index, wid, or title"):
+        mcp_server.window(action="select", index=0, wid=11)
 
 
 def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
@@ -1152,3 +1182,13 @@ def test_target_not_found_message_includes_selector_examples():
     assert "No widget found for target '#missing_btn'" in message
     assert "snapshot or inspect" in message
     assert "#objectName, role=button, text=Submit, has-text=partial, .QLabel" in message
+
+
+def test_cli_tool_help_includes_action_level_session_and_window_guidance():
+    session_help = mcp_server._cli_tool_help("session", mcp_server.session)
+    window_help = mcp_server._cli_tool_help("window", mcp_server.window)
+
+    assert "session.attach: attach to an already running Qt app" in session_help
+    assert "session.status: report current session and active window" in session_help
+    assert "window.select: switch active window" in window_help
+    assert "window.close: close one window or the active window" in window_help

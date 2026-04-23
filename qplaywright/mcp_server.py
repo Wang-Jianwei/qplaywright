@@ -321,6 +321,12 @@ def _resolve_window(
     return windows[0]
 
 
+def _require_exactly_one_window_selector(*, index: int | None, wid: int | None, title: str | None) -> None:
+    selector_count = sum(candidate is not None for candidate in (index, wid, title))
+    if selector_count != 1:
+        raise ValueError("window select requires exactly one of index, wid, or title")
+
+
 def _resolve_locator(
     connection: ManagedConnection,
     *,
@@ -685,7 +691,14 @@ if FastMCP is not None:
         executable: str | None = None,
         args: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Manage one MCP-side qplaywright session."""
+        """Manage the active qplaywright session.
+
+        Actions:
+        - session.attach: attach to an already running Qt app
+        - session.launch: launch a Qt app and attach
+        - session.close: close the current session
+        - session.status: report current session and active window
+        """
 
         if action == "attach":
             connection_state = connect_connection(_SERVER_STATE, host=host, port=port, timeout=timeout)
@@ -742,7 +755,14 @@ if FastMCP is not None:
         width: int | None = None,
         height: int | None = None,
     ) -> dict[str, Any]:
-        """Manage one top-level window within the current session."""
+        """Manage top-level windows in the current session.
+
+        Actions:
+        - window.list: list visible top-level windows
+        - window.select: switch active window
+        - window.resize: resize one window or the active window
+        - window.close: close one window or the active window
+        """
 
         connection_state = _get_connection(_SERVER_STATE)
 
@@ -754,6 +774,7 @@ if FastMCP is not None:
             }
 
         if action == "select":
+            _require_exactly_one_window_selector(index=index, wid=wid, title=title)
             selected_window = _resolve_window(
                 connection_state,
                 window_wid=wid,
