@@ -18,7 +18,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from qplaywright.protocol import (
     DEFAULT_HOST,
@@ -35,6 +35,9 @@ from qplaywright.sync_api._locator import Locator
 LOGGER = logging.getLogger(__name__)
 
 _SNAPSHOT_REF_PATTERN = re.compile(r"^e\d+$")
+
+SessionAction = Literal["attach", "launch", "close", "status"]
+WindowAction = Literal["list", "select", "resize", "close"]
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -688,7 +691,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def session(
-        action: str,
+        action: SessionAction,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
         timeout: float = 30.0,
@@ -697,11 +700,11 @@ if FastMCP is not None:
     ) -> dict[str, Any]:
         """Manage the active qplaywright session.
 
-        Actions:
-        - session.attach: attach to an already running Qt app
-        - session.launch: launch a Qt app and attach
-        - session.close: close the current session
-        - session.status: report current session and active window
+        action must be one of:
+        - attach: attach to an already running Qt app
+        - launch: launch a Qt app and attach
+        - close: close the current session
+        - status: report current session and active window
         """
 
         if action == "attach":
@@ -752,7 +755,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def window(
-        action: str,
+        action: WindowAction,
         index: int | None = None,
         wid: int | None = None,
         title: str | None = None,
@@ -761,11 +764,11 @@ if FastMCP is not None:
     ) -> dict[str, Any]:
         """Manage top-level windows in the current session.
 
-        Actions:
-        - window.list: list visible top-level windows
-        - window.select: switch active window
-        - window.resize: resize one window or the active window
-        - window.close: close one window or the active window
+        action must be one of:
+        - list: list visible top-level windows
+        - select: switch active window
+        - resize: resize one window or the active window
+        - close: close one window or the active window
         """
 
         connection_state = _get_connection(_SERVER_STATE)
