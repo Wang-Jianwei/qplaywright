@@ -139,8 +139,8 @@ def _create_visual_click_overlay_class():
             super().__init__(parent)
             self._center = center
             self._pulse_count = max(1, pulse_count)
-            self._pulse_span = 0.12
-            self._pulse_gap = 0.05
+            self._pulse_span = 0.22
+            self._pulse_gap = 0.08
             self._duration = self._pulse_span + self._pulse_gap * (self._pulse_count - 1)
             self._started = time.monotonic()
             self._timer = QTimer(self)

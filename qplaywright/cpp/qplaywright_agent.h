@@ -1105,7 +1105,7 @@ private:
 
         int durationMs() const
         {
-            return 120 + 50 * (m_pulseCount - 1);
+            return 220 + 80 * (m_pulseCount - 1);
         }
 
     protected:
@@ -1119,11 +1119,11 @@ private:
             const QColor ringColor(20, 132, 255, 220);
 
             for (int pulseIndex = 0; pulseIndex < m_pulseCount; ++pulseIndex) {
-                const int localElapsed = elapsed - pulseIndex * 50;
-                if (localElapsed < 0 || localElapsed > 120)
+                const int localElapsed = elapsed - pulseIndex * 80;
+                if (localElapsed < 0 || localElapsed > 220)
                     continue;
 
-                const qreal progress = qreal(localElapsed) / 120.0;
+                const qreal progress = qreal(localElapsed) / 220.0;
                 const int radius = int(6 + progress * 20.0);
                 QColor pulseColor = ringColor;
                 pulseColor.setAlpha(qMax(0, int(ringColor.alpha() * (1.0 - progress))));
