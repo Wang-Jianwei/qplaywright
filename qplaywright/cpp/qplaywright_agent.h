@@ -37,6 +37,8 @@
 #include <QPainter>
 #include <QPen>
 #include <QPointer>
+#include <QBrush>
+#include <QPolygon>
 #include <QWaitCondition>
 #include <QMouseEvent>
 #include <QKeyEvent>
@@ -1043,6 +1045,18 @@ public:
     void setVisualFeedbackEnabled(bool enabled)
     {
         m_visualFeedbackEnabled = enabled;
+        if (!m_visualFeedbackEnabled) {
+            closeAutomationOverlay();
+            m_overlaySyncTimer.stop();
+            return;
+        }
+
+        if (!m_overlaySyncTimer.isActive()) {
+            m_overlaySyncTimer.setInterval(16);
+            QObject::connect(&m_overlaySyncTimer, &QTimer::timeout, this, &QPlaywrightHandler::syncAutomationOverlay, Qt::UniqueConnection);
+            m_overlaySyncTimer.start();
+        }
+        syncAutomationOverlay();
     }
 
 public slots:
@@ -1072,78 +1086,215 @@ public slots:
     }
 
 private:
-    class ClickOverlay : public QWidget
+    static constexpr const char *kAutomationOverlayObjectName = "_qplaywright_automation_overlay";
+    static constexpr const char *kAutomationOverlayProperty = "qplaywrightAutomationOverlay";
+
+    struct PulseRecord
+    {
+        qint64 startedAtMs;
+        QPoint center;
+        int pulseCount;
+    };
+
+    class AutomationOverlay : public QWidget
     {
     public:
-        ClickOverlay(QWidget *parent, const QPoint &center, int pulseCount)
-            : QWidget(parent), m_center(center), m_pulseCount(pulseCount > 0 ? pulseCount : 1)
+        explicit AutomationOverlay(QWidget *targetWindow)
+            : QWidget(nullptr), m_targetWindow(targetWindow)
         {
+            Qt::WindowFlags flags = Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint;
+            setWindowFlags(flags);
             setAttribute(Qt::WA_TransparentForMouseEvents, true);
             setAttribute(Qt::WA_NoSystemBackground, true);
             setAttribute(Qt::WA_TranslucentBackground, true);
+            setAttribute(Qt::WA_ShowWithoutActivating, true);
             setFocusPolicy(Qt::NoFocus);
-            setGeometry(parent->rect());
-
-            m_timer.setInterval(16);
-            QObject::connect(&m_timer, &QTimer::timeout, this, [this] {
-                if (m_started.elapsed() >= durationMs()) {
-                    m_timer.stop();
-                    close();
-                    return;
-                }
-                update();
-            });
+            setObjectName(QString::fromLatin1(kAutomationOverlayObjectName));
+            setProperty(kAutomationOverlayProperty, true);
+            m_clock.start();
         }
 
-        void start()
+        void syncToWindow(bool forceRaise = false)
         {
-            show();
-            raise();
-            m_started.start();
-            m_timer.start();
+            if (!m_targetWindow || !m_targetWindow->isVisible()) {
+                hide();
+                return;
+            }
+
+            const QPoint topLeft = m_targetWindow->mapToGlobal(m_targetWindow->rect().topLeft());
+            if (geometry().x() != topLeft.x() || geometry().y() != topLeft.y() || width() != m_targetWindow->width() || height() != m_targetWindow->height()) {
+                setGeometry(topLeft.x(), topLeft.y(), m_targetWindow->width(), m_targetWindow->height());
+            }
+
+            if (!m_cursorPosValid)
+                m_cursorPos = m_targetWindow->rect().center();
+            m_cursorPosValid = true;
+
+            if (!isVisible())
+                show();
+            if (forceRaise)
+                raise();
         }
 
-        int durationMs() const
+        void setCursorFromGlobal(const QPoint &globalPos, int pulseCount)
         {
-            return 220 + 80 * (m_pulseCount - 1);
+            if (!m_targetWindow)
+                return;
+
+            m_cursorPos = m_targetWindow->mapFromGlobal(globalPos);
+            m_cursorPosValid = true;
+            if (pulseCount > 0)
+                m_pulses.append({m_clock.elapsed(), m_cursorPos, pulseCount});
+            syncToWindow(true);
+            update();
+        }
+
+        void closeOverlay()
+        {
+            hide();
+            close();
+        }
+
+        QWidget *targetWindow() const
+        {
+            return m_targetWindow.data();
         }
 
     protected:
         void paintEvent(QPaintEvent *) override
         {
-            const int elapsed = int(m_started.elapsed());
             QPainter painter(this);
             painter.setRenderHint(QPainter::Antialiasing, true);
 
             const QColor coreColor(20, 132, 255, 180);
             const QColor ringColor(20, 132, 255, 220);
 
-            for (int pulseIndex = 0; pulseIndex < m_pulseCount; ++pulseIndex) {
-                const int localElapsed = elapsed - pulseIndex * 80;
-                if (localElapsed < 0 || localElapsed > 220)
-                    continue;
+            const qint64 now = m_clock.elapsed();
+            for (const PulseRecord &pulse : m_pulses) {
+                for (int pulseIndex = 0; pulseIndex < pulse.pulseCount; ++pulseIndex) {
+                    const qint64 localElapsed = now - pulse.startedAtMs - pulseIndex * 80;
+                    if (localElapsed < 0 || localElapsed > 220)
+                        continue;
 
-                const qreal progress = qreal(localElapsed) / 220.0;
-                const int radius = int(6 + progress * 20.0);
-                QColor pulseColor = ringColor;
-                pulseColor.setAlpha(qMax(0, int(ringColor.alpha() * (1.0 - progress))));
+                    const qreal progress = qreal(localElapsed) / 220.0;
+                    const int radius = int(6 + progress * 20.0);
+                    QColor pulseColor = ringColor;
+                    pulseColor.setAlpha(qMax(0, int(ringColor.alpha() * (1.0 - progress))));
 
-                painter.setPen(QPen(pulseColor, 2));
-                painter.setBrush(Qt::NoBrush);
-                painter.drawEllipse(m_center, radius, radius);
+                    painter.setPen(QPen(pulseColor, 2));
+                    painter.setBrush(Qt::NoBrush);
+                    painter.drawEllipse(pulse.center, radius, radius);
+                }
             }
 
+            if (!m_cursorPosValid)
+                return;
+
+            const QPolygon shadow({
+                m_cursorPos + QPoint(2, 2),
+                m_cursorPos + QPoint(2, 20),
+                m_cursorPos + QPoint(7, 15),
+                m_cursorPos + QPoint(10, 23),
+                m_cursorPos + QPoint(13, 22),
+                m_cursorPos + QPoint(10, 14),
+                m_cursorPos + QPoint(17, 14),
+            });
+            const QPolygon cursor({
+                m_cursorPos,
+                m_cursorPos + QPoint(0, 18),
+                m_cursorPos + QPoint(5, 13),
+                m_cursorPos + QPoint(8, 21),
+                m_cursorPos + QPoint(11, 20),
+                m_cursorPos + QPoint(8, 12),
+                m_cursorPos + QPoint(15, 12),
+            });
+
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(0, 0, 0, 110));
+            painter.drawPolygon(shadow);
+            painter.setPen(QPen(QColor(0, 0, 0, 200), 1));
+            painter.setBrush(QBrush(QColor(255, 255, 255, 240)));
+            painter.drawPolygon(cursor);
             painter.setPen(Qt::NoPen);
             painter.setBrush(coreColor);
-            painter.drawEllipse(m_center, 4, 4);
+            painter.drawEllipse(m_cursorPos, 4, 4);
         }
 
     private:
-        QPoint m_center;
-        int m_pulseCount;
-        QElapsedTimer m_started;
-        QTimer m_timer;
+        QPointer<QWidget> m_targetWindow;
+        QPoint m_cursorPos;
+        bool m_cursorPosValid = false;
+        QVector<PulseRecord> m_pulses;
+        QElapsedTimer m_clock;
     };
+
+    bool isAutomationOverlayWidget(QWidget *widget) const
+    {
+        if (!widget)
+            return false;
+        if (widget->objectName() == QString::fromLatin1(kAutomationOverlayObjectName))
+            return true;
+        return widget->property(kAutomationOverlayProperty).toBool();
+    }
+
+    QList<QWidget *> topLevelWidgets() const
+    {
+        QList<QWidget *> widgets;
+        for (QWidget *widget : QApplication::topLevelWidgets()) {
+            if (!isAutomationOverlayWidget(widget))
+                widgets.append(widget);
+        }
+        return widgets;
+    }
+
+    void closeAutomationOverlay()
+    {
+        if (m_overlay) {
+            m_overlay->closeOverlay();
+            m_overlay->deleteLater();
+            m_overlay = nullptr;
+        }
+        m_activeOverlayWindow = nullptr;
+    }
+
+    void syncAutomationOverlay()
+    {
+        if (!m_visualFeedbackEnabled) {
+            closeAutomationOverlay();
+            return;
+        }
+
+        if (!m_activeOverlayWindow || !m_activeOverlayWindow->isVisible()) {
+            const QList<QWidget *> windows = topLevelWidgets();
+            m_activeOverlayWindow = windows.isEmpty() ? nullptr : windows.first();
+        }
+
+        if (!m_activeOverlayWindow) {
+            closeAutomationOverlay();
+            return;
+        }
+
+        if (!m_overlay || m_overlay->targetWindow() != m_activeOverlayWindow) {
+            closeAutomationOverlay();
+            m_overlay = new AutomationOverlay(m_activeOverlayWindow);
+        }
+
+        m_overlay->syncToWindow();
+    }
+
+    void updateVisualFeedback(QWidget *target, const QPoint &localPos, bool doubleClick)
+    {
+        if (!m_visualFeedbackEnabled || !target)
+            return;
+
+        m_activeOverlayWindow = target->window();
+        syncAutomationOverlay();
+        if (!m_overlay)
+            return;
+
+        m_overlay->setCursorFromGlobal(target->mapToGlobal(localPos), doubleClick ? 2 : 1);
+        QApplication::processEvents();
+    }
 
     QJsonValue invokeWidgetMethod(QWidget *widget, const QJsonObject &requestObject)
     {
@@ -1191,6 +1342,9 @@ private:
 
     QJsonObject serializeWidgetTree(QWidget *w, int depth = 0, int maxDepth = 10)
     {
+        if (isAutomationOverlayWidget(w))
+            throw std::runtime_error("Automation overlay widgets are excluded from snapshot capture");
+
         auto &reg = QPlaywrightRegistry::instance();
 
         QJsonObject obj;
@@ -1235,7 +1389,7 @@ private:
             QJsonArray children;
             for (QObject *child : w->children()) {
                 QWidget *cw = qobject_cast<QWidget *>(child);
-                if (cw)
+                if (cw && !isAutomationOverlayWidget(cw))
                     children.append(serializeWidgetTree(cw, depth + 1, maxDepth));
             }
             if (!children.isEmpty())
@@ -1287,7 +1441,7 @@ private:
                     throw std::runtime_error("Widget not found by wid");
                 roots.append(root);
             } else {
-                roots = QApplication::topLevelWidgets();
+                roots = topLevelWidgets();
             }
             for (QWidget *w : roots) {
                 if (w->isVisible())
@@ -1445,7 +1599,7 @@ private:
             if (method == "screenshot_widget") {
                 w = resolveOne(params);
             } else {
-                auto windows = QApplication::topLevelWidgets();
+                auto windows = topLevelWidgets();
                 w = nullptr;
                 if (params.contains("wid")) {
                     w = reg.get(params["wid"].toInt());
@@ -1500,7 +1654,7 @@ private:
         // -- Window management --
         if (method == "list_windows") {
             QJsonArray arr;
-            for (QWidget *w : QApplication::topLevelWidgets()) {
+            for (QWidget *w : topLevelWidgets()) {
                 if (!w->isVisible()) continue;
                 int wid = reg.registerWidget(w);
                 QJsonObject r;
@@ -1567,7 +1721,7 @@ private:
             if (!parent) throw std::runtime_error("Parent widget not found");
             roots.append(parent);
         } else {
-            roots = QApplication::topLevelWidgets();
+                roots = topLevelWidgets();
         }
 
         QString hasText = params["has_text"].toString();
@@ -1610,7 +1764,7 @@ private:
                 return window;
         }
 
-        for (QWidget *window : QApplication::topLevelWidgets()) {
+        for (QWidget *window : topLevelWidgets()) {
             if (window->isVisible())
                 return window;
         }
@@ -1663,6 +1817,8 @@ private:
         QPoint center = target->rect().center();
         QPoint globalPos = target->mapToGlobal(center);
         QWidget *hit = QApplication::widgetAt(globalPos);
+        if (isAutomationOverlayWidget(hit))
+            hit = nullptr;
         if (!hit)
             hit = target->childAt(center);
         if (!hit)
@@ -1698,48 +1854,11 @@ private:
         QWidget *target = clickTarget.widget;
         target->setFocus(Qt::MouseFocusReason);
         QApplication::processEvents();
-        QPointer<ClickOverlay> overlay = showClickFeedback(target, clickTarget.localPos, doubleClick);
+        updateVisualFeedback(target, clickTarget.localPos, doubleClick);
         if (doubleClick)
             QTest::mouseDClick(target, Qt::LeftButton, Qt::NoModifier, clickTarget.localPos);
         else
             QTest::mouseClick(target, Qt::LeftButton, Qt::NoModifier, clickTarget.localPos);
-        QApplication::processEvents();
-        drainClickFeedback(overlay);
-    }
-
-    QPointer<ClickOverlay> showClickFeedback(QWidget *target, const QPoint &localPos, bool doubleClick)
-    {
-        if (!m_visualFeedbackEnabled)
-            return nullptr;
-
-        QWidget *window = target->window();
-        if (!window)
-            return nullptr;
-
-        const QPoint center = window->mapFromGlobal(target->mapToGlobal(localPos));
-        auto *overlay = new ClickOverlay(window, center, doubleClick ? 2 : 1);
-        overlay->start();
-        QApplication::processEvents();
-        return overlay;
-    }
-
-    void drainClickFeedback(QPointer<ClickOverlay> overlay)
-    {
-        if (!overlay)
-            return;
-
-        QElapsedTimer timer;
-        timer.start();
-        const int timeoutMs = overlay->durationMs() + 100;
-        while (overlay && overlay->isVisible() && timer.elapsed() < timeoutMs) {
-            QApplication::processEvents();
-            QThread::msleep(10);
-        }
-
-        if (overlay) {
-            overlay->close();
-            overlay->deleteLater();
-        }
         QApplication::processEvents();
     }
 
@@ -1893,6 +2012,9 @@ private:
     }
 
     bool m_visualFeedbackEnabled = false;
+    QTimer m_overlaySyncTimer;
+    QPointer<QWidget> m_activeOverlayWindow;
+    QPointer<AutomationOverlay> m_overlay;
 };
 
 // -------------------------------------------------------------------------- //

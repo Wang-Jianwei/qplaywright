@@ -5,15 +5,17 @@
 """
 
 import sys
+import os
 sys.path.insert(0, ".")
 
 from qplaywright.sync_api import sync_qplaywright
 
 
 def main():
+    port = int(os.environ.get("QPLAYWRIGHT_PORT", "19876"))
     with sync_qplaywright() as qp:
         # Connect to the running demo app
-        app = qp.connect(port=19876, timeout=5)
+        app = qp.connect(port=port, timeout=5)
         print("Connected to demo app!")
 
         # Get the main window
