@@ -9,6 +9,8 @@ inspect windows, and interact with widgets via the existing selector model.
 import argparse
 import atexit
 import contextlib
+import inspect
+import json
 import logging
 import re
 import sys
@@ -695,6 +697,18 @@ def _action_result_with_snapshot(
     return result
 
 
+def _finalize_action_result(
+    managed_connection: ManagedConnection,
+    *,
+    include_snapshot: bool = False,
+    snapshot_target: str | None = None,
+    **payload: Any,
+) -> dict[str, Any]:
+    if not include_snapshot:
+        return dict(payload)
+    return _action_result_with_snapshot(managed_connection, snapshot_target=snapshot_target, **payload)
+
+
 def _stringify_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -910,11 +924,13 @@ if FastMCP is not None:
         window_title: str | None = None,
         window_index: int | None = None,
         double_click: bool = False,
+        include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Click or double-click the first widget matched by a selector."""
 
+        connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
-            _get_connection(_SERVER_STATE, connection),
+            connection_state,
             selector=selector,
             has_text=has_text,
             nth=nth,
@@ -926,7 +942,15 @@ if FastMCP is not None:
             locator.dblclick()
         else:
             locator.click()
-        return {"ok": True, "double_click": double_click, "selector": selector, "connection": connection}
+        return _finalize_action_result(
+            connection_state,
+            include_snapshot=include_snapshot,
+            snapshot_target=selector,
+            ok=True,
+            double_click=double_click,
+            selector=selector,
+            connection=connection,
+        )
 
 
     @mcp.tool()
@@ -939,11 +963,13 @@ if FastMCP is not None:
         window_wid: int | None = None,
         window_title: str | None = None,
         window_index: int | None = None,
+        include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Clear and fill the first matched input-like widget."""
 
+        connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
-            _get_connection(_SERVER_STATE, connection),
+            connection_state,
             selector=selector,
             has_text=has_text,
             nth=nth,
@@ -952,7 +978,15 @@ if FastMCP is not None:
             window_index=window_index,
         )
         locator.fill(value)
-        return {"ok": True, "selector": selector, "value": value, "connection": connection}
+        return _finalize_action_result(
+            connection_state,
+            include_snapshot=include_snapshot,
+            snapshot_target=selector,
+            ok=True,
+            selector=selector,
+            value=value,
+            connection=connection,
+        )
 
 
     @mcp.tool()
@@ -966,11 +1000,13 @@ if FastMCP is not None:
         window_title: str | None = None,
         window_index: int | None = None,
         args: dict[str, Any] | None = None,
+        include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Invoke one exposed custom widget method by exact name."""
 
+        connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
-            _get_connection(_SERVER_STATE, connection),
+            connection_state,
             selector=selector,
             has_text=has_text,
             nth=nth,
@@ -979,14 +1015,17 @@ if FastMCP is not None:
             window_index=window_index,
         )
         result = _invoke_locator_method(locator, method_name=method_name, args=args)
-        return {
-            "ok": True,
-            "connection": connection,
-            "selector": selector,
-            "method_name": method_name,
-            "args": dict(args or {}),
-            "result": result,
-        }
+        return _finalize_action_result(
+            connection_state,
+            include_snapshot=include_snapshot,
+            snapshot_target=selector,
+            ok=True,
+            connection=connection,
+            selector=selector,
+            method_name=method_name,
+            args=dict(args or {}),
+            result=result,
+        )
 
 
     @mcp.tool()
@@ -1000,11 +1039,13 @@ if FastMCP is not None:
         window_title: str | None = None,
         window_index: int | None = None,
         delay: int = 0,
+        include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Type text into the first matched widget without clearing existing content."""
 
+        connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
-            _get_connection(_SERVER_STATE, connection),
+            connection_state,
             selector=selector,
             has_text=has_text,
             nth=nth,
@@ -1013,7 +1054,16 @@ if FastMCP is not None:
             window_index=window_index,
         )
         locator.type(text, delay=delay)
-        return {"ok": True, "selector": selector, "text": text, "delay": delay, "connection": connection}
+        return _finalize_action_result(
+            connection_state,
+            include_snapshot=include_snapshot,
+            snapshot_target=selector,
+            ok=True,
+            selector=selector,
+            text=text,
+            delay=delay,
+            connection=connection,
+        )
 
 
     @mcp.tool()
@@ -1026,11 +1076,13 @@ if FastMCP is not None:
         window_wid: int | None = None,
         window_title: str | None = None,
         window_index: int | None = None,
+        include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Send a single key press to the first matched widget."""
 
+        connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
-            _get_connection(_SERVER_STATE, connection),
+            connection_state,
             selector=selector,
             has_text=has_text,
             nth=nth,
@@ -1039,7 +1091,15 @@ if FastMCP is not None:
             window_index=window_index,
         )
         locator.press(key)
-        return {"ok": True, "selector": selector, "key": key, "connection": connection}
+        return _finalize_action_result(
+            connection_state,
+            include_snapshot=include_snapshot,
+            snapshot_target=selector,
+            ok=True,
+            selector=selector,
+            key=key,
+            connection=connection,
+        )
 
 
     @mcp.tool()
@@ -1052,11 +1112,13 @@ if FastMCP is not None:
         window_wid: int | None = None,
         window_title: str | None = None,
         window_index: int | None = None,
+        include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Check or uncheck the first matched checkable widget."""
 
+        connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
-            _get_connection(_SERVER_STATE, connection),
+            connection_state,
             selector=selector,
             has_text=has_text,
             nth=nth,
@@ -1068,7 +1130,15 @@ if FastMCP is not None:
             locator.check()
         else:
             locator.uncheck()
-        return {"ok": True, "selector": selector, "checked": checked, "connection": connection}
+        return _finalize_action_result(
+            connection_state,
+            include_snapshot=include_snapshot,
+            snapshot_target=selector,
+            ok=True,
+            selector=selector,
+            checked=checked,
+            connection=connection,
+        )
 
 
     @mcp.tool()
@@ -1083,6 +1153,7 @@ if FastMCP is not None:
         value: str | None = None,
         index: int | None = None,
         label: str | None = None,
+        include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Select a combobox option by value, index, or label."""
 
@@ -1090,8 +1161,9 @@ if FastMCP is not None:
         if selector_count != 1:
             raise ValueError("Exactly one of value, index, or label must be provided")
 
+        connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
-            _get_connection(_SERVER_STATE, connection),
+            connection_state,
             selector=selector,
             has_text=has_text,
             nth=nth,
@@ -1100,14 +1172,17 @@ if FastMCP is not None:
             window_index=window_index,
         )
         locator.select_option(value=value, index=index, label=label)
-        return {
-            "ok": True,
-            "selector": selector,
-            "value": value,
-            "index": index,
-            "label": label,
-            "connection": connection,
-        }
+        return _finalize_action_result(
+            connection_state,
+            include_snapshot=include_snapshot,
+            snapshot_target=selector,
+            ok=True,
+            selector=selector,
+            value=value,
+            index=index,
+            label=label,
+            connection=connection,
+        )
 
 
     @mcp.tool()
@@ -1121,11 +1196,13 @@ if FastMCP is not None:
         window_index: int | None = None,
         state: str = "visible",
         timeout: float | None = None,
+        include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Wait until a widget reaches a supported state."""
 
+        connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
-            _get_connection(_SERVER_STATE, connection),
+            connection_state,
             selector=selector,
             has_text=has_text,
             nth=nth,
@@ -1134,7 +1211,14 @@ if FastMCP is not None:
             window_index=window_index,
         )
         locator.wait_for(state=state, timeout=timeout)
-        return {"ok": True, "selector": selector, "state": state, "timeout": timeout, "connection": connection}
+        payload = {
+            "ok": True,
+            "selector": selector,
+            "state": state,
+            "timeout": timeout,
+            "connection": connection,
+        }
+        return _finalize_action_result(connection_state, include_snapshot=include_snapshot, **payload)
 
 
     @mcp.tool()
@@ -1147,10 +1231,19 @@ if FastMCP is not None:
         window_title: str | None = None,
         window_index: int | None = None,
         path: str | None = None,
+        x: int | None = None,
+        y: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
     ) -> dict[str, Any]:
-        """Capture a screenshot of a window or a matched widget."""
+        """Capture a screenshot of a window or a matched widget, optionally clipped to a rectangle."""
 
         live_connection = _get_connection(_SERVER_STATE, connection)
+        clip_kwargs = _screenshot_clip_kwargs(x=x, y=y, width=width, height=height)
+        clip_x = clip_kwargs.get("x")
+        clip_y = clip_kwargs.get("y")
+        clip_width = clip_kwargs.get("width")
+        clip_height = clip_kwargs.get("height")
         if selector is None:
             window = _resolve_window(
                 live_connection,
@@ -1158,7 +1251,18 @@ if FastMCP is not None:
                 window_title=window_title,
                 window_index=window_index,
             )
-            result = window.screenshot(path=path) if path else window.screenshot()
+            if clip_kwargs:
+                result = window.screenshot(
+                    path=path,
+                    x=clip_x,
+                    y=clip_y,
+                    width=clip_width,
+                    height=clip_height,
+                )
+            elif path:
+                result = window.screenshot(path=path)
+            else:
+                result = window.screenshot()
         else:
             locator = _resolve_locator(
                 live_connection,
@@ -1169,7 +1273,18 @@ if FastMCP is not None:
                 window_title=window_title,
                 window_index=window_index,
             )
-            result = locator.screenshot(path=path) if path else locator.screenshot()
+            if clip_kwargs:
+                result = locator.screenshot(
+                    path=path,
+                    x=clip_x,
+                    y=clip_y,
+                    width=clip_width,
+                    height=clip_height,
+                )
+            elif path:
+                result = locator.screenshot(path=path)
+            else:
+                result = locator.screenshot()
         result["connection"] = connection
         result["selector"] = selector
         return result
@@ -1224,11 +1339,13 @@ if FastMCP is not None:
         window_wid: int | None = None,
         window_title: str | None = None,
         window_index: int | None = None,
+        include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Hover over the first widget matched by a selector."""
 
+        connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
-            _get_connection(_SERVER_STATE, connection),
+            connection_state,
             selector=selector,
             has_text=has_text,
             nth=nth,
@@ -1237,7 +1354,14 @@ if FastMCP is not None:
             window_index=window_index,
         )
         locator.hover()
-        return {"ok": True, "selector": selector, "connection": connection}
+        return _finalize_action_result(
+            connection_state,
+            include_snapshot=include_snapshot,
+            snapshot_target=selector,
+            ok=True,
+            selector=selector,
+            connection=connection,
+        )
 
 
     @mcp.tool()
@@ -1251,11 +1375,13 @@ if FastMCP is not None:
         window_index: int | None = None,
         delta_x: int = 0,
         delta_y: int = 0,
+        include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Send a mouse wheel scroll event to the first matched widget."""
 
+        connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
-            _get_connection(_SERVER_STATE, connection),
+            connection_state,
             selector=selector,
             has_text=has_text,
             nth=nth,
@@ -1264,13 +1390,16 @@ if FastMCP is not None:
             window_index=window_index,
         )
         locator.scroll(delta_x=delta_x, delta_y=delta_y)
-        return {
-            "ok": True,
-            "selector": selector,
-            "delta_x": delta_x,
-            "delta_y": delta_y,
-            "connection": connection,
-        }
+        return _finalize_action_result(
+            connection_state,
+            include_snapshot=include_snapshot,
+            snapshot_target=selector,
+            ok=True,
+            selector=selector,
+            delta_x=delta_x,
+            delta_y=delta_y,
+            connection=connection,
+        )
 
 
     @mcp.tool(name="browser_click")
@@ -1533,15 +1662,29 @@ if FastMCP is not None:
         type: str = "png",
         filename: str | None = None,
         fullPage: bool = False,
+        x: int | None = None,
+        y: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
     ) -> dict[str, Any]:
-        """Take a screenshot of the current Qt window or a specific widget."""
+        """Take a screenshot of the current Qt window or a specific widget, optionally clipped to a rectangle."""
 
         if type not in {"png", "jpeg", "jpg"}:
             raise ValueError("Supported screenshot types are png and jpeg")
         if fullPage:
             raise ValueError("Qt compatibility layer does not distinguish viewport and full-page screenshots")
         connection_state = _get_connection(_SERVER_STATE, connection)
+        clip_kwargs = _screenshot_clip_kwargs(x=x, y=y, width=width, height=height)
         if target is None and element is None:
+            if clip_kwargs:
+                return screenshot(
+                    connection=connection,
+                    path=filename,
+                    x=clip_kwargs["x"],
+                    y=clip_kwargs["y"],
+                    width=clip_kwargs["width"],
+                    height=clip_kwargs["height"],
+                )
             return screenshot(connection=connection, path=filename)
 
         result = _send_widget_command(
@@ -1550,6 +1693,7 @@ if FastMCP is not None:
             target=target,
             element=element,
             path=filename,
+            **clip_kwargs,
         )
         result["connection"] = connection
         result["selector"] = target or element
@@ -1587,25 +1731,35 @@ if FastMCP is not None:
         text: str | None = None,
         textGone: str | None = None,
         timeout: float = 5.0,
+        include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Wait for a duration or for text to appear or disappear in the widget snapshot."""
 
+        connection_state = _get_connection(_SERVER_STATE, connection)
         if time is not None:
             time_seconds = max(time, 0)
             time_module = __import__("time")
             time_module.sleep(time_seconds)
-            return {"ok": True, "waited": time_seconds, "connection": connection}
+            payload = {"ok": True, "waited": time_seconds, "connection": connection}
+            return _finalize_action_result(connection_state, include_snapshot=include_snapshot, **payload)
 
         if text is None and textGone is None:
             raise ValueError("Provide time, text, or textGone")
 
         _wait_for_text_state(
-            _get_connection(_SERVER_STATE, connection),
+            connection_state,
             text=text,
             text_gone=textGone,
             timeout=timeout,
         )
-        return {"ok": True, "text": text, "textGone": textGone, "timeout": timeout, "connection": connection}
+        payload = {
+            "ok": True,
+            "text": text,
+            "textGone": textGone,
+            "timeout": timeout,
+            "connection": connection,
+        }
+        return _finalize_action_result(connection_state, include_snapshot=include_snapshot, **payload)
 
 
     @mcp.tool(name="browser_verify_element_visible")
@@ -1676,6 +1830,199 @@ else:  # pragma: no cover - exercised only without the extra installed
     mcp = None
 
 
+_CLI_TOOL_NAMES = (
+    "connect",
+    "launch",
+    "disconnect",
+    "list_live_connections",
+    "list_windows",
+    "widget_tree",
+    "inspect_widget",
+    "get_widget_methods",
+    "click",
+    "fill",
+    "invoke_widget_method",
+    "type_text",
+    "press_key",
+    "set_checked",
+    "select_option",
+    "wait_for",
+    "screenshot",
+    "resize_window",
+    "close_window",
+    "hover",
+    "scroll",
+    "browser_click",
+    "browser_close",
+    "browser_fill_form",
+    "browser_hover",
+    "browser_press_key",
+    "browser_resize",
+    "browser_select_option",
+    "browser_snapshot",
+    "browser_tabs",
+    "browser_take_screenshot",
+    "browser_type",
+    "browser_wait_for",
+    "browser_verify_element_visible",
+    "browser_verify_text_visible",
+    "browser_verify_value",
+)
+
+
+def _cli_tool_registry() -> dict[str, Any]:
+    registry: dict[str, Any] = {}
+    for name in _CLI_TOOL_NAMES:
+        func = globals().get(name)
+        if callable(func):
+            registry[name] = func
+    return registry
+
+
+def _cli_usage_text() -> str:
+    return (
+        "Interactive qplaywright MCP CLI\n\n"
+        "Examples:\n"
+        "  qplaywright-mcp cli\n"
+        "  qplaywright-mcp cli connect '{\"name\": \"probe\", \"port\": 19877}'\n"
+        "  qplaywright-mcp cli browser_snapshot '{\"connection\": \"probe\", \"depth\": 4}'\n\n"
+        "REPL commands:\n"
+        "  .tools                List available tools\n"
+        "  .help                 Show CLI help\n"
+        "  .help TOOL            Show one tool signature and docstring\n"
+        "  TOOL {JSON}           Invoke one tool with a JSON object argument\n"
+        "  quit / exit           Leave the REPL"
+    )
+
+
+def _cli_tool_help(tool_name: str, func: Any) -> str:
+    signature = inspect.signature(func)
+    doc = (inspect.getdoc(func) or "No description available.").strip()
+    return f"{tool_name}{signature}\n\n{doc}"
+
+
+def _split_cli_invocation(command_line: str) -> tuple[str, str | None]:
+    parts = command_line.strip().split(None, 1)
+    if not parts:
+        raise ValueError("A tool name is required")
+    if len(parts) == 1:
+        return parts[0], None
+    return parts[0], parts[1]
+
+
+def _parse_cli_arguments(raw_arguments: str | None) -> dict[str, Any]:
+    if raw_arguments is None or not raw_arguments.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_arguments)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "CLI arguments must be a JSON object, for example: '{\"connection\": \"default\"}'"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("CLI arguments must decode to a JSON object")
+    return parsed
+
+
+def _print_cli_result(value: Any) -> None:
+    if isinstance(value, str):
+        print(value)
+        return
+    print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+
+
+def _invoke_cli_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
+    registry = _cli_tool_registry()
+    try:
+        func = registry[tool_name]
+    except KeyError as exc:
+        available = ", ".join(sorted(registry)) or "<none>"
+        raise ValueError(f"Unknown CLI tool {tool_name!r}. Available tools: {available}") from exc
+    return func(**arguments)
+
+
+def _handle_cli_meta_command(command_line: str) -> bool:
+    normalized = command_line.strip()
+    if normalized in {".tools", "tools"}:
+        print("Available tools:")
+        for name in sorted(_cli_tool_registry()):
+            print(f"- {name}")
+        return True
+
+    if normalized in {".help", "help"}:
+        print(_cli_usage_text())
+        return True
+
+    if normalized.startswith(".help ") or normalized.startswith("help "):
+        _, tool_name = normalized.split(None, 1)
+        registry = _cli_tool_registry()
+        try:
+            func = registry[tool_name]
+        except KeyError as exc:
+            raise ValueError(f"Unknown CLI tool {tool_name!r}") from exc
+        print(_cli_tool_help(tool_name, func))
+        return True
+
+    return False
+
+
+def _run_cli_command(tool_name: str, raw_arguments: str | None) -> int:
+    try:
+        result = _invoke_cli_tool(tool_name, _parse_cli_arguments(raw_arguments))
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    _print_cli_result(result)
+    return 0
+
+
+def _run_cli_repl() -> int:
+    print("qplaywright MCP CLI. Type .help for usage.")
+    while True:
+        try:
+            command_line = input("qplaywright> ").strip()
+        except EOFError:
+            print()
+            return 0
+        except KeyboardInterrupt:
+            print()
+            return 130
+
+        if not command_line:
+            continue
+        if command_line in {"quit", "exit", ".quit", ".exit"}:
+            return 0
+
+        try:
+            if _handle_cli_meta_command(command_line):
+                continue
+            tool_name, raw_arguments = _split_cli_invocation(command_line)
+            _run_cli_command(tool_name, raw_arguments)
+        except Exception as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+
+
+def _run_cli(argv: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(
+        description="Run qplaywright MCP tools directly from the command line or in an interactive REPL."
+    )
+    parser.add_argument(
+        "tool",
+        nargs="?",
+        help="Tool name to call once. Omit to start an interactive CLI session.",
+    )
+    parser.add_argument(
+        "arguments",
+        nargs="?",
+        help="JSON object with tool arguments, for example '{\"name\": \"probe\", \"port\": 19877}'.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.tool is None:
+        return _run_cli_repl()
+    return _run_cli_command(args.tool, args.arguments)
+
+
 def _configure_stdio_for_mcp(transport: str) -> None:
     """Force UTF-8 stdio for MCP line transport on Windows and other locale-based consoles."""
 
@@ -1689,6 +2036,29 @@ def _configure_stdio_for_mcp(transport: str) -> None:
             reconfigure(encoding="utf-8", errors=errors)
 
 
+def _screenshot_clip_kwargs(
+    x: int | None = None,
+    y: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+) -> dict[str, int]:
+    values = {"x": x, "y": y, "width": width, "height": height}
+    present = {key: value for key, value in values.items() if value is not None}
+    if not present:
+        return {}
+    if len(present) != 4:
+        raise ValueError("Screenshot clipping requires x, y, width, and height together")
+    if x is None or y is None or width is None or height is None:
+        raise ValueError("Screenshot clipping requires x, y, width, and height together")
+    clip_x = int(x)
+    clip_y = int(y)
+    clip_width = int(width)
+    clip_height = int(height)
+    if clip_x < 0 or clip_y < 0 or clip_width <= 0 or clip_height <= 0:
+        raise ValueError("Screenshot clipping requires non-negative x/y and positive width/height")
+    return {"x": clip_x, "y": clip_y, "width": clip_width, "height": clip_height}
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     """Entry point for running the qplaywright MCP server."""
 
@@ -1698,6 +2068,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             "Install it with: pip install -e .[mcp]"
         )
 
+    argv_list = list(argv if argv is not None else sys.argv[1:])
+    mode = "serve"
+    if argv_list and argv_list[0] in {"serve", "cli"}:
+        mode = argv_list.pop(0)
+
+    if mode == "cli":
+        raise SystemExit(_run_cli(argv_list))
+
     parser = argparse.ArgumentParser(description="Run the qplaywright MCP server")
     parser.add_argument(
         "--transport",
@@ -1705,7 +2083,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         default="stdio",
         help="MCP transport to expose. stdio is the default and works with most hosts.",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv_list)
     LOGGER.debug("Starting qplaywright MCP server with transport=%s", args.transport)
     _configure_stdio_for_mcp(args.transport)
     mcp.run(transport=args.transport)

@@ -140,11 +140,23 @@ class Window:
 
     # -- Screenshots ---------------------------------------------------------
 
-    def screenshot(self, *, path: str | None = None) -> bytes | dict:
-        """Take a screenshot of the entire window.
+    def screenshot(
+        self,
+        *,
+        path: str | None = None,
+        x: int | None = None,
+        y: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> bytes | dict:
+        """Take a screenshot of the entire window or a clipped region.
 
         Args:
             path: If provided, save the screenshot to this file path.
+            x: Optional left coordinate relative to the window.
+            y: Optional top coordinate relative to the window.
+            width: Optional clip width.
+            height: Optional clip height.
 
         Returns:
             If path is None, returns dict with base64 data.
@@ -153,6 +165,14 @@ class Window:
         params: dict[str, Any] = {"wid": self._wid}
         if path:
             params["path"] = path
+        if x is not None:
+            params["x"] = x
+        if y is not None:
+            params["y"] = y
+        if width is not None:
+            params["width"] = width
+        if height is not None:
+            params["height"] = height
         return self._conn.send(METHOD_SCREENSHOT, params)
 
     # -- Widget tree ---------------------------------------------------------

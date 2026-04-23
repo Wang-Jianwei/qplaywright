@@ -106,6 +106,21 @@ Or:
 python -m qplaywright.mcp_server
 ```
 
+Run the direct CLI / REPL when you want to keep issuing tool calls from one terminal session:
+
+```bash
+qplaywright-mcp cli
+qplaywright> connect {"name": "probe", "port": 19877}
+qplaywright> browser_snapshot {"connection": "probe", "depth": 4}
+qplaywright> click {"connection": "probe", "selector": "text=Start"}
+```
+
+You can also run one tool call without starting the REPL:
+
+```bash
+qplaywright-mcp cli list_windows '{"connection": "probe"}'
+```
+
 ## Packaging
 
 Build wheel and sdist locally:

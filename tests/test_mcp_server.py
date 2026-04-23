@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import qplaywright.mcp_server as mcp_server
@@ -61,6 +63,8 @@ class FakeLocator:
     def __init__(self, *, count: int, invoke_result=None):
         self._count = count
         self._invoke_result = invoke_result
+        self.action_calls = []
+        self.wait_calls = []
 
     def count(self) -> int:
         return self._count
@@ -111,12 +115,46 @@ class FakeLocator:
         ]
 
     def invoke(self, method_name: str, args: dict[str, object] | None = None):
+        self.action_calls.append(("invoke", {"method_name": method_name, "args": dict(args or {})}))
         if self._invoke_result is not None:
             return self._invoke_result
         return {
             "method_name": method_name,
             "args": dict(args or {}),
         }
+
+    def click(self):
+        self.action_calls.append(("click", {}))
+
+    def dblclick(self):
+        self.action_calls.append(("dblclick", {}))
+
+    def fill(self, value: str):
+        self.action_calls.append(("fill", {"value": value}))
+
+    def type(self, text: str, *, delay: int = 0):
+        self.action_calls.append(("type", {"text": text, "delay": delay}))
+
+    def press(self, key: str):
+        self.action_calls.append(("press", {"key": key}))
+
+    def check(self):
+        self.action_calls.append(("check", {}))
+
+    def uncheck(self):
+        self.action_calls.append(("uncheck", {}))
+
+    def select_option(self, *, value=None, index=None, label=None):
+        self.action_calls.append(("select_option", {"value": value, "index": index, "label": label}))
+
+    def hover(self):
+        self.action_calls.append(("hover", {}))
+
+    def scroll(self, *, delta_x: int = 0, delta_y: int = 0):
+        self.action_calls.append(("scroll", {"delta_x": delta_x, "delta_y": delta_y}))
+
+    def wait_for(self, *, state: str, timeout: float | None = None):
+        self.wait_calls.append({"state": state, "timeout": timeout})
 
 
 def test_connect_connection_replaces_existing(monkeypatch):
@@ -311,6 +349,160 @@ def test_invoke_locator_method_raises_detailed_failure_for_structured_invoke_res
 
     with pytest.raises(ValueError, match=r"Invoke failed for method 'setAmount' \(errorCode=2\): Missing required argument: value"):
         mcp_server._invoke_locator_method(locator, method_name="setAmount", args={})
+
+
+def test_wait_for_can_include_snapshot(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+    locator = FakeLocator(count=1)
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state, name: connection)
+    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(
+        mcp_server,
+        "_action_result_with_snapshot",
+        lambda managed_connection, **payload: payload | {"snapshot": "- DemoWindow [ref=e1]", "refs": [{"ref": "e1"}]},
+    )
+
+    result = mcp_server.wait_for(
+        selector="#status_label",
+        connection="demo",
+        state="visible",
+        timeout=5.0,
+        include_snapshot=True,
+    )
+
+    assert locator.wait_calls == [{"state": "visible", "timeout": 5.0}]
+    assert result["ok"] is True
+    assert result["selector"] == "#status_label"
+    assert result["snapshot"] == "- DemoWindow [ref=e1]"
+    assert result["refs"] == [{"ref": "e1"}]
+
+
+def test_browser_wait_for_time_can_include_snapshot(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state, name: connection)
+    monkeypatch.setattr(
+        mcp_server,
+        "_action_result_with_snapshot",
+        lambda managed_connection, **payload: payload | {"snapshot": "- DemoWindow [ref=e1]", "refs": [{"ref": "e1"}]},
+    )
+
+    result = mcp_server.browser_wait_for(connection="demo", time=0, include_snapshot=True)
+
+    assert result["ok"] is True
+    assert result["waited"] == 0
+    assert result["snapshot"] == "- DemoWindow [ref=e1]"
+    assert result["refs"] == [{"ref": "e1"}]
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "call_kwargs", "expected_call", "expected_payload"),
+    [
+        ("click", {"selector": "#submit", "include_snapshot": True}, ("click", {}), {"selector": "#submit"}),
+        (
+            "click",
+            {"selector": "#submit", "double_click": True, "include_snapshot": True},
+            ("dblclick", {}),
+            {"selector": "#submit", "double_click": True},
+        ),
+        (
+            "fill",
+            {"selector": "#amount", "value": "123.45", "include_snapshot": True},
+            ("fill", {"value": "123.45"}),
+            {"selector": "#amount", "value": "123.45"},
+        ),
+        (
+            "invoke_widget_method",
+            {"selector": "#amount", "method_name": "setAmount", "args": {"value": "88.00"}, "include_snapshot": True},
+            ("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}}),
+            {"selector": "#amount", "method_name": "setAmount", "args": {"value": "88.00"}},
+        ),
+        (
+            "type_text",
+            {"selector": "#amount", "text": "abc", "delay": 25, "include_snapshot": True},
+            ("type", {"text": "abc", "delay": 25}),
+            {"selector": "#amount", "text": "abc", "delay": 25},
+        ),
+        (
+            "press_key",
+            {"selector": "#amount", "key": "Enter", "include_snapshot": True},
+            ("press", {"key": "Enter"}),
+            {"selector": "#amount", "key": "Enter"},
+        ),
+        (
+            "set_checked",
+            {"selector": "#remember", "checked": True, "include_snapshot": True},
+            ("check", {}),
+            {"selector": "#remember", "checked": True},
+        ),
+        (
+            "set_checked",
+            {"selector": "#remember", "checked": False, "include_snapshot": True},
+            ("uncheck", {}),
+            {"selector": "#remember", "checked": False},
+        ),
+        (
+            "select_option",
+            {"selector": "#currency", "label": "CNY", "include_snapshot": True},
+            ("select_option", {"value": None, "index": None, "label": "CNY"}),
+            {"selector": "#currency", "label": "CNY", "value": None, "index": None},
+        ),
+        (
+            "hover",
+            {"selector": "#item", "include_snapshot": True},
+            ("hover", {}),
+            {"selector": "#item"},
+        ),
+        (
+            "scroll",
+            {"selector": "#item", "delta_x": 5, "delta_y": 10, "include_snapshot": True},
+            ("scroll", {"delta_x": 5, "delta_y": 10}),
+            {"selector": "#item", "delta_x": 5, "delta_y": 10},
+        ),
+    ],
+)
+def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_kwargs, expected_call, expected_payload):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+    locator = FakeLocator(count=1)
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state, name: connection)
+    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(
+        mcp_server,
+        "_action_result_with_snapshot",
+        lambda managed_connection, **payload: payload | {"snapshot": "- DemoWindow [ref=e1]", "refs": [{"ref": "e1"}]},
+    )
+
+    result = getattr(mcp_server, tool_name)(connection="demo", **call_kwargs)
+
+    assert locator.action_calls[-1] == expected_call
+    assert result["ok"] is True
+    for key, value in expected_payload.items():
+        assert result[key] == value
+    assert result["snapshot"] == "- DemoWindow [ref=e1]"
+    assert result["refs"] == [{"ref": "e1"}]
 
 
 def test_configure_stdio_for_mcp_reconfigures_utf8_streams(monkeypatch):
@@ -518,6 +710,62 @@ def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
 
     assert payload["refs"] == [{"ref": "e1", "wid": 1, "target": ".DemoWindow", "class": "DemoWindow", "text": "Title"}]
     assert payload["snapshot"].count("[ref=e1]") == 1
+
+
+def test_run_cli_invokes_tool_and_prints_json(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_server,
+        "connect",
+        lambda name="default", port=19876, **_: {"ok": True, "name": name, "port": port},
+    )
+
+    exit_code = mcp_server._run_cli(["connect", '{"name": "probe", "port": 19877}'])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"ok": True, "name": "probe", "port": 19877}
+
+
+def test_main_cli_dispatches_to_cli_runner(monkeypatch):
+    called = {}
+
+    def fake_run_cli(argv):
+        called["argv"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(mcp_server, "_run_cli", fake_run_cli)
+
+    with pytest.raises(SystemExit) as exc_info:
+        mcp_server.main(["cli", "list_windows", '{"connection": "probe"}'])
+
+    assert exc_info.value.code == 0
+    assert called["argv"] == ["list_windows", '{"connection": "probe"}']
+
+
+def test_main_serve_mode_keeps_existing_transport_flow(monkeypatch):
+    calls = {}
+
+    monkeypatch.setattr(mcp_server, "_configure_stdio_for_mcp", lambda transport: calls.setdefault("transport", transport))
+    monkeypatch.setattr(mcp_server.mcp, "run", lambda *, transport: calls.setdefault("run_transport", transport))
+
+    mcp_server.main(["--transport", "streamable-http"])
+
+    assert calls == {"transport": "streamable-http", "run_transport": "streamable-http"}
+
+
+def test_screenshot_clip_kwargs_validates_required_fields():
+    assert mcp_server._screenshot_clip_kwargs(x=1, y=2, width=3, height=4) == {
+        "x": 1,
+        "y": 2,
+        "width": 3,
+        "height": 4,
+    }
+
+    with pytest.raises(ValueError, match="requires x, y, width, and height together"):
+        mcp_server._screenshot_clip_kwargs(x=1, y=2, width=3)
+
+    with pytest.raises(ValueError, match="requires non-negative x/y and positive width/height"):
+        mcp_server._screenshot_clip_kwargs(x=-1, y=2, width=3, height=4)
 
 
 def test_browser_target_params_accept_snapshot_ref():

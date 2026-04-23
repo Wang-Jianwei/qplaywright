@@ -1340,7 +1340,27 @@ private:
                 if (!w) throw std::runtime_error("No visible window found");
             }
 
-            QPixmap pixmap = w->grab();
+            const bool hasClipX = params.contains("x") && !params.value("x").isNull();
+            const bool hasClipY = params.contains("y") && !params.value("y").isNull();
+            const bool hasClipWidth = params.contains("width") && !params.value("width").isNull();
+            const bool hasClipHeight = params.contains("height") && !params.value("height").isNull();
+
+            QPixmap pixmap;
+            if (hasClipX || hasClipY || hasClipWidth || hasClipHeight) {
+                if (!(hasClipX && hasClipY && hasClipWidth && hasClipHeight)) {
+                    throw std::runtime_error("Screenshot clipping requires x, y, width, and height together");
+                }
+                const int clipX = params.value("x").toInt();
+                const int clipY = params.value("y").toInt();
+                const int clipWidth = params.value("width").toInt();
+                const int clipHeight = params.value("height").toInt();
+                if (clipX < 0 || clipY < 0 || clipWidth <= 0 || clipHeight <= 0) {
+                    throw std::runtime_error("Screenshot clipping requires non-negative x/y and positive width/height");
+                }
+                pixmap = w->grab(clipX, clipY, clipWidth, clipHeight);
+            } else {
+                pixmap = w->grab();
+            }
             QString path = params["path"].toString();
 
             QJsonObject r;

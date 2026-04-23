@@ -522,7 +522,20 @@ def _handle_command(req: Request) -> Any:
                 raise ValueError("No visible window found")
             w = visible[0]
 
-        pixmap = w.grab()
+        clip_keys = ("x", "y", "width", "height")
+        has_clip = any(params.get(key) is not None for key in clip_keys)
+        if has_clip:
+            if any(params.get(key) is None for key in clip_keys):
+                raise ValueError("Screenshot clipping requires x, y, width, and height together")
+            clip_x = int(params["x"])
+            clip_y = int(params["y"])
+            clip_width = int(params["width"])
+            clip_height = int(params["height"])
+            if clip_x < 0 or clip_y < 0 or clip_width <= 0 or clip_height <= 0:
+                raise ValueError("Screenshot clipping requires non-negative x/y and positive width/height")
+            pixmap = w.grab(_QtCore.QRect(clip_x, clip_y, clip_width, clip_height))
+        else:
+            pixmap = w.grab()
         buf = _QtCore.QBuffer()
         buf.open(_QtCore.QIODevice.WriteOnly if hasattr(_QtCore.QIODevice, 'WriteOnly') else _QtCore.QIODevice.OpenModeFlag.WriteOnly)
         pixmap.save(buf, "PNG")

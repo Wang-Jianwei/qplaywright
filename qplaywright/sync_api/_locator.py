@@ -271,11 +271,27 @@ class Locator:
         """No-op for Qt (widgets are always in view if visible)."""
         pass
 
-    def screenshot(self, *, path: str | None = None) -> bytes | dict:
-        """Take a screenshot of this specific widget."""
+    def screenshot(
+        self,
+        *,
+        path: str | None = None,
+        x: int | None = None,
+        y: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> bytes | dict:
+        """Take a screenshot of this specific widget or a clipped region inside it."""
         params = self._params()
         if path:
             params["path"] = path
+        if x is not None:
+            params["x"] = x
+        if y is not None:
+            params["y"] = y
+        if width is not None:
+            params["width"] = width
+        if height is not None:
+            params["height"] = height
         return self._conn.send(METHOD_SCREENSHOT_WIDGET, params, timeout=self._timeout)
 
     # -- Waiting -------------------------------------------------------------

@@ -3,6 +3,7 @@ from __future__ import annotations
 from qplaywright.agent import _selector as selector
 from qplaywright.agent import _server as server
 from qplaywright.protocol import QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlaywrightMethodArg
+from qplaywright.sync_api._api import Window
 from qplaywright.sync_api._locator import Locator
 
 
@@ -233,6 +234,72 @@ def test_locator_methods_requests_method_schema():
             "get_methods",
             {
                 "selector": "#amount",
+            },
+            8.0,
+        )
+    ]
+
+
+def test_window_screenshot_passes_clip_region():
+    conn = FakeConnection()
+    window = Window(conn, wid=7, timeout=6.0)
+
+    result = window.screenshot(path="clip.png", x=10, y=20, width=30, height=40)
+
+    assert result == {
+        "method": "screenshot",
+        "params": {
+            "wid": 7,
+            "path": "clip.png",
+            "x": 10,
+            "y": 20,
+            "width": 30,
+            "height": 40,
+        },
+    }
+    assert conn.calls == [
+        (
+            "screenshot",
+            {
+                "wid": 7,
+                "path": "clip.png",
+                "x": 10,
+                "y": 20,
+                "width": 30,
+                "height": 40,
+            },
+            None,
+        )
+    ]
+
+
+def test_locator_screenshot_passes_clip_region():
+    conn = FakeConnection()
+    locator = Locator(conn, "#amount", timeout=8.0)
+
+    result = locator.screenshot(path="widget.png", x=1, y=2, width=3, height=4)
+
+    assert result == {
+        "method": "screenshot_widget",
+        "params": {
+            "selector": "#amount",
+            "path": "widget.png",
+            "x": 1,
+            "y": 2,
+            "width": 3,
+            "height": 4,
+        },
+    }
+    assert conn.calls == [
+        (
+            "screenshot_widget",
+            {
+                "selector": "#amount",
+                "path": "widget.png",
+                "x": 1,
+                "y": 2,
+                "width": 3,
+                "height": 4,
             },
             8.0,
         )

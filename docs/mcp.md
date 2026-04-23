@@ -30,6 +30,35 @@ You can also expose Streamable HTTP:
 python -m qplaywright.mcp_server --transport streamable-http
 ```
 
+If you want to drive qplaywright directly from one terminal session without
+writing throwaway Python scripts, start the built-in CLI / REPL:
+
+```bash
+qplaywright-mcp cli
+```
+
+Inside the REPL, use one tool call per line:
+
+```text
+qplaywright> connect {"name": "probe", "port": 19877}
+qplaywright> list_windows {"connection": "probe"}
+qplaywright> browser_snapshot {"connection": "probe", "depth": 4}
+qplaywright> click {"connection": "probe", "selector": "text=Start"}
+qplaywright> exit
+```
+
+Useful REPL meta commands:
+
+- `.tools` lists all available tools
+- `.help` shows CLI usage
+- `.help TOOL` shows one tool signature and docstring
+
+You can also execute one tool directly without entering the REPL:
+
+```bash
+qplaywright-mcp cli list_windows '{"connection": "probe"}'
+```
+
 ## Typical Tool Flow
 
 1. `connect` to a running Qt app with an embedded qplaywright agent.
@@ -159,19 +188,19 @@ Most playwright-mcp compatibility tools use these fields:
 | `widget_tree` | `connection`, `max_depth`, optional `window_wid` or `window_title` or `window_index` | widget tree nodes including `wid`, `class`, `text`, `objectName`, `children` |
 | `inspect_widget` | common native locator params, plus `property_name`, `include_methods` | `exists`, `count`, and when found: `text`, `value`, `is_visible`, `is_enabled`, `is_checked`, `bounding_box`, optional `methods` |
 | `get_widget_methods` | common native locator params | `connection`, `selector`, `methods` where each method includes `name`, `args`, `returnType`, `brief` |
-| `click` | common native locator params, plus `double_click` | `ok`, `selector`, `double_click`, `connection` |
-| `fill` | common native locator params, plus `value` | `ok`, `selector`, `value`, `connection` |
-| `invoke_widget_method` | common native locator params, plus `method_name`, `args` | `ok`, `selector`, `method_name`, `args`, `result` |
-| `type_text` | common native locator params, plus `text`, `delay` | `ok`, `selector`, `text`, `delay`, `connection` |
-| `press_key` | common native locator params, plus `key` | `ok`, `selector`, `key`, `connection` |
-| `scroll` | common native locator params, plus `delta_x`, `delta_y` | `ok`, `selector`, `delta_x`, `delta_y`, `connection` |
-| `set_checked` | common native locator params, plus `checked` | `ok`, `selector`, `checked`, `connection` |
-| `select_option` | common native locator params, plus exactly one of `value`, `index`, `label` | `ok`, `selector`, `value`, `index`, `label`, `connection` |
-| `wait_for` | common native locator params, plus `state`, `timeout` | `ok`, `selector`, `state`, `timeout`, `connection` |
-| `screenshot` | `connection`, optional common native locator params, plus `path` | screenshot payload from qplaywright, plus `connection`, `selector` |
+| `click` | common native locator params, plus `double_click`, `include_snapshot` | `ok`, `selector`, `double_click`, `connection`, optional `snapshot`, `refs` |
+| `fill` | common native locator params, plus `value`, `include_snapshot` | `ok`, `selector`, `value`, `connection`, optional `snapshot`, `refs` |
+| `invoke_widget_method` | common native locator params, plus `method_name`, `args`, `include_snapshot` | `ok`, `selector`, `method_name`, `args`, `result`, optional `snapshot`, `refs` |
+| `type_text` | common native locator params, plus `text`, `delay`, `include_snapshot` | `ok`, `selector`, `text`, `delay`, `connection`, optional `snapshot`, `refs` |
+| `press_key` | common native locator params, plus `key`, `include_snapshot` | `ok`, `selector`, `key`, `connection`, optional `snapshot`, `refs` |
+| `scroll` | common native locator params, plus `delta_x`, `delta_y`, `include_snapshot` | `ok`, `selector`, `delta_x`, `delta_y`, `connection`, optional `snapshot`, `refs` |
+| `set_checked` | common native locator params, plus `checked`, `include_snapshot` | `ok`, `selector`, `checked`, `connection`, optional `snapshot`, `refs` |
+| `select_option` | common native locator params, plus exactly one of `value`, `index`, `label`, `include_snapshot` | `ok`, `selector`, `value`, `index`, `label`, `connection`, optional `snapshot`, `refs` |
+| `wait_for` | common native locator params, plus `state`, `timeout`, `include_snapshot` | `ok`, `selector`, `state`, `timeout`, `connection`, optional `snapshot`, `refs` |
+| `screenshot` | `connection`, optional common native locator params, plus `path` and optional `x`, `y`, `width`, `height` clip rectangle | screenshot payload from qplaywright, plus `connection`, `selector` |
 | `resize_window` | `width`, `height`, `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `width`, `height`, `connection` |
 | `close_window` | `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `connection`, `window_wid` |
-| `hover` | common native locator params | `ok`, `selector`, `connection` |
+| `hover` | common native locator params, plus `include_snapshot` | `ok`, `selector`, `connection`, optional `snapshot`, `refs` |
 
 ### Native Invoke Result Shape
 
@@ -207,9 +236,9 @@ For method-only custom widgets, the common shape is:
 | `browser_select_option` | `target`, `values`, `connection`, `element` | `ok`, `target`, `value`, plus fresh `snapshot` and `refs` |
 | `browser_snapshot` | `connection`, `target`, `filename`, `depth`, optional `window_wid` or `window_title` or `window_index` when `target` is omitted | `snapshot`, `refs`, optional `path`, plus `connection`, `target` |
 | `browser_tabs` | `action`, `connection`, optional `index`, unused `url` placeholder | `result`, plus `windows`, and sometimes `selected` or `closed` |
-| `browser_take_screenshot` | `connection`, `element`, `target`, `type`, `filename`, `fullPage` | screenshot payload with `path`, `width`, `height`, plus `connection`, `selector` |
+| `browser_take_screenshot` | `connection`, `element`, `target`, `type`, `filename`, `fullPage`, optional `x`, `y`, `width`, `height` clip rectangle | screenshot payload with `path`, `width`, `height`, plus `connection`, `selector` |
 | `browser_type` | `target`, `text`, `connection`, `element`, `submit`, `slowly` | `ok`, `target`, `text`, `slowly`, optional `submitted`, plus fresh `snapshot` and `refs` |
-| `browser_wait_for` | `connection`, one of `time`, `text`, `textGone`, plus `timeout` | `ok`, and either `waited` or the waited text fields |
+| `browser_wait_for` | `connection`, one of `time`, `text`, `textGone`, plus `timeout`, optional `include_snapshot` | `ok`, and either `waited` or the waited text fields, optional `snapshot`, `refs` |
 | `browser_verify_element_visible` | `role`, `accessibleName`, `connection` | `ok`, `role`, `accessibleName`, `snapshot` |
 | `browser_verify_text_visible` | `text`, `connection` | `ok`, `text`, `snapshot`, `refs` |
 | `browser_verify_value` | `type`, `element`, `target`, `value`, `connection` | `ok`, `expected`, `actual`, `target`, plus fresh `snapshot` and `refs` |
@@ -220,6 +249,9 @@ For method-only custom widgets, the common shape is:
 live connection. Those refs can be fed back into tools like `browser_click`,
 `browser_type`, `browser_select_option`, and `browser_take_screenshot` without
 re-resolving the original selector.
+
+When you pass `x`, `y`, `width`, and `height` to `screenshot` or `browser_take_screenshot`,
+the rectangle is interpreted relative to the selected window or widget.
 
 When you only need one top-level window, prefer passing `window_wid`, `window_title`, or `window_index` to `widget_tree` or `browser_snapshot`. This reduces snapshot cost by avoiding traversal of unrelated visible windows, while keeping the target Qt application stateless from the MCP side.
 
