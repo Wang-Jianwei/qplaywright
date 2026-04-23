@@ -83,6 +83,16 @@ async def main() -> None:
                 print(f"Custom methods: {method_names}")
                 assert method_names == ["amount", "setAmount", "clearAmount"]
 
+                properties = await _call_tool(
+                    session,
+                    "inspect",
+                    {"target": "#amount_editor", "include_properties": True},
+                )
+                print(f"Initial properties: {properties['properties']}")
+                assert properties["properties"]["semanticRole"] == "amount-input"
+                assert properties["properties"]["amountValue"] == "0.00"
+                assert properties["properties"]["myText"] == "Requested amount editor: 0.00"
+
                 set_result = await _call_tool(
                     session,
                     "invoke",
@@ -111,6 +121,15 @@ async def main() -> None:
                     "errorCode": 0,
                     "errorMessage": "",
                 }
+
+                updated_properties = await _call_tool(
+                    session,
+                    "inspect",
+                    {"target": "#amount_editor", "include_properties": True},
+                )
+                print(f"Updated properties: {updated_properties['properties']}")
+                assert updated_properties["properties"]["amountValue"] == "123.45"
+                assert updated_properties["properties"]["myText"] == "Requested amount editor: 123.45"
 
                 await _call_tool(
                     session,

@@ -47,6 +47,8 @@ public:
         layout->addWidget(m_valueLabel, 1);
 
         setAccessibleName("Amount editor");
+        setProperty("myText", QStringLiteral("Requested amount editor"));
+        setProperty("semanticRole", QStringLiteral("amount-input"));
 
         QPlaywrightClassMetadata metadata;
         metadata.role("textbox")
@@ -89,6 +91,8 @@ public:
     {
         m_amount = value.trimmed().isEmpty() ? QStringLiteral("0.00") : value.trimmed();
         m_valueLabel->setText(m_amount);
+        setProperty("amountValue", m_amount);
+        setProperty("myText", QStringLiteral("Requested amount editor: %1").arg(m_amount));
     }
 
     Q_INVOKABLE void clearAmount()
