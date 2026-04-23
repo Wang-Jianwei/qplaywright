@@ -107,6 +107,12 @@ MCP 工具应该表达高层意图，例如：
 
 统一 target 解析是所有终态工具的基础设施，应尽早落地。
 
+补充说明：
+
+- 终态里的 `target` 统一成一个字符串，并不等于必须把复合条件语法也塞进这个字符串
+- 终态契约可以保持 selector 语法的原子性，例如 `role=button`、`text=Submit`、`has-text=partial`
+- 当需要“role=button 且文本包含 Submit”这类复合约束时，更清晰的终态路径是先 `snapshot` 或 `inspect` 缩小范围，再使用 ref 继续动作，而不是在 selector 中引入一套新的布尔语法
+
 ### 5. Invoke is not an extension feature, it is a core feature
 
 对 QWidget 自动化来说，自定义控件方法调用不是附加能力，而是核心能力。
@@ -239,11 +245,13 @@ Qt 业务自动化的中心应当是：
 - `target`（可选）
 - `property`
 - `include_methods`
+- `include_properties`
 - `depth`
 
 建议返回：
 
 - `exists`
+- `count`
 - `text`
 - `value`
 - `is_visible`
@@ -251,8 +259,11 @@ Qt 业务自动化的中心应当是：
 - `is_checked`
 - `bounding_box`
 - `methods`
+- `properties`
 
 当 `target` 为空时，`inspect` 可退化为 debug-only 的全量树检查模式。
+
+如果 `target` 匹配多个控件，终态可以返回第一个匹配项的标量字段，同时用 `count` 明确暴露总匹配数；这样模型不需要为“是否唯一匹配”先额外试探一次。
 
 为什么保留：
 
@@ -468,6 +479,11 @@ Qt 业务自动化的中心应当是：
 为什么保留：
 
 - 截图是观察的补充手段
+
+补充说明：
+
+- 当提供 `path` 时，响应返回保存后的 `path`
+- 当省略 `path` 时，响应直接返回内联图片数据，例如 base64 编码的 `data`
 - `clip rectangle` 是实际有价值的能力，应该并入同一工具而不是额外派生新工具
 
 ## Canonical Target Model

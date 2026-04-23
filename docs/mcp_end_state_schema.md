@@ -8,6 +8,11 @@
 
 ## Conventions
 
+- JSON 字段统一使用 `snake_case`
+- 成功响应统一包含 `ok: true`
+- 除非特别说明，目标工具在 `target` 匹配多个控件时不报错，而是返回第一个匹配项的标量字段，同时用 `count` 暴露总匹配数
+- `target` 的 selector 语法保持原子匹配，不在终态契约中定义内联布尔组合语法；需要组合条件时，先用 `snapshot` 或 `inspect` 缩小范围，再使用 snapshot ref
+
 ## Request Model
 
 除 `session` 和 `window` 之外，终态工具默认都是单一意图工具，不再额外包一层 `action`。
@@ -37,6 +42,12 @@
 - `#amount_editor`
 - `role=button`
 - `text=保存`
+
+补充说明：
+
+- 终态契约中的 selector 仍沿用 qplaywright 的单表达式语法，例如 `role=button`、`text=保存`、`has-text=partial`
+- 终态契约当前不定义 `role=button >> has-text=Submit` 或 `role=button[has-text=Submit]` 这类复合语法
+- 当需要“角色 + 文本”等复合定位时，推荐流程是先 `snapshot` 或 `inspect` 观察并拿到更稳定的 target，再使用 snapshot ref 继续动作
 
 ### Include Snapshot
 
@@ -132,6 +143,8 @@
   "refs": []
 }
 ```
+
+其中 `refs` 的元素类型为 `RefEntry[]`。
 
 字段说明：
 
@@ -286,6 +299,8 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
+其中 `windows` 的元素类型为 `WindowInfo[]`。
+
 ### Window Response: Select
 
 ```json
@@ -329,6 +344,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 - 当 `action="close"` 且关闭的是当前 active window 时，服务端应自动把 `active_window` 切换到下一个可见窗口
 - 如果没有剩余可见窗口，则 `active_window` 允许为 `null`
+- 当 `close` 导致 active window 变化时，refs 按 `select` 的同一规则处理并清空；旧窗口上下文中的 snapshot ref 不再可用
 
 ## Snapshot
 
@@ -380,6 +396,8 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
+其中 `refs` 的元素类型为 `RefEntry[]`。
+
 ## Inspect
 
 工具名：`inspect`
@@ -405,6 +423,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 - `include_methods` 默认为 `false`
 - `include_properties` 默认为 `false`，用于返回目标当前全部 Qt properties
 - `depth` 只在 `target=null` 时有意义
+- 当 `target` 匹配多个控件时，`text`、`value`、`is_visible`、`is_enabled`、`is_checked`、`bounding_box`、`property_value`、`methods`、`properties` 都取第一个匹配项；`count` 反映总匹配数
 
 ### Inspect Response: Target Mode
 
@@ -922,6 +941,33 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   }
 }
 ```
+
+### Screenshot Response: Inline Data
+
+```json
+{
+  "ok": true,
+  "target": "#amount_editor",
+  "data": "iVBORw0KGgoAAAANSUhEUgAA...",
+  "width": 220,
+  "height": 80,
+  "active_window": {
+    "wid": 1,
+    "title": "QPlaywright Demo App",
+    "class": "DemoWindow",
+    "index": 0,
+    "is_active": true,
+    "is_modal": false,
+    "width": 640,
+    "height": 720
+  }
+}
+```
+
+补充说明：
+
+- 当提供 `path` 时，响应返回 `path`
+- 当省略 `path` 时，响应返回 `data`，其值为 PNG 图片的 base64 编码
 
 ## Ref Lifetime Rules
 

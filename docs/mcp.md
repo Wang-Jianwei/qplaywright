@@ -127,6 +127,10 @@ That value may be either:
 - a qplaywright selector such as `#amount_editor`, `role=button`, `text=Submit`, or `.QLabel`
 - a snapshot ref such as `e12`
 
+The selector side of `target` keeps the existing atomic qplaywright forms.
+This contract does not define inline composite syntax such as `role=button >> has-text=Submit`.
+When you need compound disambiguation, use `snapshot` or `inspect` first, then continue with the returned snapshot ref.
+
 ### Optional Post-Action Observation
 
 Action tools support `include_snapshot=false` by default.
@@ -187,6 +191,8 @@ Supported actions:
 - `resize`
 - `close`
 
+If `select` or `close` changes the active window, previously issued snapshot refs are cleared and should be treated as expired.
+
 Selection fields:
 
 - `wid`
@@ -233,6 +239,7 @@ Request:
 
 When `target` is omitted, `inspect` returns the active window tree in debug mode.
 When `target` is provided, `inspect` returns widget state and optional method metadata.
+If multiple widgets match the target, scalar fields describe the first match and `count` reports the total number of matches.
 
 ### Action Tools
 
@@ -274,6 +281,7 @@ Request:
 
 When `target` is omitted, the current active window is captured.
 When clipping fields are provided, all of `x`, `y`, `width`, and `height` must be present.
+When `path` is omitted, the response returns inline PNG data in `data` instead of a saved file path.
 
 ## End-to-End Demo
 
@@ -315,3 +323,6 @@ Supported selectors match the existing qplaywright syntax:
 - `#objectName`
 - `name=objectName`
 - `.QLabel`
+
+Composite selector grammar is intentionally not part of the current contract.
+For cases like "button whose text contains Submit", first discover the right widget with `snapshot` or `inspect`, then reuse its snapshot ref.
