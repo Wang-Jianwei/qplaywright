@@ -89,6 +89,22 @@ class FakeConnection:
         return {"method": method, "params": payload}
 
 
+class SequencedConnection(FakeConnection):
+    def __init__(self, responses: dict[str, list[object] | object]):
+        super().__init__()
+        self.responses = responses
+
+    def send(self, method: str, params: dict | None = None, *, timeout: float | None = None):
+        payload = params or {}
+        self.calls.append((method, payload, timeout))
+        response = self.responses[method]
+        if isinstance(response, list):
+            if len(response) > 1:
+                return response.pop(0)
+            return response[0]
+        return response
+
+
 def test_selector_declared_method_schema_reads_class_metadata():
     widget = FakeInvokeWidget()
 
@@ -255,6 +271,38 @@ def test_locator_can_send_direct_widget_id_params():
             },
             9.0,
         )
+    ]
+
+
+def test_locator_wait_for_checked_and_unchecked_poll_is_checked():
+    checked_conn = SequencedConnection({
+        "count": [1, 1],
+        "is_checked": [False, True],
+    })
+    checked_locator = Locator(checked_conn, "#remember", timeout=0.5)
+
+    checked_locator.wait_for(state="checked", timeout=0.2)
+
+    assert checked_conn.calls == [
+        ("count", {"selector": "#remember"}, 0.5),
+        ("is_checked", {"selector": "#remember", "nth": 0}, 0.5),
+        ("count", {"selector": "#remember"}, 0.5),
+        ("is_checked", {"selector": "#remember", "nth": 0}, 0.5),
+    ]
+
+    unchecked_conn = SequencedConnection({
+        "count": [1, 1],
+        "is_checked": [True, False],
+    })
+    unchecked_locator = Locator(unchecked_conn, "#remember", timeout=0.5)
+
+    unchecked_locator.wait_for(state="unchecked", timeout=0.2)
+
+    assert unchecked_conn.calls == [
+        ("count", {"selector": "#remember"}, 0.5),
+        ("is_checked", {"selector": "#remember", "nth": 0}, 0.5),
+        ("count", {"selector": "#remember"}, 0.5),
+        ("is_checked", {"selector": "#remember", "nth": 0}, 0.5),
     ]
 
 

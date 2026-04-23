@@ -368,14 +368,14 @@ def _handle_command(req: Request) -> Any:
             return None
         w = widgets[0]
         wid = _registry.register(w)
-        return {"wid": wid, **widget_to_dict(w, max_depth=0)}
+        return {"wid": wid, **widget_to_dict(w, max_depth=params.get("max_depth", 0))}
 
     if method == METHOD_FIND_ALL:
         widgets = _resolve_widgets(params)
         result = []
         for w in widgets:
             wid = _registry.register(w)
-            result.append({"wid": wid, **widget_to_dict(w, max_depth=0)})
+            result.append({"wid": wid, **widget_to_dict(w, max_depth=params.get("max_depth", 0))})
         return result
 
     if method == METHOD_WIDGET_TREE:
@@ -487,7 +487,10 @@ def _handle_command(req: Request) -> Any:
         return True
 
     if method == METHOD_PRESS:
-        w = _resolve_one(params)
+        if "wid" in params or "selector" in params:
+            w = _resolve_one(params)
+        else:
+            w = _resolve_press_target(params)
         key = params["key"]
         _press_key(w, key)
         return True
@@ -566,6 +569,7 @@ def _handle_command(req: Request) -> Any:
                     "class": _widget_class_name(w),
                     "width": w.width(),
                     "height": w.height(),
+                    "is_modal": bool(w.isModal()) if hasattr(w, "isModal") else False,
                 })
         return result
 
@@ -921,6 +925,26 @@ def _wait_for(params: dict) -> bool:
         time.sleep(poll_interval / 1000.0)
 
     raise TimeoutError(f"Timed out waiting for {selector!r} to be {state}")
+
+
+def _resolve_press_target(params: dict):
+    app = _QApplication
+    if app is not None:
+        focused = app.focusWidget()
+        if focused is not None:
+            return focused
+
+    window_wid = params.get("window_wid")
+    if window_wid is not None:
+        window = _registry.get(window_wid)
+        if window is not None:
+            return window
+
+    visible = [window for window in _get_top_level_widgets() if window.isVisible()]
+    if visible:
+        return visible[0]
+
+    raise ValueError("No visible window found for targetless key press")
 
 
 # --------------------------------------------------------------------------- #

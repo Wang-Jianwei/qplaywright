@@ -52,9 +52,10 @@ class FakeTransportConn:
 
 
 class FakeWindow:
-    def __init__(self, wid: int, title: str):
+    def __init__(self, wid: int, title: str, *, is_modal: bool = False):
         self.wid = wid
         self._title = title
+        self._is_modal = is_modal
         self.closed = False
         self.resized_to = None
         self.screenshot_calls = []
@@ -67,6 +68,9 @@ class FakeWindow:
 
     def close(self) -> None:
         self.closed = True
+
+    def isModal(self) -> bool:
+        return self._is_modal
 
     def locator(self, target: str):
         return FakeLocator(count=1, target=target)
@@ -411,7 +415,7 @@ def test_session_close_clears_stale_connection(monkeypatch):
 def test_window_tool_lists_selects_resizes_and_closes(monkeypatch):
     state = mcp_server.ServerState()
     first = FakeWindow(11, "First")
-    second = FakeWindow(22, "Second")
+    second = FakeWindow(22, "Second", is_modal=True)
     state.connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -430,7 +434,9 @@ def test_window_tool_lists_selects_resizes_and_closes(monkeypatch):
 
     assert [window["wid"] for window in listed["windows"]] == [11, 22]
     assert listed["windows"][0]["is_active"] is True
+    assert listed["windows"][1]["is_modal"] is True
     assert selected["active_window"]["wid"] == 22
+    assert selected["active_window"]["is_modal"] is True
     assert selected["refs_cleared"] is True
     assert resized["active_window"]["wid"] == 22
     assert first.resized_to is None
@@ -581,6 +587,22 @@ def test_wait_can_include_snapshot(monkeypatch):
     assert result["refs"] == [{"ref": "e1"}]
 
 
+def test_wait_rejects_undocumented_state(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
+
+    with pytest.raises(ValueError, match="state must be one of"):
+        mcp_server.wait(target="#status_label", state="attached")
+
+
 @pytest.mark.parametrize(
     ("tool_name", "call_kwargs", "expected_calls", "expected_payload"),
     [
@@ -670,6 +692,52 @@ def test_finalize_action_result_switches_active_window_and_uses_window_snapshot(
     assert result["active_window"]["wid"] == 22
     assert connection.active_window_wid == 22
     assert captured["target"] is None
+
+
+def test_press_key_without_target_uses_active_window_transport(monkeypatch):
+    state = mcp_server.ServerState()
+    transport = FakeTransportConn()
+    app = FakeApp([FakeWindow(11, "Main")])
+    app._conn = transport
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(
+        mcp_server,
+        "_window_summary",
+        lambda managed_connection: [{"wid": 11, "title": "Main", "class": "DemoWindow", "index": 0, "width": 640, "height": 720, "is_active": True, "is_modal": False}],
+    )
+
+    result = mcp_server.press_key(key="Enter")
+
+    assert transport.calls[-1] == {"method": "press", "params": {"key": "Enter", "window_wid": 11}, "timeout": 30.0}
+    assert result["ok"] is True
+    assert result["target"] is None
+    assert result["key"] == "Enter"
+
+
+def test_scroll_rejects_zero_delta(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
+
+    with pytest.raises(ValueError, match="cannot both be 0"):
+        mcp_server.scroll(target="#item")
 
 
 def test_configure_stdio_for_mcp_reconfigures_utf8_streams(monkeypatch):
@@ -804,6 +872,52 @@ def test_snapshot_payload_preserves_existing_ref_bindings():
     assert payload["refs"] == [{"ref": "e2", "wid": 1, "target": ".DemoWindow", "class": "DemoWindow", "text": "Title"}]
     assert connection.snapshot_refs == {"e1": 99, "e2": 1}
     assert connection.snapshot_wids == {99: "e1", 1: "e2"}
+
+
+def test_snapshot_result_resets_refs_and_passes_depth_for_target_snapshot():
+    transport = FakeTransportConn(
+        responses={
+            mcp_server.METHOD_FIND: {
+                "wid": 42,
+                "class": "DemoWindow",
+                "objectName": "",
+                "text": "Dialog",
+                "children": [
+                    {
+                        "wid": 43,
+                        "class": "QPushButton",
+                        "objectName": "confirm_btn",
+                        "text": "Confirm",
+                        "children": [],
+                    }
+                ],
+            }
+        }
+    )
+    app = FakeApp([])
+    app._conn = transport
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        snapshot_refs={"e9": 42},
+        snapshot_wids={42: "e9"},
+    )
+
+    result = mcp_server._snapshot_result(connection, target="e9", depth=3)
+
+    assert transport.calls == [
+        {"method": "find", "params": {"wid": 42, "max_depth": 3}, "timeout": 30.0}
+    ]
+    assert connection.snapshot_refs == {"e1": 42, "e2": 43}
+    assert connection.snapshot_wids == {42: "e1", 43: "e2"}
+    assert result["refs"] == [
+        {"ref": "e1", "wid": 42, "target": ".DemoWindow", "class": "DemoWindow", "text": "Dialog"},
+        {"ref": "e2", "wid": 43, "target": "#confirm_btn", "class": "QPushButton", "text": "Confirm"},
+    ]
 
 
 def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():

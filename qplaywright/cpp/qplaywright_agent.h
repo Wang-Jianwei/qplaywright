@@ -1150,7 +1150,7 @@ private:
             if (widgets.isEmpty()) return QJsonValue::Null;
             QWidget *w = widgets.first();
             int wid = reg.registerWidget(w);
-            QJsonObject r = QPlaywrightSerializer::widgetToJson(w, 0, 0);
+            QJsonObject r = serializeWidgetTree(w, 0, params["max_depth"].toInt(0));
             r["wid"] = wid;
             return r;
         }
@@ -1160,7 +1160,7 @@ private:
             QJsonArray arr;
             for (QWidget *w : widgets) {
                 int wid = reg.registerWidget(w);
-                QJsonObject r = QPlaywrightSerializer::widgetToJson(w, 0, 0);
+                QJsonObject r = serializeWidgetTree(w, 0, params["max_depth"].toInt(0));
                 r["wid"] = wid;
                 arr.append(r);
             }
@@ -1294,7 +1294,9 @@ private:
         }
 
         if (method == "press") {
-            QWidget *w = resolveOne(params);
+            QWidget *w = (params.contains("wid") || params.contains("selector"))
+                ? resolveOne(params)
+                : resolvePressTarget(params);
             QString key = params["key"].toString();
             pressKey(w, key);
             return true;
@@ -1357,7 +1359,7 @@ private:
                 if (clipX < 0 || clipY < 0 || clipWidth <= 0 || clipHeight <= 0) {
                     throw std::runtime_error("Screenshot clipping requires non-negative x/y and positive width/height");
                 }
-                pixmap = w->grab(clipX, clipY, clipWidth, clipHeight);
+                pixmap = w->grab(QRect(clipX, clipY, clipWidth, clipHeight));
             } else {
                 pixmap = w->grab();
             }
@@ -1392,6 +1394,7 @@ private:
                 r["class"] = QString::fromLatin1(w->metaObject()->className());
                 r["width"] = w->width();
                 r["height"] = w->height();
+                r["is_modal"] = w->isModal();
                 arr.append(r);
             }
             return arr;
@@ -1478,6 +1481,26 @@ private:
             throw std::runtime_error(("No widget found for: " + sel).toStdString());
         }
         return widgets.first();
+    }
+
+    QWidget *resolvePressTarget(const QJsonObject &params)
+    {
+        auto &reg = QPlaywrightRegistry::instance();
+
+        if (QWidget *focused = QApplication::focusWidget())
+            return focused;
+
+        if (params.contains("window_wid")) {
+            if (QWidget *window = reg.get(params["window_wid"].toInt()))
+                return window;
+        }
+
+        for (QWidget *window : QApplication::topLevelWidgets()) {
+            if (window->isVisible())
+                return window;
+        }
+
+        throw std::runtime_error("No visible window found for targetless key press");
     }
 
     QWidget *primaryEventTarget(QWidget *w)

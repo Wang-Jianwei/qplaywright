@@ -20,7 +20,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from qplaywright.protocol import DEFAULT_HOST, DEFAULT_PORT, METHOD_FIND, METHOD_LIST_WINDOWS, METHOD_PING, METHOD_WIDGET_TREE
+from qplaywright.protocol import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    METHOD_FIND,
+    METHOD_LIST_WINDOWS,
+    METHOD_PING,
+    METHOD_PRESS,
+    METHOD_WIDGET_TREE,
+)
 from qplaywright.sync_api import QPlaywright
 from qplaywright.sync_api._locator import Locator
 
@@ -93,6 +101,7 @@ def _list_windows_raw(connection: ManagedConnection) -> list[dict[str, Any]]:
                 "class": "",
                 "width": None,
                 "height": None,
+                "is_modal": bool(window.isModal()) if hasattr(window, "isModal") else False,
                 "index": index,
             }
         )
@@ -127,7 +136,7 @@ def _window_summary(connection: ManagedConnection) -> list[dict[str, Any]]:
                 "width": window.get("width"),
                 "height": window.get("height"),
                 "is_active": is_active,
-                "is_modal": False,
+                "is_modal": bool(window.get("is_modal", False)),
             }
         )
     return summaries
@@ -551,13 +560,16 @@ def _write_text_file(path: str, content: str) -> str:
     return str(target_path)
 
 
-def _target_params(connection: ManagedConnection, target: str) -> dict[str, Any]:
+def _target_params(connection: ManagedConnection, target: str, **extra: Any) -> dict[str, Any]:
     if _SNAPSHOT_REF_PATTERN.match(target):
         ref_wid = connection.snapshot_refs.get(target)
         if ref_wid is None:
             raise ValueError(_target_not_found_message(connection, target))
-        return {"wid": ref_wid}
-    return {"selector": target}
+        params: dict[str, Any] = {"wid": ref_wid}
+    else:
+        params = {"selector": target}
+    params.update(extra)
+    return params
 
 
 def _snapshot_result(
@@ -566,6 +578,9 @@ def _snapshot_result(
     target: str | None = None,
     depth: int = 10,
 ) -> dict[str, Any]:
+    target_params = _target_params(managed_connection, target, max_depth=depth) if target is not None else None
+    managed_connection.clear_snapshot_refs()
+
     if target is None:
         return _snapshot_payload(
             managed_connection,
@@ -579,12 +594,23 @@ def _snapshot_result(
 
     node = managed_connection.app._conn.send(
         METHOD_FIND,
-        _target_params(managed_connection, target),
+        target_params,
         timeout=managed_connection.timeout,
     )
     if node is None:
         raise ValueError(_target_not_found_message(managed_connection, target))
     return _snapshot_payload(managed_connection, [node], depth=depth)
+
+
+def _press_key_without_target(connection: ManagedConnection, *, key: str) -> None:
+    client = getattr(connection.app, "_conn", None)
+    if client is None:
+        raise RuntimeError("Active session does not expose the raw transport required for targetless press_key")
+
+    params: dict[str, Any] = {"key": key}
+    if connection.active_window_wid is not None:
+        params["window_wid"] = connection.active_window_wid
+    client.send(METHOD_PRESS, params, timeout=connection.timeout)
 
 
 def _action_result_with_snapshot(
@@ -927,15 +953,18 @@ if FastMCP is not None:
         )
     @mcp.tool()
     def press_key(
-        target: str,
         key: str,
+        target: str | None = None,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Send a single key press to the first matched widget."""
 
         connection_state = _get_connection(_SERVER_STATE)
-        locator = _resolve_locator(connection_state, target=target)
-        locator.press(key)
+        if target is None:
+            _press_key_without_target(connection_state, key=key)
+        else:
+            locator = _resolve_locator(connection_state, target=target)
+            locator.press(key)
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
@@ -1007,6 +1036,10 @@ if FastMCP is not None:
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Wait until a widget reaches a supported state."""
+
+        allowed_states = {"visible", "hidden", "enabled", "disabled", "checked", "unchecked"}
+        if state not in allowed_states:
+            raise ValueError(f"state must be one of {sorted(allowed_states)!r}")
 
         connection_state = _get_connection(_SERVER_STATE)
         locator = _resolve_locator(connection_state, target=target)
@@ -1103,6 +1136,9 @@ if FastMCP is not None:
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Send a mouse wheel scroll event to the first matched widget."""
+
+        if delta_x == 0 and delta_y == 0:
+            raise ValueError("delta_x and delta_y cannot both be 0")
 
         connection_state = _get_connection(_SERVER_STATE)
         locator = _resolve_locator(connection_state, target=target)
