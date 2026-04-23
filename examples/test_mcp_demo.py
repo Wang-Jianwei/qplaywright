@@ -67,26 +67,47 @@ async def _attach_session(
     session: ClientSession,
     *,
     port: int,
-    timeout: float = 30.0,
+    timeout: float = 60.0,
     host: str = "127.0.0.1",
 ) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
+    total_deadline = loop.time() + timeout
+    readiness_deadline = loop.time() + min(5.0, timeout / 3.0)
     while True:
+        probe_remaining = readiness_deadline - loop.time()
+        if probe_remaining <= 0:
+            break
         try:
-            probe = socket.create_connection((host, port), timeout=0.5)
+            probe = socket.create_connection((host, port), timeout=min(0.5, probe_remaining))
             probe.close()
             break
         except OSError:
-            if loop.time() >= deadline:
-                break
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(min(0.25, probe_remaining))
 
-    return await _call_tool(
-        session,
-        "session",
-        {"action": "attach", "host": host, "port": port, "timeout": timeout},
-    )
+    remaining = total_deadline - loop.time()
+    if remaining <= 0:
+        raise TimeoutError(
+            f"Timed out waiting for QPlaywright agent at {host}:{port} to accept connections"
+        )
+
+    last_error: RuntimeError | None = None
+    while True:
+        remaining = total_deadline - loop.time()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"Timed out waiting for QPlaywright agent at {host}:{port} to accept connections"
+            ) from last_error
+        try:
+            return await _call_tool(
+                session,
+                "session",
+                {"action": "attach", "host": host, "port": port, "timeout": max(0.1, remaining)},
+            )
+        except RuntimeError as exc:
+            if "Could not connect to QPlaywright agent" not in str(exc):
+                raise
+            last_error = exc
+            await asyncio.sleep(min(0.25, remaining))
 
 
 async def _close_session(session: ClientSession) -> dict[str, Any]:
@@ -146,7 +167,7 @@ async def main() -> None:
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                connect_result = await _attach_session(session, port=DEMO_PORT, timeout=30.0)
+                connect_result = await _attach_session(session, port=DEMO_PORT, timeout=60.0)
                 print(f"Connected: {connect_result['active_window']}")
 
                 windows = await _list_windows(session)

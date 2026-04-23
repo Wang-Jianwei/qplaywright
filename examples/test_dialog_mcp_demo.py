@@ -49,7 +49,7 @@ async def main() -> None:
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                await _attach_session(session, port=DEMO_PORT, timeout=30.0)
+                await _attach_session(session, port=DEMO_PORT, timeout=60.0)
 
                 await _call_tool(
                     session,
