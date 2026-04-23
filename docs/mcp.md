@@ -64,8 +64,8 @@ qplaywright-mcp cli list_windows '{"connection": "probe"}'
 1. `connect` to a running Qt app with an embedded qplaywright agent.
 2. `list_windows` to discover the target top-level window.
 3. `widget_tree` or `inspect_widget` to understand the UI structure. When multiple top-level windows are visible, prefer `window_wid`, `window_title`, or `window_index` so you do not fetch unrelated windows.
-4. Use action tools like `click`, `fill`, `type_text`, `set_checked`,
-   `press_key`, `scroll`, `select_option`, `wait_for`, and `screenshot`.
+4. Use action tools like `click`, `input`, `set_checked`,
+   `press_key`, `scroll`, `choose`, `wait`, and `screenshot`.
 5. `disconnect` when finished.
 
 ## Exposed MCP Interfaces
@@ -98,14 +98,13 @@ These are the primary MCP tools backed directly by the qplaywright sync client:
 | `inspect_widget` | Inspect target match state such as text, value, visibility, checked state, and optional methods |
 | `get_widget_methods` | Return custom widget method metadata from `qplaywrightClassMetadata` |
 | `click` | Click or double-click the first matched widget |
-| `fill` | Clear and fill the first matched editable widget |
-| `invoke_widget_method` | Invoke one exposed custom widget method by exact name |
-| `type_text` | Type text without clearing existing content |
+| `input` | Replace or append text, optionally submitting with Enter |
+| `invoke` | Invoke one exposed custom widget method by exact name |
 | `press_key` | Send one key press to the matched widget |
 | `scroll` | Send a mouse wheel scroll event to the matched widget |
 | `set_checked` | Check or uncheck the matched widget |
-| `select_option` | Select one combobox option by `value`, `index`, or `label` |
-| `wait_for` | Wait until a widget reaches a supported state |
+| `choose` | Select one combobox option by `value`, `index`, or `label` |
+| `wait` | Wait until a widget reaches a supported state |
 | `screenshot` | Capture a screenshot of a window or matched widget |
 | `resize_window` | Resize a top-level window |
 | `close_window` | Close a top-level window |
@@ -188,15 +187,14 @@ Most playwright-mcp compatibility tools use these fields:
 | `widget_tree` | `connection`, `max_depth`, optional `window_wid` or `window_title` or `window_index` | widget tree nodes including `wid`, `class`, `text`, `objectName`, `children` |
 | `inspect_widget` | common native target params, plus `property_name`, `include_methods` | `exists`, `count`, `target`, and when found: `text`, `value`, `is_visible`, `is_enabled`, `is_checked`, `bounding_box`, optional `methods` |
 | `get_widget_methods` | common native target params | `connection`, `target`, `methods` where each method includes `name`, `args`, `returnType`, `brief` |
-| `click` | common native target params, plus `double_click`, `include_snapshot` | `ok`, `target`, `double_click`, `connection`, optional `snapshot`, `refs` |
-| `fill` | common native target params, plus `value`, `include_snapshot` | `ok`, `target`, `value`, `connection`, optional `snapshot`, `refs` |
-| `invoke_widget_method` | common native target params, plus `method_name`, `args`, `include_snapshot` | `ok`, `target`, `method_name`, `args`, `result`, optional `snapshot`, `refs` |
-| `type_text` | common native target params, plus `text`, `delay`, `include_snapshot` | `ok`, `target`, `text`, `delay`, `connection`, optional `snapshot`, `refs` |
+| `click` | common native target params, plus `count`, `include_snapshot` | `ok`, `target`, `count`, `connection`, optional `snapshot`, `refs` |
+| `input` | common native target params, plus `text`, `mode`, `delay`, `submit`, `include_snapshot` | `ok`, `target`, `text`, `mode`, `delay`, `submitted`, `connection`, optional `snapshot`, `refs` |
+| `invoke` | common native target params, plus `method`, `args`, `include_snapshot` | `ok`, `target`, `method`, `args`, `result`, optional `snapshot`, `refs` |
 | `press_key` | common native target params, plus `key`, `include_snapshot` | `ok`, `target`, `key`, `connection`, optional `snapshot`, `refs` |
 | `scroll` | common native target params, plus `delta_x`, `delta_y`, `include_snapshot` | `ok`, `target`, `delta_x`, `delta_y`, `connection`, optional `snapshot`, `refs` |
 | `set_checked` | common native target params, plus `checked`, `include_snapshot` | `ok`, `target`, `checked`, `connection`, optional `snapshot`, `refs` |
-| `select_option` | common native target params, plus exactly one of `value`, `index`, `label`, `include_snapshot` | `ok`, `target`, `value`, `index`, `label`, `connection`, optional `snapshot`, `refs` |
-| `wait_for` | common native target params, plus `state`, `timeout`, `include_snapshot` | `ok`, `target`, `state`, `timeout`, `connection`, optional `snapshot`, `refs` |
+| `choose` | common native target params, plus exactly one of `value`, `index`, `label`, `include_snapshot` | `ok`, `target`, `value`, `index`, `label`, `connection`, optional `snapshot`, `refs` |
+| `wait` | common native target params, plus `state`, `timeout`, `include_snapshot` | `ok`, `target`, `state`, `timeout`, `connection`, optional `snapshot`, `refs` |
 | `screenshot` | `connection`, optional common native target params, plus `path` and optional `x`, `y`, `width`, `height` clip rectangle | screenshot payload from qplaywright, plus `connection`, `target` |
 | `resize_window` | `width`, `height`, `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `width`, `height`, `connection` |
 | `close_window` | `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `connection`, `window_wid` |
@@ -204,7 +202,7 @@ Most playwright-mcp compatibility tools use these fields:
 
 ### Native Invoke Result Shape
 
-`invoke_widget_method` wraps the underlying widget method result in `result`.
+`invoke` wraps the underlying widget method result in `result`.
 For method-only custom widgets, the common shape is:
 
 ```json
@@ -212,7 +210,7 @@ For method-only custom widgets, the common shape is:
   "ok": true,
   "connection": "demo",
   "target": "#amount_editor",
-  "method_name": "amount",
+  "method": "amount",
   "args": {},
   "result": {
     "ok": true,

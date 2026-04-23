@@ -6,6 +6,7 @@ northbound MCP tool layer so MCP hosts can connect to a running Qt app,
 inspect windows, and interact with widgets via the existing selector model.
 """
 
+import builtins
 import argparse
 import atexit
 import contextlib
@@ -503,7 +504,7 @@ def _selector_help_text() -> str:
         "1. connect or launch a Qt app with an embedded qplaywright agent\n"
         "2. list_windows\n"
         "3. widget_tree or inspect_widget\n"
-        "4. click, fill, type_text, set_checked, press_key, select_option, screenshot\n"
+        "4. click, input, set_checked, press_key, choose, screenshot\n"
         "5. disconnect when finished"
     )
 
@@ -930,10 +931,13 @@ if FastMCP is not None:
         window_wid: int | None = None,
         window_title: str | None = None,
         window_index: int | None = None,
-        double_click: bool = False,
+        count: int = 1,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Click or double-click the first widget matched by a target."""
+
+        if count not in (1, 2):
+            raise ValueError("count must be 1 or 2")
 
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
@@ -945,7 +949,7 @@ if FastMCP is not None:
             window_title=window_title,
             window_index=window_index,
         )
-        if double_click:
+        if count == 2:
             locator.dblclick()
         else:
             locator.click()
@@ -954,25 +958,33 @@ if FastMCP is not None:
             include_snapshot=include_snapshot,
             snapshot_target=target,
             ok=True,
-            double_click=double_click,
+            count=count,
             target=target,
             connection=connection,
         )
 
 
     @mcp.tool()
-    def fill(
+    def input(
         target: str,
-        value: str,
+        text: str,
         connection: str = "default",
         has_text: str | None = None,
         nth: int | None = None,
         window_wid: int | None = None,
         window_title: str | None = None,
         window_index: int | None = None,
+        mode: str = "replace",
+        delay: int = 0,
+        submit: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
-        """Clear and fill the first matched input-like widget."""
+        """Input text into the first matched input-like widget."""
+
+        if mode not in ("replace", "append"):
+            raise ValueError("mode must be 'replace' or 'append'")
+        if delay < 0:
+            raise ValueError("delay must be >= 0")
 
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
@@ -984,22 +996,36 @@ if FastMCP is not None:
             window_title=window_title,
             window_index=window_index,
         )
-        locator.fill(value)
+        if mode == "replace":
+            if delay == 0:
+                locator.fill(text)
+            else:
+                locator.clear()
+                locator.type(text, delay=delay)
+        else:
+            locator.type(text, delay=delay)
+
+        if submit:
+            locator.press("Enter")
+
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
             snapshot_target=target,
             ok=True,
             target=target,
-            value=value,
+            text=text,
+            mode=mode,
+            delay=delay,
+            submitted=submit,
             connection=connection,
         )
 
 
     @mcp.tool()
-    def invoke_widget_method(
+    def invoke(
         target: str,
-        method_name: str,
+        method: str,
         connection: str = "default",
         has_text: str | None = None,
         nth: int | None = None,
@@ -1021,7 +1047,7 @@ if FastMCP is not None:
             window_title=window_title,
             window_index=window_index,
         )
-        result = _invoke_locator_method(locator, method_name=method_name, args=args)
+        result = _invoke_locator_method(locator, method_name=method, args=args)
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
@@ -1029,50 +1055,10 @@ if FastMCP is not None:
             ok=True,
             connection=connection,
             target=target,
-            method_name=method_name,
+            method=method,
             args=dict(args or {}),
             result=result,
         )
-
-
-    @mcp.tool()
-    def type_text(
-        target: str,
-        text: str,
-        connection: str = "default",
-        has_text: str | None = None,
-        nth: int | None = None,
-        window_wid: int | None = None,
-        window_title: str | None = None,
-        window_index: int | None = None,
-        delay: int = 0,
-        include_snapshot: bool = False,
-    ) -> dict[str, Any]:
-        """Type text into the first matched widget without clearing existing content."""
-
-        connection_state = _get_connection(_SERVER_STATE, connection)
-        locator = _resolve_locator(
-            connection_state,
-            target=target,
-            has_text=has_text,
-            nth=nth,
-            window_wid=window_wid,
-            window_title=window_title,
-            window_index=window_index,
-        )
-        locator.type(text, delay=delay)
-        return _finalize_action_result(
-            connection_state,
-            include_snapshot=include_snapshot,
-            snapshot_target=target,
-            ok=True,
-            target=target,
-            text=text,
-            delay=delay,
-            connection=connection,
-        )
-
-
     @mcp.tool()
     def press_key(
         target: str,
@@ -1149,7 +1135,7 @@ if FastMCP is not None:
 
 
     @mcp.tool()
-    def select_option(
+    def choose(
         target: str,
         connection: str = "default",
         has_text: str | None = None,
@@ -1193,7 +1179,7 @@ if FastMCP is not None:
 
 
     @mcp.tool()
-    def wait_for(
+    def wait(
         target: str,
         connection: str = "default",
         has_text: str | None = None,
@@ -1852,13 +1838,12 @@ _CLI_TOOL_NAMES = (
     "inspect_widget",
     "get_widget_methods",
     "click",
-    "fill",
-    "invoke_widget_method",
-    "type_text",
+    "input",
+    "invoke",
     "press_key",
     "set_checked",
-    "select_option",
-    "wait_for",
+    "choose",
+    "wait",
     "screenshot",
     "resize_window",
     "close_window",
@@ -1992,7 +1977,7 @@ def _run_cli_repl() -> int:
     print("qplaywright MCP CLI. Type .help for usage.")
     while True:
         try:
-            command_line = input("qplaywright> ").strip()
+            command_line = builtins.input("qplaywright> ").strip()
         except EOFError:
             print()
             return 0

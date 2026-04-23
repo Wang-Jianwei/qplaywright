@@ -132,6 +132,9 @@ class FakeLocator:
     def fill(self, value: str):
         self.action_calls.append(("fill", {"value": value}))
 
+    def clear(self):
+        self.action_calls.append(("clear", {}))
+
     def type(self, text: str, *, delay: int = 0):
         self.action_calls.append(("type", {"text": text, "delay": delay}))
 
@@ -399,7 +402,7 @@ def test_invoke_locator_method_raises_detailed_failure_for_structured_invoke_res
         mcp_server._invoke_locator_method(locator, method_name="setAmount", args={})
 
 
-def test_wait_for_can_include_snapshot(monkeypatch):
+def test_wait_can_include_snapshot(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -418,7 +421,7 @@ def test_wait_for_can_include_snapshot(monkeypatch):
         lambda managed_connection, **payload: payload | {"snapshot": "- DemoWindow [ref=e1]", "refs": [{"ref": "e1"}]},
     )
 
-    result = mcp_server.wait_for(
+    result = mcp_server.wait(
         target="#status_label",
         connection="demo",
         state="visible",
@@ -459,72 +462,72 @@ def test_browser_wait_for_time_can_include_snapshot(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("tool_name", "call_kwargs", "expected_call", "expected_payload"),
+    ("tool_name", "call_kwargs", "expected_calls", "expected_payload"),
     [
-        ("click", {"target": "#submit", "include_snapshot": True}, ("click", {}), {"target": "#submit"}),
+        ("click", {"target": "#submit", "include_snapshot": True}, [("click", {})], {"target": "#submit", "count": 1}),
         (
             "click",
-            {"target": "#submit", "double_click": True, "include_snapshot": True},
-            ("dblclick", {}),
-            {"target": "#submit", "double_click": True},
+            {"target": "#submit", "count": 2, "include_snapshot": True},
+            [("dblclick", {})],
+            {"target": "#submit", "count": 2},
         ),
         (
-            "fill",
-            {"target": "#amount", "value": "123.45", "include_snapshot": True},
-            ("fill", {"value": "123.45"}),
-            {"target": "#amount", "value": "123.45"},
+            "input",
+            {"target": "#amount", "text": "123.45", "include_snapshot": True},
+            [("fill", {"value": "123.45"})],
+            {"target": "#amount", "text": "123.45", "mode": "replace", "delay": 0, "submitted": False},
         ),
         (
-            "invoke_widget_method",
-            {"target": "#amount", "method_name": "setAmount", "args": {"value": "88.00"}, "include_snapshot": True},
-            ("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}}),
-            {"target": "#amount", "method_name": "setAmount", "args": {"value": "88.00"}},
+            "invoke",
+            {"target": "#amount", "method": "setAmount", "args": {"value": "88.00"}, "include_snapshot": True},
+            [("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}})],
+            {"target": "#amount", "method": "setAmount", "args": {"value": "88.00"}},
         ),
         (
-            "type_text",
-            {"target": "#amount", "text": "abc", "delay": 25, "include_snapshot": True},
-            ("type", {"text": "abc", "delay": 25}),
-            {"target": "#amount", "text": "abc", "delay": 25},
+            "input",
+            {"target": "#amount", "text": "abc", "mode": "append", "delay": 25, "submit": True, "include_snapshot": True},
+            [("type", {"text": "abc", "delay": 25}), ("press", {"key": "Enter"})],
+            {"target": "#amount", "text": "abc", "mode": "append", "delay": 25, "submitted": True},
         ),
         (
             "press_key",
             {"target": "#amount", "key": "Enter", "include_snapshot": True},
-            ("press", {"key": "Enter"}),
+            [("press", {"key": "Enter"})],
             {"target": "#amount", "key": "Enter"},
         ),
         (
             "set_checked",
             {"target": "#remember", "checked": True, "include_snapshot": True},
-            ("check", {}),
+            [("check", {})],
             {"target": "#remember", "checked": True},
         ),
         (
             "set_checked",
             {"target": "#remember", "checked": False, "include_snapshot": True},
-            ("uncheck", {}),
+            [("uncheck", {})],
             {"target": "#remember", "checked": False},
         ),
         (
-            "select_option",
+            "choose",
             {"target": "#currency", "label": "CNY", "include_snapshot": True},
-            ("select_option", {"value": None, "index": None, "label": "CNY"}),
+            [("select_option", {"value": None, "index": None, "label": "CNY"})],
             {"target": "#currency", "label": "CNY", "value": None, "index": None},
         ),
         (
             "hover",
             {"target": "#item", "include_snapshot": True},
-            ("hover", {}),
+            [("hover", {})],
             {"target": "#item"},
         ),
         (
             "scroll",
             {"target": "#item", "delta_x": 5, "delta_y": 10, "include_snapshot": True},
-            ("scroll", {"delta_x": 5, "delta_y": 10}),
+            [("scroll", {"delta_x": 5, "delta_y": 10})],
             {"target": "#item", "delta_x": 5, "delta_y": 10},
         ),
     ],
 )
-def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_kwargs, expected_call, expected_payload):
+def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_kwargs, expected_calls, expected_payload):
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -545,7 +548,7 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
 
     result = getattr(mcp_server, tool_name)(connection="demo", **call_kwargs)
 
-    assert locator.action_calls[-1] == expected_call
+    assert locator.action_calls == expected_calls
     assert result["ok"] is True
     for key, value in expected_payload.items():
         assert result[key] == value
