@@ -12,3 +12,4 @@ build_*/
 dist/
 
 demo*.png
+tmp*.png
