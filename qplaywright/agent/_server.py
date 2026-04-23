@@ -94,9 +94,11 @@ _QtCore = None
 _QtGui = None
 _QtTest = None
 _QApplication = None
-_VISUAL_FEEDBACK_OVERLAYS: dict[int, Any] = {}
 _VISUAL_FEEDBACK_ENABLED = False
-_VisualClickOverlay = None
+_AUTOMATION_OVERLAY_OBJECT_NAME = "_qplaywright_automation_overlay"
+_AUTOMATION_OVERLAY_PROPERTY = "qplaywrightAutomationOverlay"
+_OVERLAY_MANAGER = None
+_OverlayManagerClass = None
 
 
 def _import_qt():
@@ -122,120 +124,252 @@ def _import_qt():
     raise ImportError("No Qt binding found. Install PySide6, PyQt6, PySide2, or PyQt5.")
 
 
-def _create_visual_click_overlay_class():
+def _is_automation_overlay_widget(widget) -> bool:
+    if widget is None:
+        return False
+
+    object_name = getattr(widget, "objectName", None)
+    if callable(object_name) and object_name() == _AUTOMATION_OVERLAY_OBJECT_NAME:
+        return True
+
+    return bool(_qt_property(widget, _AUTOMATION_OVERLAY_PROPERTY))
+
+
+def _create_overlay_manager_class():
     _import_qt()
     assert _QtWidgets is not None
     assert _QtCore is not None
     assert _QtGui is not None
+    QObject = _QtCore.QObject
     QWidget = _QtWidgets.QWidget
     Qt = _QtCore.Qt
     QTimer = _QtCore.QTimer
+    QPoint = _QtCore.QPoint
     QPainter = _QtGui.QPainter
     QColor = _QtGui.QColor
     QPen = _QtGui.QPen
+    QPolygon = _QtGui.QPolygon
+    QBrush = _QtGui.QBrush
 
-    class _VisualClickOverlay(QWidget):
-        def __init__(self, parent, center, *, pulse_count: int = 1):
-            super().__init__(parent)
-            self._center = center
-            self._pulse_count = max(1, pulse_count)
+    class _AutomationOverlay(QWidget):
+        def __init__(self, target_window):
+            super().__init__(None)
+            self._target_window = target_window
+            self._cursor_pos = None
             self._pulse_span = 0.22
             self._pulse_gap = 0.08
-            self._duration = self._pulse_span + self._pulse_gap * (self._pulse_count - 1)
-            self._started = time.monotonic()
+            self._pulse_records: list[tuple[float, Any, int]] = []
             self._timer = QTimer(self)
             self._timer.timeout.connect(self._tick)
 
+            flags = Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+            if hasattr(Qt, "NoDropShadowWindowHint"):
+                flags |= Qt.NoDropShadowWindowHint
+            self.setWindowFlags(flags)
             self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             self.setAttribute(Qt.WA_NoSystemBackground, True)
             if hasattr(Qt, "WA_TranslucentBackground"):
                 self.setAttribute(Qt.WA_TranslucentBackground, True)
+            if hasattr(Qt, "WA_ShowWithoutActivating"):
+                self.setAttribute(Qt.WA_ShowWithoutActivating, True)
             self.setFocusPolicy(Qt.NoFocus)
-            self.setGeometry(parent.rect())
+            self.setObjectName(_AUTOMATION_OVERLAY_OBJECT_NAME)
+            self.setProperty(_AUTOMATION_OVERLAY_PROPERTY, True)
 
-        @property
-        def duration(self) -> float:
-            return self._duration
+        def sync_to_window(self, *, force_raise: bool = False) -> None:
+            if self._target_window is None:
+                self.hide()
+                return
 
-        def start(self) -> None:
-            self.show()
-            self.raise_()
-            self._timer.start(16)
+            if not self._target_window.isVisible():
+                self.hide()
+                return
+
+            top_left = self._target_window.mapToGlobal(self._target_window.rect().topLeft())
+            rect = self.geometry()
+            if rect.x() != top_left.x() or rect.y() != top_left.y() or rect.width() != self._target_window.width() or rect.height() != self._target_window.height():
+                self.setGeometry(top_left.x(), top_left.y(), self._target_window.width(), self._target_window.height())
+
+            if self._cursor_pos is None:
+                self._cursor_pos = self._target_window.rect().center()
+
+            if not self.isVisible():
+                self.show()
+            if force_raise:
+                self.raise_()
+            if not self._timer.isActive():
+                self._timer.start(16)
+
+        def set_cursor_from_global(self, global_pos, *, pulse_count: int = 0) -> None:
+            self._cursor_pos = self._target_window.mapFromGlobal(global_pos)
+            if pulse_count > 0:
+                self._pulse_records.append((time.monotonic(), QPoint(self._cursor_pos), pulse_count))
+            self.sync_to_window(force_raise=True)
+            self.update()
+
+        def close_overlay(self) -> None:
+            self._timer.stop()
+            self.hide()
+            self.close()
 
         def _tick(self) -> None:
-            if time.monotonic() - self._started >= self._duration:
+            cutoff = time.monotonic() - (self._pulse_span + self._pulse_gap)
+            self._pulse_records = [record for record in self._pulse_records if record[0] >= cutoff]
+            if self._target_window is None or not self._target_window.isVisible():
+                self.hide()
+            else:
+                self.sync_to_window()
+            if not self.isVisible() and not self._pulse_records:
                 self._timer.stop()
-                self.close()
                 return
             self.update()
 
         def paintEvent(self, _event) -> None:
-            elapsed = time.monotonic() - self._started
             painter = QPainter(self)
             painter.setRenderHint(QPainter.Antialiasing, True)
 
             core_color = QColor(20, 132, 255, 180)
             ring_base = QColor(20, 132, 255, 220)
 
-            for pulse_index in range(self._pulse_count):
-                local_elapsed = elapsed - pulse_index * self._pulse_gap
-                if local_elapsed < 0 or local_elapsed > self._pulse_span:
-                    continue
+            for started_at, center, pulse_count in self._pulse_records:
+                elapsed = time.monotonic() - started_at
+                for pulse_index in range(pulse_count):
+                    local_elapsed = elapsed - pulse_index * self._pulse_gap
+                    if local_elapsed < 0 or local_elapsed > self._pulse_span:
+                        continue
 
-                progress = local_elapsed / self._pulse_span
-                radius = 6 + progress * 20
-                alpha = max(0, int(ring_base.alpha() * (1.0 - progress)))
-                ring_color = QColor(ring_base)
-                ring_color.setAlpha(alpha)
-                painter.setPen(QPen(ring_color, 2))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(self._center, int(radius), int(radius))
+                    progress = local_elapsed / self._pulse_span
+                    radius = 6 + progress * 20
+                    alpha = max(0, int(ring_base.alpha() * (1.0 - progress)))
+                    ring_color = QColor(ring_base)
+                    ring_color.setAlpha(alpha)
+                    painter.setPen(QPen(ring_color, 2))
+                    painter.setBrush(Qt.NoBrush)
+                    painter.drawEllipse(center, int(radius), int(radius))
+
+            if self._cursor_pos is None:
+                return
+
+            shadow = QPolygon(
+                [
+                    self._cursor_pos + QPoint(2, 2),
+                    self._cursor_pos + QPoint(2, 20),
+                    self._cursor_pos + QPoint(7, 15),
+                    self._cursor_pos + QPoint(10, 23),
+                    self._cursor_pos + QPoint(13, 22),
+                    self._cursor_pos + QPoint(10, 14),
+                    self._cursor_pos + QPoint(17, 14),
+                ]
+            )
+            cursor = QPolygon(
+                [
+                    self._cursor_pos,
+                    self._cursor_pos + QPoint(0, 18),
+                    self._cursor_pos + QPoint(5, 13),
+                    self._cursor_pos + QPoint(8, 21),
+                    self._cursor_pos + QPoint(11, 20),
+                    self._cursor_pos + QPoint(8, 12),
+                    self._cursor_pos + QPoint(15, 12),
+                ]
+            )
 
             painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 110))
+            painter.drawPolygon(shadow)
+            painter.setPen(QPen(QColor(0, 0, 0, 200), 1))
+            painter.setBrush(QBrush(QColor(255, 255, 255, 240)))
+            painter.drawPolygon(cursor)
+            painter.setPen(Qt.NoPen)
             painter.setBrush(core_color)
-            painter.drawEllipse(self._center, 4, 4)
+            painter.drawEllipse(self._cursor_pos, 4, 4)
 
-    return _VisualClickOverlay
+    class _OverlayManager(QObject):
+        def __init__(self, app):
+            super().__init__(app)
+            self._app = app
+            self._overlays: dict[int, Any] = {}
+            self._active_window_id: int | None = None
+            self._timer = QTimer(self)
+            self._timer.timeout.connect(self._sync)
+            self._timer.start(16)
+
+        def close_all(self) -> None:
+            for overlay in list(self._overlays.values()):
+                overlay.close_overlay()
+            self._overlays.clear()
+            self._timer.stop()
+
+        def move_cursor(self, widget, pos, *, pulse_count: int = 0) -> None:
+            target_window = widget.window() if hasattr(widget, "window") else None
+            if target_window is None:
+                return
+            self._active_window_id = id(target_window)
+            overlay = self._ensure_overlay(target_window)
+            overlay.set_cursor_from_global(widget.mapToGlobal(pos), pulse_count=pulse_count)
+
+        def _ensure_overlay(self, target_window):
+            window_id = id(target_window)
+            overlay = self._overlays.get(window_id)
+            if overlay is not None:
+                return overlay
+
+            overlay = _AutomationOverlay(target_window)
+            self._overlays[window_id] = overlay
+            target_window.destroyed.connect(lambda *_args, wid=window_id: self._drop_overlay(wid))
+            overlay.sync_to_window()
+            return overlay
+
+        def _drop_overlay(self, window_id: int) -> None:
+            overlay = self._overlays.pop(window_id, None)
+            if overlay is not None:
+                overlay.close_overlay()
+
+        def _sync(self) -> None:
+            if self._active_window_id is None:
+                visible_windows = _get_top_level_widgets()
+                if visible_windows:
+                    self._active_window_id = id(visible_windows[0])
+
+            for window_id, overlay in list(self._overlays.items()):
+                target_window = getattr(overlay, "_target_window", None)
+                if target_window is None:
+                    self._drop_overlay(window_id)
+                    continue
+
+                is_active = window_id == self._active_window_id
+                if not is_active:
+                    overlay.hide()
+                    continue
+
+                overlay.sync_to_window()
+
+            if self._active_window_id is not None and self._active_window_id not in self._overlays:
+                for window in _get_top_level_widgets():
+                    if id(window) == self._active_window_id:
+                        self._ensure_overlay(window)
+                        break
+
+    return _OverlayManager
 
 
-def _ensure_visual_click_overlay_class():
-    global _VisualClickOverlay
-    if _VisualClickOverlay is None:
-        _VisualClickOverlay = _create_visual_click_overlay_class()
-    return _VisualClickOverlay
-
-
-def _show_click_feedback(widget, pos, *, double: bool = False):
+def _ensure_overlay_manager():
+    global _OVERLAY_MANAGER, _OverlayManagerClass
     if not _VISUAL_FEEDBACK_ENABLED:
         return None
 
-    window = widget.window() if hasattr(widget, "window") else None
-    if window is None or not hasattr(window, "mapFromGlobal"):
-        return None
-
-    overlay_cls = _ensure_visual_click_overlay_class()
-    center = window.mapFromGlobal(widget.mapToGlobal(pos))
-    overlay = overlay_cls(window, center, pulse_count=2 if double else 1)
-    overlay_id = id(overlay)
-    _VISUAL_FEEDBACK_OVERLAYS[overlay_id] = overlay
-    overlay.destroyed.connect(lambda *_args, oid=overlay_id: _VISUAL_FEEDBACK_OVERLAYS.pop(oid, None))
-    overlay.start()
-    _process_events()
-    return overlay
+    if _OverlayManagerClass is None:
+        _OverlayManagerClass = _create_overlay_manager_class()
+    if _OVERLAY_MANAGER is None:
+        assert _QApplication is not None
+        _OVERLAY_MANAGER = _OverlayManagerClass(_QApplication.instance())
+    return _OVERLAY_MANAGER
 
 
-def _drain_click_feedback(overlay) -> None:
-    if overlay is None:
+def _update_visual_feedback(widget, pos, *, double: bool = False) -> None:
+    manager = _ensure_overlay_manager()
+    if manager is None:
         return
-
-    deadline = time.monotonic() + overlay.duration + 0.1
-    while overlay.isVisible() and time.monotonic() < deadline:
-        _process_events()
-        time.sleep(0.01)
-
-    if overlay.isVisible():
-        overlay.close()
-        _process_events()
+    manager.move_cursor(widget, pos, pulse_count=2 if double else 1)
 
 
 # --------------------------------------------------------------------------- #
@@ -279,13 +413,16 @@ _registry = _WidgetRegistry()
 def _widget_tree_to_dict(widget, *, depth: int = 0, max_depth: int = 50) -> dict:
     """Serialize a widget tree and include stable widget ids for each node."""
 
+    if _is_automation_overlay_widget(widget):
+        raise ValueError("Automation overlay widgets are excluded from snapshot capture")
+
     info = widget_to_dict(widget, depth=depth, max_depth=depth)
     info["wid"] = _registry.register(widget)
 
     if depth < max_depth:
         children = []
         for child in widget.children():
-            if hasattr(child, "isVisible"):
+            if hasattr(child, "isVisible") and not _is_automation_overlay_widget(child):
                 children.append(_widget_tree_to_dict(child, depth=depth + 1, max_depth=max_depth))
         if children:
             info["children"] = children
@@ -342,7 +479,7 @@ def _create_dispatcher():
 # --------------------------------------------------------------------------- #
 
 def _get_top_level_widgets():
-    return _QApplication.topLevelWidgets()
+    return [widget for widget in _QApplication.topLevelWidgets() if not _is_automation_overlay_widget(widget)]
 
 
 def _resolve_widgets(params: dict) -> list:
@@ -777,6 +914,8 @@ def _resolve_click_target(widget):
     widget_at = getattr(_QApplication, "widgetAt", None)
     if callable(widget_at):
         hit = widget_at(global_pos)
+    if _is_automation_overlay_widget(hit):
+        hit = None
     if hit is None and hasattr(target, "childAt"):
         hit = target.childAt(center)
     if hit is None:
@@ -816,7 +955,7 @@ def _click_widget(widget, *, double: bool = False):
         event_target.setFocus()
     _process_events()
 
-    overlay = _show_click_feedback(event_target, local_pos, double=double)
+    _update_visual_feedback(event_target, local_pos, double=double)
 
     if QTest and hasattr(QTest, "mouseClick"):
         try:
@@ -834,7 +973,6 @@ def _click_widget(widget, *, double: bool = False):
         _post_mouse_event(event_target, local_pos, double=double)
 
     _process_events()
-    _drain_click_feedback(overlay)
 
 
 def _post_mouse_event(widget, pos, *, double: bool = False):
@@ -1218,7 +1356,7 @@ def start_agent(
     Returns:
         The server thread (call ``server.stop()`` to shut down).
     """
-    global _agent_server, _VISUAL_FEEDBACK_ENABLED
+    global _agent_server, _VISUAL_FEEDBACK_ENABLED, _OVERLAY_MANAGER
     _import_qt()
 
     if visual_feedback is None:
@@ -1230,6 +1368,12 @@ def start_agent(
         app = _QApplication.instance()
     if app is None:
         raise RuntimeError("No QApplication instance found. Create one first.")
+
+    if _VISUAL_FEEDBACK_ENABLED:
+        _ensure_overlay_manager()
+    elif _OVERLAY_MANAGER is not None:
+        _OVERLAY_MANAGER.close_all()
+        _OVERLAY_MANAGER = None
 
     Dispatcher, CommandEvent = _create_dispatcher()
     dispatcher = Dispatcher()
