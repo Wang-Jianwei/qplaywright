@@ -56,9 +56,13 @@ class FakeWindow:
         self.wid = wid
         self._title = title
         self.closed = False
+        self.resized_to = None
 
     def title(self) -> str:
         return self._title
+
+    def resize(self, width: int, height: int) -> None:
+        self.resized_to = (width, height)
 
     def close(self) -> None:
         self.closed = True
@@ -197,6 +201,44 @@ def test_connect_connection_replaces_existing(monkeypatch):
     assert existing_qplaywright.closed is True
     assert existing_app.closed is True
     assert created[0].connected == ("127.0.0.1", 19877, 5.0)
+
+
+def test_legacy_connect_and_launch_preserve_response_shape(monkeypatch):
+    state = mcp_server.ServerState()
+    created: list[FakeQPlaywright] = []
+
+    def fake_factory():
+        instance = FakeQPlaywright()
+        created.append(instance)
+        return instance
+
+    monkeypatch.setattr(mcp_server, "QPlaywright", fake_factory)
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    connected = mcp_server.connect(name="demo", port=19877, timeout=5.0)
+    launched = mcp_server.launch("demo_app.exe", args=["--flag"], name="demo2", port=19878, timeout=6.0)
+
+    assert connected == {
+        "connection": "demo",
+        "host": "127.0.0.1",
+        "port": 19877,
+        "timeout": 5.0,
+        "replaced": False,
+        "current_window_wid": None,
+        "windows": [],
+    }
+    assert launched == {
+        "connection": "demo2",
+        "host": "127.0.0.1",
+        "port": 19878,
+        "timeout": 6.0,
+        "replaced": False,
+        "launched_executable": "demo_app.exe",
+        "current_window_wid": None,
+        "windows": [],
+    }
+    assert created[0].connected == ("127.0.0.1", 19877, 5.0)
+    assert created[1].launched == ("demo_app.exe", ["--flag"], "127.0.0.1", 19878, 6.0)
 
 
 def test_get_connection_removes_stale_connection_from_state():
@@ -388,6 +430,31 @@ def test_session_attach_status_and_close(monkeypatch):
     assert state.connections == {}
 
 
+def test_legacy_disconnect_preserves_launched_executable(monkeypatch):
+    state = mcp_server.ServerState(
+        connections={
+            "demo": mcp_server.ManagedConnection(
+                name="demo",
+                qplaywright=FakeQPlaywright(),
+                app=FakeApp([]),
+                host="127.0.0.1",
+                port=19876,
+                timeout=30.0,
+                launched_executable="demo_app.exe",
+            )
+        }
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    result = mcp_server.disconnect("demo")
+
+    assert result == {
+        "connection": "demo",
+        "closed": True,
+        "launched_executable": "demo_app.exe",
+    }
+
+
 def test_window_tool_selects_and_closes_windows(monkeypatch):
     state = mcp_server.ServerState()
     first = FakeWindow(11, "First")
@@ -415,6 +482,33 @@ def test_window_tool_selects_and_closes_windows(monkeypatch):
     assert closed["ok"] is True
     assert closed["action"] == "close"
     assert closed["active_window"]["wid"] == 11
+
+
+def test_legacy_window_tools_wrap_window_actions(monkeypatch):
+    state = mcp_server.ServerState()
+    first = FakeWindow(11, "First")
+    second = FakeWindow(22, "Second")
+    state.connections["demo"] = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([first, second]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=22,
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    windows = mcp_server.list_windows(connection="demo")
+    resized = mcp_server.resize_window(width=800, height=600, connection="demo", window_wid=11)
+    closed = mcp_server.close_window(connection="demo", window_wid=22)
+
+    assert [window["wid"] for window in windows] == [11, 22]
+    assert resized == {"ok": True, "width": 800, "height": 600, "connection": "demo"}
+    assert first.resized_to == (800, 600)
+    assert closed == {"ok": True, "connection": "demo", "window_wid": 22}
+    assert second.closed is True
+    assert state.connections["demo"].active_window_wid == 11
 
 
 def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):

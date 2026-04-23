@@ -896,7 +896,20 @@ if FastMCP is not None:
     ) -> dict[str, Any]:
         """Connect to a running Qt application with an embedded qplaywright agent."""
 
-        return connect_connection(_SERVER_STATE, name=name, host=host, port=port, timeout=timeout)
+        normalized = _normalize_connection_name(name)
+        replaced = normalized in _SERVER_STATE.connections
+        session(action="attach", connection=normalized, host=host, port=port, timeout=timeout)
+        connection_state = _get_connection(_SERVER_STATE, normalized)
+        windows = _window_summary(connection_state)
+        return {
+            "connection": normalized,
+            "host": host,
+            "port": port,
+            "timeout": timeout,
+            "replaced": replaced,
+            "current_window_wid": connection_state.active_window_wid,
+            "windows": windows,
+        }
 
 
     @mcp.tool()
@@ -910,22 +923,42 @@ if FastMCP is not None:
     ) -> dict[str, Any]:
         """Launch a Qt executable that embeds qplaywright agent support and connect to it."""
 
-        return launch_connection(
-            _SERVER_STATE,
+        normalized = _normalize_connection_name(name)
+        replaced = normalized in _SERVER_STATE.connections
+        session(
+            action="launch",
+            connection=normalized,
             executable=executable,
             args=args,
-            name=name,
             host=host,
             port=port,
             timeout=timeout,
         )
+        connection_state = _get_connection(_SERVER_STATE, normalized)
+        windows = _window_summary(connection_state)
+        return {
+            "connection": normalized,
+            "host": host,
+            "port": port,
+            "timeout": timeout,
+            "replaced": replaced,
+            "launched_executable": executable,
+            "current_window_wid": connection_state.active_window_wid,
+            "windows": windows,
+        }
 
 
     @mcp.tool()
     def disconnect(name: str = "default") -> dict[str, Any]:
         """Close one MCP-managed qplaywright connection."""
 
-        return disconnect_connection(_SERVER_STATE, name=name)
+        connection_state = _get_connection(_SERVER_STATE, name)
+        result = session(action="close", connection=name)
+        return {
+            "connection": name,
+            "closed": result["closed"],
+            "launched_executable": connection_state.launched_executable,
+        }
 
 
     @mcp.tool()
@@ -975,14 +1008,13 @@ if FastMCP is not None:
         if action == "resize":
             if width is None or height is None:
                 raise ValueError("width and height are required when action='resize'")
-            resize_window(
-                width=width,
-                height=height,
-                connection=connection,
+            target_window = _resolve_window(
+                connection_state,
                 window_wid=wid,
                 window_title=title,
                 window_index=index,
             )
+            target_window.resize(width, height)
             return {
                 "ok": True,
                 "action": action,
@@ -996,12 +1028,9 @@ if FastMCP is not None:
                 window_title=title,
                 window_index=index,
             )
-            close_window(
-                connection=connection,
-                window_wid=target_window.wid,
-            )
+            target_window.close()
             remaining_windows = _window_summary(connection_state)
-            if target_window.wid == connection_state.active_window_wid:
+            if not any(window["wid"] == connection_state.active_window_wid for window in remaining_windows):
                 _select_active_window(connection_state, remaining_windows[0]["wid"] if remaining_windows else None)
             return {
                 "ok": True,
@@ -1016,7 +1045,7 @@ if FastMCP is not None:
     def list_windows(connection: str = "default") -> list[dict[str, Any]]:
         """List visible top-level windows for a connected Qt application."""
 
-        return _window_summary(_get_connection(_SERVER_STATE, connection))
+        return window(action="list", connection=connection)["windows"]
 
 
     @mcp.tool()
@@ -1552,14 +1581,21 @@ if FastMCP is not None:
     ) -> dict[str, Any]:
         """Resize one top-level window."""
 
-        window = _resolve_window(
-            _get_connection(_SERVER_STATE, connection),
-            window_wid=window_wid,
-            window_title=window_title,
-            window_index=window_index,
+        window_result = window(
+            action="resize",
+            connection=connection,
+            wid=window_wid,
+            title=window_title,
+            index=window_index,
+            width=width,
+            height=height,
         )
-        window.resize(width, height)
-        return {"ok": True, "width": width, "height": height, "connection": connection}
+        return {
+            "ok": window_result["ok"],
+            "width": width,
+            "height": height,
+            "connection": connection,
+        }
 
 
     @mcp.tool()
@@ -1571,14 +1607,23 @@ if FastMCP is not None:
     ) -> dict[str, Any]:
         """Close one top-level window."""
 
-        window = _resolve_window(
-            _get_connection(_SERVER_STATE, connection),
+        connection_state = _get_connection(_SERVER_STATE, connection)
+        resolved_window = _resolve_window(
+            connection_state,
             window_wid=window_wid,
             window_title=window_title,
             window_index=window_index,
         )
-        window.close()
-        return {"ok": True, "connection": connection, "window_wid": window.wid}
+        window_result = window(
+            action="close",
+            connection=connection,
+            wid=resolved_window.wid,
+        )
+        return {
+            "ok": window_result["ok"],
+            "connection": connection,
+            "window_wid": resolved_window.wid,
+        }
 
 
     @mcp.tool()

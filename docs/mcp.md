@@ -87,6 +87,10 @@ The server can be exposed through:
 
 These are the primary MCP tools backed directly by the qplaywright sync client:
 
+Preferred end-state entry points are `session`, `window`, `snapshot`, and `inspect`.
+Older native tools such as `connect`, `launch`, `disconnect`, `list_windows`,
+`resize_window`, and `close_window` remain available as transitional aliases.
+
 | Tool | Purpose |
 | --- | --- |
 | `session` | Attach, launch, inspect status, or close the active MCP-side session |
@@ -113,6 +117,15 @@ These are the primary MCP tools backed directly by the qplaywright sync client:
 | `resize_window` | Resize a top-level window |
 | `close_window` | Close a top-level window |
 | `hover` | Hover over the first matched widget |
+
+### Legacy Native Aliases
+
+These legacy native tools still exist, but they now delegate to the newer
+resource-style tools where possible:
+
+- `connect` and `launch` delegate to `session`
+- `disconnect` delegates to `session` with `action="close"`
+- `list_windows`, `resize_window`, and `close_window` delegate to `window`
 
 ### playwright-mcp Compatibility Tools
 
