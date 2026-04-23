@@ -43,7 +43,7 @@ Inside the REPL, use one tool call per line:
 qplaywright> connect {"name": "probe", "port": 19877}
 qplaywright> list_windows {"connection": "probe"}
 qplaywright> browser_snapshot {"connection": "probe", "depth": 4}
-qplaywright> click {"connection": "probe", "selector": "text=Start"}
+qplaywright> click {"connection": "probe", "target": "text=Start"}
 qplaywright> exit
 ```
 
@@ -95,7 +95,7 @@ These are the primary MCP tools backed directly by the qplaywright sync client:
 | `list_live_connections` | List all live connections tracked by the MCP server |
 | `list_windows` | List visible top-level windows |
 | `widget_tree` | Return the current visible widget tree |
-| `inspect_widget` | Inspect selector match state such as text, value, visibility, checked state, and optional methods |
+| `inspect_widget` | Inspect target match state such as text, value, visibility, checked state, and optional methods |
 | `get_widget_methods` | Return custom widget method metadata from `qplaywrightClassMetadata` |
 | `click` | Click or double-click the first matched widget |
 | `fill` | Clear and fill the first matched editable widget |
@@ -148,15 +148,15 @@ cleanly match browser semantics:
 
 ## Common Parameters And Return Shapes
 
-### Common Native Locator Parameters
+### Common Native Target Parameters
 
-Most native widget-oriented tools share the same locator scope parameters:
+Most native widget-oriented tools share the same target scope parameters:
 
 | Parameter | Meaning |
 | --- | --- |
 | `connection` | MCP-side connection name, default is `default` |
-| `selector` | qplaywright selector such as `#login_btn`, `role=button`, or `.QLabel`, and native action tools also accept snapshot refs such as `e12` |
-| `has_text` | Optional text filter applied after selector resolution |
+| `target` | qplaywright selector such as `#login_btn`, `role=button`, or `.QLabel`, or a snapshot ref such as `e12` |
+| `has_text` | Optional text filter applied after target resolution when `target` is a selector |
 | `nth` | Optional zero-based match index inside the selected window scope |
 | `window_wid` | Resolve inside a specific top-level window wid |
 | `window_title` | Resolve inside the first window whose title contains this text |
@@ -186,21 +186,21 @@ Most playwright-mcp compatibility tools use these fields:
 | `list_live_connections` | none | list entries with `connection`, `host`, `port`, `timeout`, `launched_executable`, `window_count` |
 | `list_windows` | `connection` | list entries with `index`, `wid`, `title`, `class`, `width`, `height` |
 | `widget_tree` | `connection`, `max_depth`, optional `window_wid` or `window_title` or `window_index` | widget tree nodes including `wid`, `class`, `text`, `objectName`, `children` |
-| `inspect_widget` | common native locator params, plus `property_name`, `include_methods` | `exists`, `count`, and when found: `text`, `value`, `is_visible`, `is_enabled`, `is_checked`, `bounding_box`, optional `methods` |
-| `get_widget_methods` | common native locator params | `connection`, `selector`, `methods` where each method includes `name`, `args`, `returnType`, `brief` |
-| `click` | common native locator params, plus `double_click`, `include_snapshot` | `ok`, `selector`, `double_click`, `connection`, optional `snapshot`, `refs` |
-| `fill` | common native locator params, plus `value`, `include_snapshot` | `ok`, `selector`, `value`, `connection`, optional `snapshot`, `refs` |
-| `invoke_widget_method` | common native locator params, plus `method_name`, `args`, `include_snapshot` | `ok`, `selector`, `method_name`, `args`, `result`, optional `snapshot`, `refs` |
-| `type_text` | common native locator params, plus `text`, `delay`, `include_snapshot` | `ok`, `selector`, `text`, `delay`, `connection`, optional `snapshot`, `refs` |
-| `press_key` | common native locator params, plus `key`, `include_snapshot` | `ok`, `selector`, `key`, `connection`, optional `snapshot`, `refs` |
-| `scroll` | common native locator params, plus `delta_x`, `delta_y`, `include_snapshot` | `ok`, `selector`, `delta_x`, `delta_y`, `connection`, optional `snapshot`, `refs` |
-| `set_checked` | common native locator params, plus `checked`, `include_snapshot` | `ok`, `selector`, `checked`, `connection`, optional `snapshot`, `refs` |
-| `select_option` | common native locator params, plus exactly one of `value`, `index`, `label`, `include_snapshot` | `ok`, `selector`, `value`, `index`, `label`, `connection`, optional `snapshot`, `refs` |
-| `wait_for` | common native locator params, plus `state`, `timeout`, `include_snapshot` | `ok`, `selector`, `state`, `timeout`, `connection`, optional `snapshot`, `refs` |
-| `screenshot` | `connection`, optional common native locator params, plus `path` and optional `x`, `y`, `width`, `height` clip rectangle | screenshot payload from qplaywright, plus `connection`, `selector` |
+| `inspect_widget` | common native target params, plus `property_name`, `include_methods` | `exists`, `count`, `target`, and when found: `text`, `value`, `is_visible`, `is_enabled`, `is_checked`, `bounding_box`, optional `methods` |
+| `get_widget_methods` | common native target params | `connection`, `target`, `methods` where each method includes `name`, `args`, `returnType`, `brief` |
+| `click` | common native target params, plus `double_click`, `include_snapshot` | `ok`, `target`, `double_click`, `connection`, optional `snapshot`, `refs` |
+| `fill` | common native target params, plus `value`, `include_snapshot` | `ok`, `target`, `value`, `connection`, optional `snapshot`, `refs` |
+| `invoke_widget_method` | common native target params, plus `method_name`, `args`, `include_snapshot` | `ok`, `target`, `method_name`, `args`, `result`, optional `snapshot`, `refs` |
+| `type_text` | common native target params, plus `text`, `delay`, `include_snapshot` | `ok`, `target`, `text`, `delay`, `connection`, optional `snapshot`, `refs` |
+| `press_key` | common native target params, plus `key`, `include_snapshot` | `ok`, `target`, `key`, `connection`, optional `snapshot`, `refs` |
+| `scroll` | common native target params, plus `delta_x`, `delta_y`, `include_snapshot` | `ok`, `target`, `delta_x`, `delta_y`, `connection`, optional `snapshot`, `refs` |
+| `set_checked` | common native target params, plus `checked`, `include_snapshot` | `ok`, `target`, `checked`, `connection`, optional `snapshot`, `refs` |
+| `select_option` | common native target params, plus exactly one of `value`, `index`, `label`, `include_snapshot` | `ok`, `target`, `value`, `index`, `label`, `connection`, optional `snapshot`, `refs` |
+| `wait_for` | common native target params, plus `state`, `timeout`, `include_snapshot` | `ok`, `target`, `state`, `timeout`, `connection`, optional `snapshot`, `refs` |
+| `screenshot` | `connection`, optional common native target params, plus `path` and optional `x`, `y`, `width`, `height` clip rectangle | screenshot payload from qplaywright, plus `connection`, `target` |
 | `resize_window` | `width`, `height`, `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `width`, `height`, `connection` |
 | `close_window` | `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `connection`, `window_wid` |
-| `hover` | common native locator params, plus `include_snapshot` | `ok`, `selector`, `connection`, optional `snapshot`, `refs` |
+| `hover` | common native target params, plus `include_snapshot` | `ok`, `target`, `connection`, optional `snapshot`, `refs` |
 
 ### Native Invoke Result Shape
 
@@ -211,7 +211,7 @@ For method-only custom widgets, the common shape is:
 {
   "ok": true,
   "connection": "demo",
-  "selector": "#amount_editor",
+  "target": "#amount_editor",
   "method_name": "amount",
   "args": {},
   "result": {

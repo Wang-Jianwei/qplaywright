@@ -377,20 +377,20 @@ def _resolve_window(
 def _resolve_locator(
     connection: ManagedConnection,
     *,
-    selector: str,
+    target: str,
     has_text: str | None = None,
     nth: int | None = None,
     window_wid: int | None = None,
     window_title: str | None = None,
     window_index: int | None = None,
 ) -> Any:
-    if not selector.strip():
-        raise ValueError("Selector must not be empty")
+    if not target.strip():
+        raise ValueError("target must not be empty")
 
-    if _SNAPSHOT_REF_PATTERN.match(selector):
-        ref_wid = connection.snapshot_refs.get(selector)
+    if _SNAPSHOT_REF_PATTERN.match(target):
+        ref_wid = connection.snapshot_refs.get(target)
         if ref_wid is None:
-            raise ValueError(_target_not_found_message(connection, selector))
+            raise ValueError(_target_not_found_message(connection, target))
         return Locator(connection.app._conn, "", widget_wid=ref_wid, timeout=connection.timeout)
 
     window = _resolve_window(
@@ -399,7 +399,7 @@ def _resolve_locator(
         window_title=window_title,
         window_index=window_index,
     )
-    locator = window.locator(selector, has_text=has_text)
+    locator = window.locator(target, has_text=has_text)
     if nth is not None:
         locator = locator.nth(nth)
     return locator
@@ -851,7 +851,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def inspect_widget(
-        selector: str,
+        target: str,
         connection: str = "default",
         has_text: str | None = None,
         nth: int | None = None,
@@ -861,11 +861,11 @@ if FastMCP is not None:
         property_name: str | None = None,
         include_methods: bool = False,
     ) -> dict[str, Any]:
-        """Inspect widgets matched by a selector and return common state for the first match."""
+        """Inspect widgets matched by a target and return common state for the first match."""
 
         locator = _resolve_locator(
             _get_connection(_SERVER_STATE, connection),
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -876,7 +876,7 @@ if FastMCP is not None:
         result.update(
             {
                 "connection": connection,
-                "selector": selector,
+                "target": target,
                 "has_text": has_text,
                 "nth": nth,
                 "window_wid": window_wid,
@@ -890,7 +890,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def get_widget_methods(
-        selector: str,
+        target: str,
         connection: str = "default",
         has_text: str | None = None,
         nth: int | None = None,
@@ -902,7 +902,7 @@ if FastMCP is not None:
 
         locator = _resolve_locator(
             _get_connection(_SERVER_STATE, connection),
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -911,7 +911,7 @@ if FastMCP is not None:
         )
         return {
             "connection": connection,
-            "selector": selector,
+            "target": target,
             "has_text": has_text,
             "nth": nth,
             "window_wid": window_wid,
@@ -923,7 +923,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def click(
-        selector: str,
+        target: str,
         connection: str = "default",
         has_text: str | None = None,
         nth: int | None = None,
@@ -933,12 +933,12 @@ if FastMCP is not None:
         double_click: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
-        """Click or double-click the first widget matched by a selector."""
+        """Click or double-click the first widget matched by a target."""
 
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
             connection_state,
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -952,17 +952,17 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
-            snapshot_target=selector,
+            snapshot_target=target,
             ok=True,
             double_click=double_click,
-            selector=selector,
+            target=target,
             connection=connection,
         )
 
 
     @mcp.tool()
     def fill(
-        selector: str,
+        target: str,
         value: str,
         connection: str = "default",
         has_text: str | None = None,
@@ -977,7 +977,7 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
             connection_state,
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -988,9 +988,9 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
-            snapshot_target=selector,
+            snapshot_target=target,
             ok=True,
-            selector=selector,
+            target=target,
             value=value,
             connection=connection,
         )
@@ -998,7 +998,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def invoke_widget_method(
-        selector: str,
+        target: str,
         method_name: str,
         connection: str = "default",
         has_text: str | None = None,
@@ -1014,7 +1014,7 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
             connection_state,
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -1025,10 +1025,10 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
-            snapshot_target=selector,
+            snapshot_target=target,
             ok=True,
             connection=connection,
-            selector=selector,
+            target=target,
             method_name=method_name,
             args=dict(args or {}),
             result=result,
@@ -1037,7 +1037,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def type_text(
-        selector: str,
+        target: str,
         text: str,
         connection: str = "default",
         has_text: str | None = None,
@@ -1053,7 +1053,7 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
             connection_state,
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -1064,9 +1064,9 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
-            snapshot_target=selector,
+            snapshot_target=target,
             ok=True,
-            selector=selector,
+            target=target,
             text=text,
             delay=delay,
             connection=connection,
@@ -1075,7 +1075,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def press_key(
-        selector: str,
+        target: str,
         key: str,
         connection: str = "default",
         has_text: str | None = None,
@@ -1090,7 +1090,7 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
             connection_state,
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -1101,9 +1101,9 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
-            snapshot_target=selector,
+            snapshot_target=target,
             ok=True,
-            selector=selector,
+            target=target,
             key=key,
             connection=connection,
         )
@@ -1111,7 +1111,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def set_checked(
-        selector: str,
+        target: str,
         checked: bool,
         connection: str = "default",
         has_text: str | None = None,
@@ -1126,7 +1126,7 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
             connection_state,
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -1140,9 +1140,9 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
-            snapshot_target=selector,
+            snapshot_target=target,
             ok=True,
-            selector=selector,
+            target=target,
             checked=checked,
             connection=connection,
         )
@@ -1150,7 +1150,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def select_option(
-        selector: str,
+        target: str,
         connection: str = "default",
         has_text: str | None = None,
         nth: int | None = None,
@@ -1171,7 +1171,7 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
             connection_state,
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -1182,9 +1182,9 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
-            snapshot_target=selector,
+            snapshot_target=target,
             ok=True,
-            selector=selector,
+            target=target,
             value=value,
             index=index,
             label=label,
@@ -1194,7 +1194,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def wait_for(
-        selector: str,
+        target: str,
         connection: str = "default",
         has_text: str | None = None,
         nth: int | None = None,
@@ -1210,7 +1210,7 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
             connection_state,
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -1220,18 +1220,23 @@ if FastMCP is not None:
         locator.wait_for(state=state, timeout=timeout)
         payload = {
             "ok": True,
-            "selector": selector,
+            "target": target,
             "state": state,
             "timeout": timeout,
             "connection": connection,
         }
-        return _finalize_action_result(connection_state, include_snapshot=include_snapshot, **payload)
+        return _finalize_action_result(
+            connection_state,
+            include_snapshot=include_snapshot,
+            snapshot_target=target,
+            **payload,
+        )
 
 
     @mcp.tool()
     def screenshot(
         connection: str = "default",
-        selector: str | None = None,
+        target: str | None = None,
         has_text: str | None = None,
         nth: int | None = None,
         window_wid: int | None = None,
@@ -1251,7 +1256,7 @@ if FastMCP is not None:
         clip_y = clip_kwargs.get("y")
         clip_width = clip_kwargs.get("width")
         clip_height = clip_kwargs.get("height")
-        if selector is None:
+        if target is None:
             window = _resolve_window(
                 live_connection,
                 window_wid=window_wid,
@@ -1273,7 +1278,7 @@ if FastMCP is not None:
         else:
             locator = _resolve_locator(
                 live_connection,
-                selector=selector,
+                target=target,
                 has_text=has_text,
                 nth=nth,
                 window_wid=window_wid,
@@ -1293,7 +1298,7 @@ if FastMCP is not None:
             else:
                 result = locator.screenshot()
         result["connection"] = connection
-        result["selector"] = selector
+        result["target"] = target
         return result
 
 
@@ -1339,7 +1344,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def hover(
-        selector: str,
+        target: str,
         connection: str = "default",
         has_text: str | None = None,
         nth: int | None = None,
@@ -1348,12 +1353,12 @@ if FastMCP is not None:
         window_index: int | None = None,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
-        """Hover over the first widget matched by a selector."""
+        """Hover over the first widget matched by a target."""
 
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
             connection_state,
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -1364,16 +1369,16 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
-            snapshot_target=selector,
+            snapshot_target=target,
             ok=True,
-            selector=selector,
+            target=target,
             connection=connection,
         )
 
 
     @mcp.tool()
     def scroll(
-        selector: str,
+        target: str,
         connection: str = "default",
         has_text: str | None = None,
         nth: int | None = None,
@@ -1389,7 +1394,7 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE, connection)
         locator = _resolve_locator(
             connection_state,
-            selector=selector,
+            target=target,
             has_text=has_text,
             nth=nth,
             window_wid=window_wid,
@@ -1400,9 +1405,9 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_snapshot=include_snapshot,
-            snapshot_target=selector,
+            snapshot_target=target,
             ok=True,
-            selector=selector,
+            target=target,
             delta_x=delta_x,
             delta_y=delta_y,
             connection=connection,
@@ -1777,8 +1782,8 @@ if FastMCP is not None:
     ) -> dict[str, Any]:
         """Verify a Qt widget is visible by role and accessible/displayed name."""
 
-        selector = f"role={role}"
-        locator_info = inspect_widget(selector=selector, has_text=accessibleName, connection=connection)
+        target = f"role={role}"
+        locator_info = inspect_widget(target=target, has_text=accessibleName, connection=connection)
         if not locator_info["exists"] or not locator_info["is_visible"]:
             raise AssertionError(f"Expected visible element role={role!r} accessibleName={accessibleName!r}")
         return {

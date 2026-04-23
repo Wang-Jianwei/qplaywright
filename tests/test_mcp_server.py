@@ -307,7 +307,7 @@ def test_resolve_locator_accepts_snapshot_ref_as_widget_id():
     )
     connection.app._conn = FakeTransportConn()
 
-    locator = mcp_server._resolve_locator(connection, selector="e2")
+    locator = mcp_server._resolve_locator(connection, target="e2")
     locator.click()
 
     assert connection.app._conn.calls == [
@@ -327,7 +327,20 @@ def test_resolve_locator_rejects_missing_snapshot_ref_with_refresh_hint():
     )
 
     with pytest.raises(ValueError, match="Snapshot ref 'e9' is not available"):
-        mcp_server._resolve_locator(connection, selector="e9")
+        mcp_server._resolve_locator(connection, target="e9")
+
+
+def test_inspect_widget_uses_target_payload(monkeypatch):
+    locator = FakeLocator(count=1)
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state, name: object())
+    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+
+    result = mcp_server.inspect_widget(target="#amount", connection="demo", include_methods=True)
+
+    assert result["target"] == "#amount"
+    assert result["include_methods"] is True
+    assert result["methods"][0]["name"] == "setAmount"
 
 
 def test_inspect_locator_handles_empty_and_present_results():
@@ -406,7 +419,7 @@ def test_wait_for_can_include_snapshot(monkeypatch):
     )
 
     result = mcp_server.wait_for(
-        selector="#status_label",
+        target="#status_label",
         connection="demo",
         state="visible",
         timeout=5.0,
@@ -415,7 +428,7 @@ def test_wait_for_can_include_snapshot(monkeypatch):
 
     assert locator.wait_calls == [{"state": "visible", "timeout": 5.0}]
     assert result["ok"] is True
-    assert result["selector"] == "#status_label"
+    assert result["target"] == "#status_label"
     assert result["snapshot"] == "- DemoWindow [ref=e1]"
     assert result["refs"] == [{"ref": "e1"}]
 
@@ -448,66 +461,66 @@ def test_browser_wait_for_time_can_include_snapshot(monkeypatch):
 @pytest.mark.parametrize(
     ("tool_name", "call_kwargs", "expected_call", "expected_payload"),
     [
-        ("click", {"selector": "#submit", "include_snapshot": True}, ("click", {}), {"selector": "#submit"}),
+        ("click", {"target": "#submit", "include_snapshot": True}, ("click", {}), {"target": "#submit"}),
         (
             "click",
-            {"selector": "#submit", "double_click": True, "include_snapshot": True},
+            {"target": "#submit", "double_click": True, "include_snapshot": True},
             ("dblclick", {}),
-            {"selector": "#submit", "double_click": True},
+            {"target": "#submit", "double_click": True},
         ),
         (
             "fill",
-            {"selector": "#amount", "value": "123.45", "include_snapshot": True},
+            {"target": "#amount", "value": "123.45", "include_snapshot": True},
             ("fill", {"value": "123.45"}),
-            {"selector": "#amount", "value": "123.45"},
+            {"target": "#amount", "value": "123.45"},
         ),
         (
             "invoke_widget_method",
-            {"selector": "#amount", "method_name": "setAmount", "args": {"value": "88.00"}, "include_snapshot": True},
+            {"target": "#amount", "method_name": "setAmount", "args": {"value": "88.00"}, "include_snapshot": True},
             ("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}}),
-            {"selector": "#amount", "method_name": "setAmount", "args": {"value": "88.00"}},
+            {"target": "#amount", "method_name": "setAmount", "args": {"value": "88.00"}},
         ),
         (
             "type_text",
-            {"selector": "#amount", "text": "abc", "delay": 25, "include_snapshot": True},
+            {"target": "#amount", "text": "abc", "delay": 25, "include_snapshot": True},
             ("type", {"text": "abc", "delay": 25}),
-            {"selector": "#amount", "text": "abc", "delay": 25},
+            {"target": "#amount", "text": "abc", "delay": 25},
         ),
         (
             "press_key",
-            {"selector": "#amount", "key": "Enter", "include_snapshot": True},
+            {"target": "#amount", "key": "Enter", "include_snapshot": True},
             ("press", {"key": "Enter"}),
-            {"selector": "#amount", "key": "Enter"},
+            {"target": "#amount", "key": "Enter"},
         ),
         (
             "set_checked",
-            {"selector": "#remember", "checked": True, "include_snapshot": True},
+            {"target": "#remember", "checked": True, "include_snapshot": True},
             ("check", {}),
-            {"selector": "#remember", "checked": True},
+            {"target": "#remember", "checked": True},
         ),
         (
             "set_checked",
-            {"selector": "#remember", "checked": False, "include_snapshot": True},
+            {"target": "#remember", "checked": False, "include_snapshot": True},
             ("uncheck", {}),
-            {"selector": "#remember", "checked": False},
+            {"target": "#remember", "checked": False},
         ),
         (
             "select_option",
-            {"selector": "#currency", "label": "CNY", "include_snapshot": True},
+            {"target": "#currency", "label": "CNY", "include_snapshot": True},
             ("select_option", {"value": None, "index": None, "label": "CNY"}),
-            {"selector": "#currency", "label": "CNY", "value": None, "index": None},
+            {"target": "#currency", "label": "CNY", "value": None, "index": None},
         ),
         (
             "hover",
-            {"selector": "#item", "include_snapshot": True},
+            {"target": "#item", "include_snapshot": True},
             ("hover", {}),
-            {"selector": "#item"},
+            {"target": "#item"},
         ),
         (
             "scroll",
-            {"selector": "#item", "delta_x": 5, "delta_y": 10, "include_snapshot": True},
+            {"target": "#item", "delta_x": 5, "delta_y": 10, "include_snapshot": True},
             ("scroll", {"delta_x": 5, "delta_y": 10}),
-            {"selector": "#item", "delta_x": 5, "delta_y": 10},
+            {"target": "#item", "delta_x": 5, "delta_y": 10},
         ),
     ],
 )
