@@ -40,9 +40,9 @@ qplaywright-mcp cli
 Inside the REPL, use one tool call per line:
 
 ```text
-qplaywright> connect {"name": "probe", "port": 19877}
-qplaywright> list_windows {"connection": "probe"}
-qplaywright> browser_snapshot {"connection": "probe", "depth": 4}
+qplaywright> session {"action": "attach", "connection": "probe", "port": 19877}
+qplaywright> window {"action": "list", "connection": "probe"}
+qplaywright> snapshot {"connection": "probe", "depth": 4}
 qplaywright> click {"connection": "probe", "target": "text=Start"}
 qplaywright> exit
 ```
@@ -56,17 +56,17 @@ Useful REPL meta commands:
 You can also execute one tool directly without entering the REPL:
 
 ```bash
-qplaywright-mcp cli list_windows '{"connection": "probe"}'
+qplaywright-mcp cli snapshot '{"connection": "probe", "depth": 4}'
 ```
 
 ## Typical Tool Flow
 
-1. `connect` to a running Qt app with an embedded qplaywright agent.
-2. `list_windows` to discover the target top-level window.
-3. `widget_tree` or `inspect_widget` to understand the UI structure. When multiple top-level windows are visible, prefer `window_wid`, `window_title`, or `window_index` so you do not fetch unrelated windows.
+1. `session` with `action="attach"` or `action="launch"` to establish the active session.
+2. `window` with `action="list"` to discover the target top-level window.
+3. `snapshot` or `inspect` to understand the current UI. When multiple top-level windows are visible, use `window` with `action="select"` first.
 4. Use action tools like `click`, `input`, `set_checked`,
    `press_key`, `scroll`, `choose`, `wait`, and `screenshot`.
-5. `disconnect` when finished.
+5. `session` with `action="close"` when finished.
 
 ## Exposed MCP Interfaces
 
@@ -89,6 +89,10 @@ These are the primary MCP tools backed directly by the qplaywright sync client:
 
 | Tool | Purpose |
 | --- | --- |
+| `session` | Attach, launch, inspect status, or close the active MCP-side session |
+| `window` | List, select, resize, or close one top-level Qt window |
+| `snapshot` | Return a text snapshot and stable refs for the active window or one target |
+| `inspect` | Inspect one target or return the active window widget tree in debug mode |
 | `connect` | Connect to a running Qt app that already embedded the qplaywright agent |
 | `launch` | Launch a Qt executable with agent support and connect to it |
 | `disconnect` | Close one MCP-managed connection |
@@ -179,6 +183,10 @@ Most playwright-mcp compatibility tools use these fields:
 
 | Tool | Main parameters | Key return fields |
 | --- | --- | --- |
+| `session` | `action`, optional `connection`, plus attach/launch parameters such as `host`, `port`, `timeout`, `executable`, `args` | `ok`, `action`, and usually `session`, optional `active_window`, or `closed` for `action="close"` |
+| `window` | `action`, optional `connection`, optional one of `wid`, `title`, `index`, plus `width`, `height` for `action="resize"` | `ok`, `action`, and either `windows`, `active_window`, or `refs_cleared` depending on the action |
+| `snapshot` | optional `connection`, optional `target`, plus `depth`, `save_to` | `ok`, `session`, `window`, `target`, `snapshot`, `refs`, optional `save_to` |
+| `inspect` | optional `connection`, optional `target`, plus `property`, `include_methods`, `depth` | target mode returns `ok`, `target`, `exists`, `count`, widget state fields; debug mode returns `ok`, `target=null`, `depth`, `tree` |
 | `connect` | `name`, `host`, `port`, `timeout` | `connection`, `current_window_wid`, `windows`, `replaced` |
 | `launch` | `executable`, `args`, `name`, `host`, `port`, `timeout` | `connection`, `launched_executable`, `current_window_wid`, `windows`, `replaced` |
 | `disconnect` | `name` | `connection`, `closed`, `launched_executable` |

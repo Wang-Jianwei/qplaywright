@@ -11,9 +11,14 @@ class FakeQPlaywright:
     def __init__(self):
         self.closed = False
         self.connected = None
+        self.launched = None
 
     def connect(self, *, host: str, port: int, timeout: float):
         self.connected = (host, port, timeout)
+        return FakeApp([])
+
+    def launch(self, executable, *args, host: str, port: int, timeout: float):
+        self.launched = (executable, list(args), host, port, timeout)
         return FakeApp([])
 
     def close(self) -> None:
@@ -27,7 +32,7 @@ class FakeApp:
         self._conn: FakeTransportConn | None = None
 
     def windows(self):
-        return self._windows
+        return [window for window in self._windows if not window.closed]
 
     def close(self) -> None:
         self.closed = True
@@ -344,6 +349,132 @@ def test_inspect_widget_uses_target_payload(monkeypatch):
     assert result["target"] == "#amount"
     assert result["include_methods"] is True
     assert result["methods"][0]["name"] == "setAmount"
+
+
+def test_session_attach_status_and_close(monkeypatch):
+    state = mcp_server.ServerState()
+    created: list[FakeQPlaywright] = []
+
+    def fake_factory():
+        instance = FakeQPlaywright()
+        created.append(instance)
+        return instance
+
+    monkeypatch.setattr(mcp_server, "QPlaywright", fake_factory)
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    attached = mcp_server.session(action="attach", connection="demo", port=19877, timeout=5.0)
+
+    assert attached["ok"] is True
+    assert attached["action"] == "attach"
+    assert attached["session"] == {
+        "connected": True,
+        "host": "127.0.0.1",
+        "port": 19877,
+        "launched_executable": None,
+    }
+    assert attached["active_window"] is None
+    assert created[0].connected == ("127.0.0.1", 19877, 5.0)
+
+    status = mcp_server.session(action="status", connection="demo")
+
+    assert status["ok"] is True
+    assert status["action"] == "status"
+    assert status["session"]["port"] == 19877
+
+    closed = mcp_server.session(action="close", connection="demo")
+
+    assert closed == {"ok": True, "action": "close", "closed": True}
+    assert state.connections == {}
+
+
+def test_window_tool_selects_and_closes_windows(monkeypatch):
+    state = mcp_server.ServerState()
+    first = FakeWindow(11, "First")
+    second = FakeWindow(22, "Second")
+    state.connections["demo"] = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([first, second]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    selected = mcp_server.window(action="select", connection="demo", wid=22)
+
+    assert selected["ok"] is True
+    assert selected["action"] == "select"
+    assert selected["active_window"]["wid"] == 22
+    assert selected["refs_cleared"] is True
+
+    closed = mcp_server.window(action="close", connection="demo", wid=22)
+
+    assert closed["ok"] is True
+    assert closed["action"] == "close"
+    assert closed["active_window"]["wid"] == 11
+
+
+def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
+    state = mcp_server.ServerState()
+    state.connections["demo"] = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    captured = {}
+
+    def fake_snapshot_result(managed_connection, **kwargs):
+        captured["kwargs"] = kwargs
+        return {"snapshot": "- Main [ref=e1]", "refs": [{"ref": "e1"}]}
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_compat_snapshot_result", fake_snapshot_result)
+    monkeypatch.setattr(mcp_server, "_write_text_file", lambda path, content: path)
+
+    result = mcp_server.snapshot(connection="demo", depth=4, save_to="snapshot.txt")
+
+    assert captured["kwargs"] == {"snapshot_target": None, "depth": 4, "window_wid": 11}
+    assert result["ok"] is True
+    assert result["window"]["wid"] == 11
+    assert result["save_to"] == "snapshot.txt"
+
+
+def test_inspect_without_target_returns_active_window_tree(monkeypatch):
+    state = mcp_server.ServerState()
+    state.connections["demo"] = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    captured = {}
+
+    def fake_widget_tree_raw(managed_connection, **kwargs):
+        captured["kwargs"] = kwargs
+        return [{"wid": 11, "class": "DemoWindow", "children": []}]
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_widget_tree_raw", fake_widget_tree_raw)
+
+    result = mcp_server.inspect(connection="demo", depth=6)
+
+    assert captured["kwargs"] == {"max_depth": 6, "window_wid": 11}
+    assert result == {
+        "ok": True,
+        "target": None,
+        "depth": 6,
+        "tree": [{"wid": 11, "class": "DemoWindow", "children": []}],
+    }
 
 
 def test_inspect_locator_handles_empty_and_present_results():

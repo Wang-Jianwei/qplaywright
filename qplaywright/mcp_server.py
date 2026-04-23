@@ -9,8 +9,8 @@ inspect windows, and interact with widgets via the existing selector model.
 import builtins
 import argparse
 import atexit
+import inspect as pyinspect
 import contextlib
-import inspect
 import json
 import logging
 import re
@@ -151,6 +151,36 @@ def _window_summary(connection: ManagedConnection) -> list[dict[str, Any]]:
             }
         )
     return summaries
+
+
+def _active_window_summary(
+    connection: ManagedConnection,
+    *,
+    windows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    if windows is None:
+        windows = _window_summary(connection)
+    if not windows:
+        return None
+
+    active_window = None
+    if connection.active_window_wid is not None:
+        active_window = next(
+            (window for window in windows if window["wid"] == connection.active_window_wid),
+            None,
+        )
+    if active_window is None:
+        active_window = windows[0]
+    return {**active_window, "is_active": True}
+
+
+def _session_summary(connection: ManagedConnection) -> dict[str, Any]:
+    return {
+        "connected": True,
+        "host": connection.host,
+        "port": connection.port,
+        "launched_executable": connection.launched_executable,
+    }
 
 
 def _resolve_window_scope_wid(
@@ -709,14 +739,7 @@ def _observe_action_window_state(managed_connection: ManagedConnection) -> dict[
     previous_active_window_wid = managed_connection.active_window_wid
     windows = _window_summary(managed_connection)
 
-    active_window: dict[str, Any] | None = None
-    if previous_active_window_wid is not None:
-        active_window = next(
-            (window for window in windows if window["wid"] == previous_active_window_wid),
-            None,
-        )
-    if active_window is None and windows:
-        active_window = windows[0]
+    active_window = _active_window_summary(managed_connection, windows=windows)
 
     next_active_window_wid = active_window["wid"] if active_window is not None else None
     if next_active_window_wid != managed_connection.active_window_wid:
@@ -724,7 +747,7 @@ def _observe_action_window_state(managed_connection: ManagedConnection) -> dict[
 
     return {
         "window_changed": next_active_window_wid != previous_active_window_wid,
-        "active_window": ({**active_window, "is_active": True} if active_window is not None else None),
+        "active_window": active_window,
     }
 
 
@@ -789,7 +812,7 @@ if FastMCP is not None:
         "qplaywright",
         instructions=(
             "Automate Qt QWidget applications through qplaywright. "
-            "Use connect or launch first, then list_windows and inspect_widget "
+            "Use session, window, snapshot, and inspect to discover the UI before "
             "before performing destructive UI actions."
         ),
         json_response=True,
@@ -801,6 +824,67 @@ if FastMCP is not None:
         """Selector syntax and recommended qplaywright MCP workflow."""
 
         return _selector_help_text()
+
+
+    @mcp.tool()
+    def session(
+        action: str,
+        connection: str = "default",
+        host: str = DEFAULT_HOST,
+        port: int = DEFAULT_PORT,
+        timeout: float = 30.0,
+        executable: str | None = None,
+        args: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Manage one MCP-side qplaywright session."""
+
+        if action == "attach":
+            connect_connection(_SERVER_STATE, name=connection, host=host, port=port, timeout=timeout)
+            connection_state = _get_connection(_SERVER_STATE, connection)
+            windows = _window_summary(connection_state)
+            return {
+                "ok": True,
+                "action": action,
+                "session": _session_summary(connection_state),
+                "active_window": _active_window_summary(connection_state, windows=windows),
+            }
+
+        if action == "launch":
+            if not executable:
+                raise ValueError("executable is required when action='launch'")
+            launch_connection(
+                _SERVER_STATE,
+                executable=executable,
+                args=args,
+                name=connection,
+                host=host,
+                port=port,
+                timeout=timeout,
+            )
+            connection_state = _get_connection(_SERVER_STATE, connection)
+            windows = _window_summary(connection_state)
+            return {
+                "ok": True,
+                "action": action,
+                "session": _session_summary(connection_state),
+                "active_window": _active_window_summary(connection_state, windows=windows),
+            }
+
+        if action == "close":
+            result = disconnect_connection(_SERVER_STATE, name=connection)
+            return {"ok": True, "action": action, "closed": result["closed"]}
+
+        if action == "status":
+            connection_state = _get_connection(_SERVER_STATE, connection)
+            windows = _window_summary(connection_state)
+            return {
+                "ok": True,
+                "action": action,
+                "session": _session_summary(connection_state),
+                "active_window": _active_window_summary(connection_state, windows=windows),
+            }
+
+        raise ValueError(f"Unsupported session action: {action!r}")
 
 
     @mcp.tool()
@@ -852,10 +936,117 @@ if FastMCP is not None:
 
 
     @mcp.tool()
+    def window(
+        action: str,
+        connection: str = "default",
+        index: int | None = None,
+        wid: int | None = None,
+        title: str | None = None,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> dict[str, Any]:
+        """Manage one top-level window within the current session."""
+
+        connection_state = _get_connection(_SERVER_STATE, connection)
+
+        if action == "list":
+            return {
+                "ok": True,
+                "action": action,
+                "windows": _window_summary(connection_state),
+            }
+
+        if action == "select":
+            selected_window = _resolve_window(
+                connection_state,
+                window_wid=wid,
+                window_title=title,
+                window_index=index,
+            )
+            refs_cleared = connection_state.active_window_wid != selected_window.wid
+            _select_active_window(connection_state, selected_window.wid)
+            return {
+                "ok": True,
+                "action": action,
+                "active_window": _active_window_summary(connection_state),
+                "refs_cleared": refs_cleared,
+            }
+
+        if action == "resize":
+            if width is None or height is None:
+                raise ValueError("width and height are required when action='resize'")
+            resize_window(
+                width=width,
+                height=height,
+                connection=connection,
+                window_wid=wid,
+                window_title=title,
+                window_index=index,
+            )
+            return {
+                "ok": True,
+                "action": action,
+                "active_window": _active_window_summary(connection_state),
+            }
+
+        if action == "close":
+            target_window = _resolve_window(
+                connection_state,
+                window_wid=wid,
+                window_title=title,
+                window_index=index,
+            )
+            close_window(
+                connection=connection,
+                window_wid=target_window.wid,
+            )
+            remaining_windows = _window_summary(connection_state)
+            if target_window.wid == connection_state.active_window_wid:
+                _select_active_window(connection_state, remaining_windows[0]["wid"] if remaining_windows else None)
+            return {
+                "ok": True,
+                "action": action,
+                "active_window": _active_window_summary(connection_state, windows=remaining_windows),
+            }
+
+        raise ValueError(f"Unsupported window action: {action!r}")
+
+
+    @mcp.tool()
     def list_windows(connection: str = "default") -> list[dict[str, Any]]:
         """List visible top-level windows for a connected Qt application."""
 
         return _window_summary(_get_connection(_SERVER_STATE, connection))
+
+
+    @mcp.tool()
+    def snapshot(
+        connection: str = "default",
+        target: str | None = None,
+        depth: int = 10,
+        save_to: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a text snapshot of the current active window or one target."""
+
+        connection_state = _get_connection(_SERVER_STATE, connection)
+        active_window = _active_window_summary(connection_state)
+        scoped_window_wid = None if target is not None else connection_state.active_window_wid
+        payload = _compat_snapshot_result(
+            connection_state,
+            snapshot_target=target,
+            depth=depth,
+            window_wid=scoped_window_wid,
+        )
+        result = {
+            "ok": True,
+            "session": _session_summary(connection_state),
+            "window": active_window,
+            "target": target,
+            **payload,
+        }
+        if save_to is not None:
+            result["save_to"] = _write_text_file(save_to, payload["snapshot"])
+        return result
 
 
     @mcp.tool()
@@ -878,6 +1069,38 @@ if FastMCP is not None:
             window_index=window_index,
         )
         return _widget_tree_raw(connection_state, max_depth=max_depth, window_wid=scoped_window_wid)
+
+
+    @mcp.tool()
+    def inspect(
+        connection: str = "default",
+        target: str | None = None,
+        property: str | None = None,
+        include_methods: bool = False,
+        depth: int = 10,
+    ) -> dict[str, Any]:
+        """Inspect one target or return the current active window tree in debug mode."""
+
+        connection_state = _get_connection(_SERVER_STATE, connection)
+        if target is None:
+            return {
+                "ok": True,
+                "target": None,
+                "depth": depth,
+                "tree": _widget_tree_raw(
+                    connection_state,
+                    max_depth=depth,
+                    window_wid=connection_state.active_window_wid,
+                ),
+            }
+
+        locator = _resolve_locator(connection_state, target=target)
+        result = _inspect_locator(locator, property_name=property, include_methods=include_methods)
+        return {
+            "ok": True,
+            "target": target,
+            **result,
+        }
 
 
     @mcp.tool()
@@ -1859,6 +2082,10 @@ else:  # pragma: no cover - exercised only without the extra installed
 
 
 _CLI_TOOL_NAMES = (
+    "session",
+    "window",
+    "snapshot",
+    "inspect",
     "connect",
     "launch",
     "disconnect",
@@ -1911,8 +2138,8 @@ def _cli_usage_text() -> str:
         "Interactive qplaywright MCP CLI\n\n"
         "Examples:\n"
         "  qplaywright-mcp cli\n"
-        "  qplaywright-mcp cli connect '{\"name\": \"probe\", \"port\": 19877}'\n"
-        "  qplaywright-mcp cli browser_snapshot '{\"connection\": \"probe\", \"depth\": 4}'\n\n"
+        "  qplaywright-mcp cli session '{\"action\": \"attach\", \"connection\": \"probe\", \"port\": 19877}'\n"
+        "  qplaywright-mcp cli snapshot '{\"connection\": \"probe\", \"depth\": 4}'\n\n"
         "REPL commands:\n"
         "  .tools                List available tools\n"
         "  .help                 Show CLI help\n"
@@ -1923,8 +2150,8 @@ def _cli_usage_text() -> str:
 
 
 def _cli_tool_help(tool_name: str, func: Any) -> str:
-    signature = inspect.signature(func)
-    doc = (inspect.getdoc(func) or "No description available.").strip()
+    signature = pyinspect.signature(func)
+    doc = (pyinspect.getdoc(func) or "No description available.").strip()
     return f"{tool_name}{signature}\n\n{doc}"
 
 
