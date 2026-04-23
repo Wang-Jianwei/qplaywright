@@ -705,6 +705,29 @@ def _action_result_with_snapshot(
     return result
 
 
+def _observe_action_window_state(managed_connection: ManagedConnection) -> dict[str, Any]:
+    previous_active_window_wid = managed_connection.active_window_wid
+    windows = _window_summary(managed_connection)
+
+    active_window: dict[str, Any] | None = None
+    if previous_active_window_wid is not None:
+        active_window = next(
+            (window for window in windows if window["wid"] == previous_active_window_wid),
+            None,
+        )
+    if active_window is None and windows:
+        active_window = windows[0]
+
+    next_active_window_wid = active_window["wid"] if active_window is not None else None
+    if next_active_window_wid != managed_connection.active_window_wid:
+        _select_active_window(managed_connection, next_active_window_wid)
+
+    return {
+        "window_changed": next_active_window_wid != previous_active_window_wid,
+        "active_window": ({**active_window, "is_active": True} if active_window is not None else None),
+    }
+
+
 def _finalize_action_result(
     managed_connection: ManagedConnection,
     *,
@@ -712,9 +735,16 @@ def _finalize_action_result(
     snapshot_target: str | None = None,
     **payload: Any,
 ) -> dict[str, Any]:
+    result = dict(payload)
+    result.update(_observe_action_window_state(managed_connection))
     if not include_snapshot:
-        return dict(payload)
-    return _action_result_with_snapshot(managed_connection, snapshot_target=snapshot_target, **payload)
+        return result
+    effective_snapshot_target = None if result["window_changed"] else snapshot_target
+    return _action_result_with_snapshot(
+        managed_connection,
+        snapshot_target=effective_snapshot_target,
+        **result,
+    )
 
 
 def _stringify_value(value: Any) -> str:

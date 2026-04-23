@@ -187,14 +187,14 @@ Most playwright-mcp compatibility tools use these fields:
 | `widget_tree` | `connection`, `max_depth`, optional `window_wid` or `window_title` or `window_index` | widget tree nodes including `wid`, `class`, `text`, `objectName`, `children` |
 | `inspect_widget` | common native target params, plus `property_name`, `include_methods` | `exists`, `count`, `target`, and when found: `text`, `value`, `is_visible`, `is_enabled`, `is_checked`, `bounding_box`, optional `methods` |
 | `get_widget_methods` | common native target params | `connection`, `target`, `methods` where each method includes `name`, `args`, `returnType`, `brief` |
-| `click` | common native target params, plus `count`, `include_snapshot` | `ok`, `target`, `count`, `connection`, optional `snapshot`, `refs` |
-| `input` | common native target params, plus `text`, `mode`, `delay`, `submit`, `include_snapshot` | `ok`, `target`, `text`, `mode`, `delay`, `submitted`, `connection`, optional `snapshot`, `refs` |
-| `invoke` | common native target params, plus `method`, `args`, `include_snapshot` | `ok`, `target`, `method`, `args`, `result`, optional `snapshot`, `refs` |
-| `press_key` | common native target params, plus `key`, `include_snapshot` | `ok`, `target`, `key`, `connection`, optional `snapshot`, `refs` |
-| `scroll` | common native target params, plus `delta_x`, `delta_y`, `include_snapshot` | `ok`, `target`, `delta_x`, `delta_y`, `connection`, optional `snapshot`, `refs` |
-| `set_checked` | common native target params, plus `checked`, `include_snapshot` | `ok`, `target`, `checked`, `connection`, optional `snapshot`, `refs` |
-| `choose` | common native target params, plus exactly one of `value`, `index`, `label`, `include_snapshot` | `ok`, `target`, `value`, `index`, `label`, `connection`, optional `snapshot`, `refs` |
-| `wait` | common native target params, plus `state`, `timeout`, `include_snapshot` | `ok`, `target`, `state`, `timeout`, `connection`, optional `snapshot`, `refs` |
+| `click` | common native target params, plus `count`, `include_snapshot` | `ok`, `target`, `count`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
+| `input` | common native target params, plus `text`, `mode`, `delay`, `submit`, `include_snapshot` | `ok`, `target`, `text`, `mode`, `delay`, `submitted`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
+| `invoke` | common native target params, plus `method`, `args`, `include_snapshot` | `ok`, `target`, `method`, `args`, `result`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
+| `press_key` | common native target params, plus `key`, `include_snapshot` | `ok`, `target`, `key`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
+| `scroll` | common native target params, plus `delta_x`, `delta_y`, `include_snapshot` | `ok`, `target`, `delta_x`, `delta_y`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
+| `set_checked` | common native target params, plus `checked`, `include_snapshot` | `ok`, `target`, `checked`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
+| `choose` | common native target params, plus exactly one of `value`, `index`, `label`, `include_snapshot` | `ok`, `target`, `value`, `index`, `label`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
+| `wait` | common native target params, plus `state`, `timeout`, `include_snapshot` | `ok`, `target`, `state`, `timeout`, `connection`, `active_window`, `window_changed`, optional `snapshot`, `refs` |
 | `screenshot` | `connection`, optional common native target params, plus `path` and optional `x`, `y`, `width`, `height` clip rectangle | screenshot payload from qplaywright, plus `connection`, `target` |
 | `resize_window` | `width`, `height`, `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `width`, `height`, `connection` |
 | `close_window` | `connection`, `window_wid` or `window_title` or `window_index` | `ok`, `connection`, `window_wid` |
@@ -210,6 +210,16 @@ For method-only custom widgets, the common shape is:
   "ok": true,
   "connection": "demo",
   "target": "#amount_editor",
+  "active_window": {
+    "wid": 1,
+    "title": "QPlaywright Demo App",
+    "class": "DemoWindow",
+    "index": 0,
+    "width": 640,
+    "height": 720,
+    "is_active": true
+  },
+  "window_changed": false,
   "method": "amount",
   "args": {},
   "result": {

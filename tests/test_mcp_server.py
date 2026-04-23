@@ -410,11 +410,17 @@ def test_wait_can_include_snapshot(monkeypatch):
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
+        active_window_wid=11,
     )
     locator = FakeLocator(count=1)
 
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state, name: connection)
     monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(
+        mcp_server,
+        "_window_summary",
+        lambda managed_connection: [{"wid": 11, "title": "Main", "class": "DemoWindow", "index": 0, "width": 640, "height": 720}],
+    )
     monkeypatch.setattr(
         mcp_server,
         "_action_result_with_snapshot",
@@ -432,6 +438,8 @@ def test_wait_can_include_snapshot(monkeypatch):
     assert locator.wait_calls == [{"state": "visible", "timeout": 5.0}]
     assert result["ok"] is True
     assert result["target"] == "#status_label"
+    assert result["window_changed"] is False
+    assert result["active_window"]["wid"] == 11
     assert result["snapshot"] == "- DemoWindow [ref=e1]"
     assert result["refs"] == [{"ref": "e1"}]
 
@@ -535,11 +543,17 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
+        active_window_wid=11,
     )
     locator = FakeLocator(count=1)
 
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state, name: connection)
     monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(
+        mcp_server,
+        "_window_summary",
+        lambda managed_connection: [{"wid": 11, "title": "Main", "class": "DemoWindow", "index": 0, "width": 640, "height": 720}],
+    )
     monkeypatch.setattr(
         mcp_server,
         "_action_result_with_snapshot",
@@ -550,10 +564,50 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
 
     assert locator.action_calls == expected_calls
     assert result["ok"] is True
+    assert result["window_changed"] is False
+    assert result["active_window"]["wid"] == 11
     for key, value in expected_payload.items():
         assert result[key] == value
     assert result["snapshot"] == "- DemoWindow [ref=e1]"
     assert result["refs"] == [{"ref": "e1"}]
+
+
+def test_finalize_action_result_switches_active_window_and_uses_window_snapshot(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    captured = {}
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_window_summary",
+        lambda managed_connection: [{"wid": 22, "title": "Dialog", "class": "QDialog", "index": 0, "width": 480, "height": 320}],
+    )
+
+    def fake_action_result_with_snapshot(managed_connection, *, snapshot_target=None, **payload):
+        captured["snapshot_target"] = snapshot_target
+        return payload | {"snapshot": "- QDialog [ref=e1]", "refs": [{"ref": "e1"}]}
+
+    monkeypatch.setattr(mcp_server, "_action_result_with_snapshot", fake_action_result_with_snapshot)
+
+    result = mcp_server._finalize_action_result(
+        connection,
+        include_snapshot=True,
+        snapshot_target="#submit",
+        ok=True,
+        target="#submit",
+    )
+
+    assert result["window_changed"] is True
+    assert result["active_window"]["wid"] == 22
+    assert connection.active_window_wid == 22
+    assert captured["snapshot_target"] is None
 
 
 def test_configure_stdio_for_mcp_reconfigures_utf8_streams(monkeypatch):
