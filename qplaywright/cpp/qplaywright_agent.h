@@ -1285,11 +1285,11 @@ private:
                 QFont badgeFont = painter.font();
                 badgeFont.setFamily(qApp->font().family());
                 if (badgeFont.pointSizeF() > 0.0)
-                    badgeFont.setPointSizeF(qMax(8.5, badgeFont.pointSizeF() - 1.5));
+                    badgeFont.setPointSizeF(qMax(7.5, badgeFont.pointSizeF() - 2.0));
                 else if (badgeFont.pixelSize() > 0)
-                    badgeFont.setPixelSize(qMax(11, badgeFont.pixelSize() - 2));
+                    badgeFont.setPixelSize(qMax(10, badgeFont.pixelSize() - 3));
                 else
-                    badgeFont.setPointSizeF(8.5);
+                    badgeFont.setPointSizeF(7.5);
                 painter.setFont(badgeFont);
                 const QFontMetrics metrics = painter.fontMetrics();
                 const int badgeWidth = metrics.horizontalAdvance(labelText) + 18;

@@ -309,11 +309,11 @@ def _create_overlay_manager_class():
                 label_text = f"正在与 Agent {self._session_agent_name} 共享"
                 font = painter.font()
                 if font.pointSizeF() > 0:
-                    font.setPointSizeF(max(8.5, font.pointSizeF() - 1.5))
+                    font.setPointSizeF(max(7.5, font.pointSizeF() - 2.0))
                 elif font.pixelSize() > 0:
-                    font.setPixelSize(max(11, font.pixelSize() - 2))
+                    font.setPixelSize(max(10, font.pixelSize() - 3))
                 else:
-                    font.setPointSizeF(8.5)
+                    font.setPointSizeF(7.5)
                 painter.setFont(font)
                 metrics = painter.fontMetrics()
                 badge_width = metrics.horizontalAdvance(label_text) + 18
