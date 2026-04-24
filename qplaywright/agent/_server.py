@@ -1064,16 +1064,46 @@ def _is_same_or_descendant_widget(candidate, ancestor) -> bool:
     return False
 
 
-def _is_topmost_visible_widget(widget) -> bool:
-    """Return True when the widget is frontmost at its center hit point."""
-    _import_qt()
+def _point_xy(point) -> tuple[int, int]:
+    x_attr = getattr(point, "x", None)
+    y_attr = getattr(point, "y", None)
+    x_value = x_attr() if callable(x_attr) else x_attr
+    y_value = y_attr() if callable(y_attr) else y_attr
+    return int(x_value), int(y_value)
 
-    target = _primary_event_target(widget)
-    if not hasattr(target, "isVisible") or not target.isVisible():
-        return False
 
-    center = target.rect().center()
-    global_pos = target.mapToGlobal(center)
+def _offset_point(point, dx: int, dy: int):
+    point_type = type(point)
+    x_value, y_value = _point_xy(point)
+    return point_type(x_value + dx, y_value + dy)
+
+
+def _sample_local_points(widget) -> list:
+    center = widget.rect().center()
+
+    width_fn = getattr(widget, "width", None)
+    height_fn = getattr(widget, "height", None)
+    width = int(width_fn()) if callable(width_fn) else 0
+    height = int(height_fn()) if callable(height_fn) else 0
+
+    offset_x = max(1, width // 4) if width > 1 else 0
+    offset_y = max(1, height // 4) if height > 1 else 0
+
+    samples = [center]
+    if offset_x or offset_y:
+        samples.extend(
+            [
+                _offset_point(center, -offset_x, -offset_y),
+                _offset_point(center, offset_x, -offset_y),
+                _offset_point(center, -offset_x, offset_y),
+                _offset_point(center, offset_x, offset_y),
+            ]
+        )
+    return samples
+
+
+def _topmost_hit_at_point(target, local_point):
+    global_pos = target.mapToGlobal(local_point)
 
     hit = None
     widget_at = getattr(_QApplication, "widgetAt", None)
@@ -1082,13 +1112,27 @@ def _is_topmost_visible_widget(widget) -> bool:
     if _is_automation_overlay_widget(hit):
         hit = None
     if hit is None and hasattr(target, "childAt"):
-        hit = target.childAt(center)
+        hit = target.childAt(local_point)
     if hit is None:
         hit = target
+    return hit
 
-    if hasattr(hit, "isVisible") and not hit.isVisible():
+
+def _is_topmost_visible_widget(widget) -> bool:
+    """Return True when the widget is frontmost at one of several sample points."""
+    _import_qt()
+
+    target = _primary_event_target(widget)
+    if not hasattr(target, "isVisible") or not target.isVisible():
         return False
-    return _is_same_or_descendant_widget(hit, target)
+
+    for sample_point in _sample_local_points(target):
+        hit = _topmost_hit_at_point(target, sample_point)
+        if hasattr(hit, "isVisible") and not hit.isVisible():
+            continue
+        if _is_same_or_descendant_widget(hit, target):
+            return True
+    return False
 
 
 def _resolve_click_target(widget):

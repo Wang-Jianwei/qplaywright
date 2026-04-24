@@ -2196,25 +2196,54 @@ private:
         return false;
     }
 
+    QVector<QPoint> sampleLocalPoints(QWidget *target)
+    {
+        const QPoint center = target->rect().center();
+        const int width = target->width();
+        const int height = target->height();
+        const int offsetX = width > 1 ? qMax(1, width / 4) : 0;
+        const int offsetY = height > 1 ? qMax(1, height / 4) : 0;
+
+        QVector<QPoint> samples;
+        samples.append(center);
+        if (offsetX || offsetY) {
+            samples.append(center + QPoint(-offsetX, -offsetY));
+            samples.append(center + QPoint(offsetX, -offsetY));
+            samples.append(center + QPoint(-offsetX, offsetY));
+            samples.append(center + QPoint(offsetX, offsetY));
+        }
+        return samples;
+    }
+
+    QWidget *topmostHitAtPoint(QWidget *target, const QPoint &localPoint)
+    {
+        const QPoint globalPos = target->mapToGlobal(localPoint);
+
+        QWidget *hit = QApplication::widgetAt(globalPos);
+        if (isAutomationOverlayWidget(hit))
+            hit = nullptr;
+        if (!hit)
+            hit = target->childAt(localPoint);
+        if (!hit)
+            hit = target;
+        return hit;
+    }
+
     bool isTopmostVisibleWidget(QWidget *w)
     {
         QWidget *target = primaryEventTarget(w);
         if (!target || !target->isVisible())
             return false;
 
-        const QPoint center = target->rect().center();
-        const QPoint globalPos = target->mapToGlobal(center);
-
-        QWidget *hit = QApplication::widgetAt(globalPos);
-        if (isAutomationOverlayWidget(hit))
-            hit = nullptr;
-        if (!hit)
-            hit = target->childAt(center);
-        if (!hit)
-            hit = target;
-        if (!hit->isVisible())
-            return false;
-        return isSameOrDescendantWidget(hit, target);
+        const QVector<QPoint> samples = sampleLocalPoints(target);
+        for (const QPoint &samplePoint : samples) {
+            QWidget *hit = topmostHitAtPoint(target, samplePoint);
+            if (!hit->isVisible())
+                continue;
+            if (isSameOrDescendantWidget(hit, target))
+                return true;
+        }
+        return false;
     }
 
     struct ClickTarget

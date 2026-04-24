@@ -40,6 +40,7 @@ class FakeClickWidget:
         enabled: bool = True,
         global_origin: FakePoint = FakePoint(100, 200),
         center: FakePoint = FakePoint(10, 12),
+        size: tuple[int, int] = (40, 40),
     ):
         self._class_name = class_name
         self._parent = parent
@@ -47,6 +48,7 @@ class FakeClickWidget:
         self._enabled = enabled
         self._global_origin = global_origin
         self._center = center
+        self._size = size
         self._child = None
         self._viewport = None
         self.focus_calls: list[tuple[object, ...]] = []
@@ -62,6 +64,12 @@ class FakeClickWidget:
 
     def rect(self) -> FakeRect:
         return FakeRect(self._center)
+
+    def width(self) -> int:
+        return self._size[0]
+
+    def height(self) -> int:
+        return self._size[1]
 
     def mapToGlobal(self, point: FakePoint) -> FakePoint:
         return FakePoint(self._global_origin.x + point.x, self._global_origin.y + point.y)
@@ -97,6 +105,8 @@ class FakeApplication:
 
     @staticmethod
     def widgetAt(point: FakePoint):
+        if callable(FakeApplication.widget_at_result):
+            return FakeApplication.widget_at_result(point)
         return FakeApplication.widget_at_result
 
     @staticmethod
@@ -188,3 +198,17 @@ def test_is_topmost_visible_widget_rejects_covered_center(monkeypatch):
     _install_fake_qt(monkeypatch, widget_at=overlay)
 
     assert server._is_topmost_visible_widget(widget) is False
+
+
+def test_is_topmost_visible_widget_accepts_partial_visibility_when_non_center_sample_is_visible(monkeypatch):
+    widget = FakeClickWidget("QPushButton", global_origin=FakePoint(100, 200), center=FakePoint(20, 20), size=(40, 40))
+    overlay = FakeClickWidget("OverlayWidget", global_origin=FakePoint(100, 200))
+
+    def widget_at(point: FakePoint):
+        if point == FakePoint(120, 220):
+            return overlay
+        return widget
+
+    _install_fake_qt(monkeypatch, widget_at=widget_at)
+
+    assert server._is_topmost_visible_widget(widget) is True
