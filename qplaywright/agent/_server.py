@@ -781,9 +781,7 @@ def _handle_command(req: Request) -> Any:
         target = _primary_event_target(w)
         local_pos = target.rect().center()
         _move_visual_cursor(target, local_pos)
-        center = target.mapToGlobal(local_pos)
-        QCursor.setPos(center)
-        _process_events()
+        _hover_widget(target, local_pos)
         return True
 
     if method == METHOD_FOCUS:
@@ -1096,6 +1094,31 @@ def _type_text(widget, text: str, delay: int = 0):
                 _process_events()
                 time.sleep(delay / 1000.0)
 
+    _process_events()
+
+
+def _hover_widget(widget, pos):
+    """Dispatch a synthetic hover event without warping the real cursor."""
+    _import_qt()
+    Qt = _QtCore.Qt
+    QEvent = _QtCore.QEvent
+
+    QMouseEvent = _QtGui.QMouseEvent
+    global_pos = widget.mapToGlobal(pos)
+
+    try:
+        move = QMouseEvent(
+            QEvent.Type.MouseMove, pos, global_pos,
+            Qt.NoButton, Qt.NoButton, Qt.NoModifier,
+        )
+    except TypeError:
+        from PySide6.QtCore import QPointF
+        move = QMouseEvent(
+            QEvent.Type.MouseMove, QPointF(pos), QPointF(global_pos),
+            Qt.NoButton, Qt.NoButton, Qt.NoModifier,
+        )
+
+    _QApplication.postEvent(widget, move)
     _process_events()
 
 

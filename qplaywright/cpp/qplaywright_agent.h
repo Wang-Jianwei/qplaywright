@@ -1724,11 +1724,7 @@ private:
 
         if (method == "hover") {
             QWidget *w = resolveOne(params);
-            QWidget *target = primaryEventTarget(w);
-            QPoint center = target->rect().center();
-            updateVisualFeedback(target, center, 0);
-            QCursor::setPos(target->mapToGlobal(center));
-            QApplication::processEvents();
+            hoverWidget(w);
             return true;
         }
 
@@ -2097,6 +2093,35 @@ private:
         } else {
             throw std::runtime_error(("Unknown key: " + keyStr).toStdString());
         }
+        QApplication::processEvents();
+    }
+
+    void hoverWidget(QWidget *w)
+    {
+        QWidget *target = primaryEventTarget(w);
+        QPoint center = target->rect().center();
+        updateVisualFeedback(target, center, 0);
+        QPoint globalPos = target->mapToGlobal(center);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QMouseEvent event(
+            QEvent::MouseMove,
+            QPointF(center),
+            QPointF(globalPos),
+            Qt::NoButton,
+            Qt::NoButton,
+            Qt::NoModifier
+        );
+#else
+        QMouseEvent event(
+            QEvent::MouseMove,
+            center,
+            globalPos,
+            Qt::NoButton,
+            Qt::NoButton,
+            Qt::NoModifier
+        );
+#endif
+        QApplication::sendEvent(target, &event);
         QApplication::processEvents();
     }
 

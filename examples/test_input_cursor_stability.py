@@ -48,6 +48,11 @@ def main() -> None:
         after_fill = _cursor_pos()
         _assert_cursor_stable("fill", before_fill, after_fill)
 
+        before_hover = _cursor_pos()
+        window.locator("#username").hover()
+        after_hover = _cursor_pos()
+        _assert_cursor_stable("hover", before_hover, after_hover)
+
         before_type = _cursor_pos()
         window.locator("#password").type("secret", delay=0)
         after_type = _cursor_pos()
