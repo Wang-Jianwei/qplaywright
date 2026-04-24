@@ -178,9 +178,9 @@ class Window:
 
     # -- Widget tree ---------------------------------------------------------
 
-    def widget_tree(self, *, max_depth: int = 10) -> list[dict]:
-        """Get the full widget tree (for debugging)."""
-        return self._conn.send(METHOD_WIDGET_TREE, {"max_depth": max_depth})
+    def widget_tree(self, *, max_depth: int = 10, topmost_only: bool = False) -> list[dict]:
+        """Get the widget tree, optionally filtering to frontmost visible widgets."""
+        return self._conn.send(METHOD_WIDGET_TREE, {"max_depth": max_depth, "topmost_only": topmost_only})
 
     # -- Waiting -------------------------------------------------------------
 

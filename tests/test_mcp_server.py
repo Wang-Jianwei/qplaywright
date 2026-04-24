@@ -506,11 +506,12 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
     monkeypatch.setattr(mcp_server, "_snapshot_result", fake_snapshot_result)
     monkeypatch.setattr(mcp_server, "_write_text_file", lambda path, content: path)
 
-    result = mcp_server.snapshot(depth=4, save_to="snapshot.txt")
+    result = mcp_server.snapshot(depth=4, topmost_only=True, save_to="snapshot.txt")
 
-    assert captured["kwargs"] == {"target": None, "depth": 4}
+    assert captured["kwargs"] == {"target": None, "depth": 4, "topmost_only": True}
     assert result["ok"] is True
     assert result["window"]["wid"] == 11
+    assert result["topmost_only"] is True
     assert result["save_to"] == "snapshot.txt"
 
 
@@ -534,9 +535,9 @@ def test_inspect_without_target_returns_active_window_tree(monkeypatch):
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
     monkeypatch.setattr(mcp_server, "_widget_tree_raw", fake_widget_tree_raw)
 
-    result = mcp_server.inspect(depth=6)
+    result = mcp_server.inspect(depth=6, topmost_only=True)
 
-    assert captured["kwargs"] == {"max_depth": 6, "window_wid": 11}
+    assert captured["kwargs"] == {"max_depth": 6, "window_wid": 11, "topmost_only": True}
     assert result == {
         "ok": True,
         "target": None,
@@ -1217,7 +1218,7 @@ def test_widget_tree_raw_includes_optional_window_wid():
     captured = {}
 
     class FakeConn:
-        def send(self, method, params):
+        def send(self, method, params, timeout=None):
             captured["method"] = method
             captured["params"] = params
             return []
@@ -1232,9 +1233,9 @@ def test_widget_tree_raw_includes_optional_window_wid():
     )
     connection.app._conn = FakeConn()
 
-    mcp_server._widget_tree_raw(connection, max_depth=4, window_wid=12)
+    mcp_server._widget_tree_raw(connection, max_depth=4, window_wid=12, topmost_only=True)
 
-    assert captured == {"method": mcp_server.METHOD_WIDGET_TREE, "params": {"max_depth": 4, "wid": 12}}
+    assert captured == {"method": mcp_server.METHOD_WIDGET_TREE, "params": {"max_depth": 4, "topmost_only": True, "wid": 12}}
 
 
 def test_snapshot_result_scopes_to_active_window(monkeypatch):
@@ -1255,9 +1256,9 @@ def test_snapshot_result_scopes_to_active_window(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "_widget_tree_raw", fake_widget_tree_raw)
 
-    payload = mcp_server._snapshot_result(connection, depth=3)
+    payload = mcp_server._snapshot_result(connection, depth=3, topmost_only=True)
 
-    assert captured["kwargs"] == {"max_depth": 3, "window_wid": 22}
+    assert captured["kwargs"] == {"max_depth": 3, "window_wid": 22, "topmost_only": True, "timeout": None}
     assert 'DialogWindow "Dialog"' in payload["snapshot"]
     assert payload["refs"][0]["wid"] == 22
 

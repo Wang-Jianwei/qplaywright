@@ -1724,7 +1724,7 @@ private:
         return properties;
     }
 
-    QJsonObject serializeWidgetTree(QWidget *w, int depth = 0, int maxDepth = 10)
+    QJsonObject serializeWidgetTree(QWidget *w, int depth = 0, int maxDepth = 10, bool topmostOnly = false)
     {
         if (isAutomationOverlayWidget(w))
             throw std::runtime_error("Automation overlay widgets are excluded from snapshot capture");
@@ -1774,8 +1774,11 @@ private:
             QJsonArray children;
             for (QObject *child : w->children()) {
                 QWidget *cw = qobject_cast<QWidget *>(child);
-                if (cw && !isAutomationOverlayWidget(cw))
-                    children.append(serializeWidgetTree(cw, depth + 1, maxDepth));
+                if (!cw || isAutomationOverlayWidget(cw))
+                    continue;
+                if (topmostOnly && !isTopmostVisibleWidget(cw))
+                    continue;
+                children.append(serializeWidgetTree(cw, depth + 1, maxDepth, topmostOnly));
             }
             if (!children.isEmpty())
                 obj["children"] = children;
@@ -1818,6 +1821,7 @@ private:
 
         if (method == "widget_tree") {
             int maxDepth = params["max_depth"].toInt(10);
+            const bool topmostOnly = params["topmost_only"].toBool(false);
             QJsonArray arr;
             QList<QWidget *> roots;
             if (params.contains("wid")) {
@@ -1830,7 +1834,7 @@ private:
             }
             for (QWidget *w : roots) {
                 if (w->isVisible())
-                    arr.append(serializeWidgetTree(w, 0, maxDepth));
+                    arr.append(serializeWidgetTree(w, 0, maxDepth, topmostOnly));
             }
             return arr;
         }
@@ -2190,6 +2194,27 @@ private:
             current = current->parentWidget();
         }
         return false;
+    }
+
+    bool isTopmostVisibleWidget(QWidget *w)
+    {
+        QWidget *target = primaryEventTarget(w);
+        if (!target || !target->isVisible())
+            return false;
+
+        const QPoint center = target->rect().center();
+        const QPoint globalPos = target->mapToGlobal(center);
+
+        QWidget *hit = QApplication::widgetAt(globalPos);
+        if (isAutomationOverlayWidget(hit))
+            hit = nullptr;
+        if (!hit)
+            hit = target->childAt(center);
+        if (!hit)
+            hit = target;
+        if (!hit->isVisible())
+            return false;
+        return isSameOrDescendantWidget(hit, target);
     }
 
     struct ClickTarget

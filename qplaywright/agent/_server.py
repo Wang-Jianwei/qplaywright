@@ -547,7 +547,16 @@ class _WidgetRegistry:
 _registry = _WidgetRegistry()
 
 
-def _widget_tree_to_dict(widget, *, depth: int = 0, max_depth: int = 50) -> dict:
+def _iter_tree_children(widget, *, topmost_only: bool = False):
+    for child in widget.children():
+        if not hasattr(child, "isVisible") or _is_automation_overlay_widget(child):
+            continue
+        if topmost_only and not _is_topmost_visible_widget(child):
+            continue
+        yield child
+
+
+def _widget_tree_to_dict(widget, *, depth: int = 0, max_depth: int = 50, topmost_only: bool = False) -> dict:
     """Serialize a widget tree and include stable widget ids for each node."""
 
     if _is_automation_overlay_widget(widget):
@@ -558,9 +567,10 @@ def _widget_tree_to_dict(widget, *, depth: int = 0, max_depth: int = 50) -> dict
 
     if depth < max_depth:
         children = []
-        for child in widget.children():
-            if hasattr(child, "isVisible") and not _is_automation_overlay_widget(child):
-                children.append(_widget_tree_to_dict(child, depth=depth + 1, max_depth=max_depth))
+        for child in _iter_tree_children(widget, topmost_only=topmost_only):
+            children.append(
+                _widget_tree_to_dict(child, depth=depth + 1, max_depth=max_depth, topmost_only=topmost_only)
+            )
         if children:
             info["children"] = children
 
@@ -785,6 +795,7 @@ def _handle_command(req: Request) -> Any:
 
     if method == METHOD_WIDGET_TREE:
         wid = params.get("wid")
+        topmost_only = bool(params.get("topmost_only", False))
         if wid is not None:
             root = _registry.get(wid)
             if root is None:
@@ -792,7 +803,11 @@ def _handle_command(req: Request) -> Any:
             roots = [root]
         else:
             roots = _get_top_level_widgets()
-        return [_widget_tree_to_dict(r, max_depth=params.get("max_depth", 10)) for r in roots if r.isVisible()]
+        return [
+            _widget_tree_to_dict(r, max_depth=params.get("max_depth", 10), topmost_only=topmost_only)
+            for r in roots
+            if r.isVisible()
+        ]
 
     if method == METHOD_COUNT:
         return len(_resolve_widgets(params))
@@ -1047,6 +1062,33 @@ def _is_same_or_descendant_widget(candidate, ancestor) -> bool:
         parent_widget = getattr(current, "parentWidget", None)
         current = parent_widget() if callable(parent_widget) else None
     return False
+
+
+def _is_topmost_visible_widget(widget) -> bool:
+    """Return True when the widget is frontmost at its center hit point."""
+    _import_qt()
+
+    target = _primary_event_target(widget)
+    if not hasattr(target, "isVisible") or not target.isVisible():
+        return False
+
+    center = target.rect().center()
+    global_pos = target.mapToGlobal(center)
+
+    hit = None
+    widget_at = getattr(_QApplication, "widgetAt", None)
+    if callable(widget_at):
+        hit = widget_at(global_pos)
+    if _is_automation_overlay_widget(hit):
+        hit = None
+    if hit is None and hasattr(target, "childAt"):
+        hit = target.childAt(center)
+    if hit is None:
+        hit = target
+
+    if hasattr(hit, "isVisible") and not hit.isVisible():
+        return False
+    return _is_same_or_descendant_widget(hit, target)
 
 
 def _resolve_click_target(widget):

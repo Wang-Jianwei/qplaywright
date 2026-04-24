@@ -168,3 +168,23 @@ def test_click_widget_uses_hit_target_and_local_position(monkeypatch):
     assert FakeQTest.calls == [("click", hit, "left", "none", FakePoint(2, 7))]
     assert hit.focus_calls == [("mouse",)]
     assert FakeApplication.process_events_calls >= 2
+
+
+def test_is_topmost_visible_widget_accepts_descendant_hit(monkeypatch):
+    viewport = FakeClickWidget("QViewport", global_origin=FakePoint(100, 200))
+    hit = FakeClickWidget("InnerButton", parent=viewport, global_origin=FakePoint(108, 205))
+    widget = FakeClickWidget("QListWidget")
+    widget.setViewport(viewport)
+
+    _install_fake_qt(monkeypatch, widget_at=hit)
+
+    assert server._is_topmost_visible_widget(widget) is True
+
+
+def test_is_topmost_visible_widget_rejects_covered_center(monkeypatch):
+    widget = FakeClickWidget("QPushButton")
+    overlay = FakeClickWidget("OverlayWidget", global_origin=FakePoint(100, 200))
+
+    _install_fake_qt(monkeypatch, widget_at=overlay)
+
+    assert server._is_topmost_visible_widget(widget) is False

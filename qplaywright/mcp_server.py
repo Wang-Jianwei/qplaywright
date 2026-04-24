@@ -248,9 +248,10 @@ def _widget_tree_raw(
     *,
     max_depth: int,
     window_wid: int | None = None,
+    topmost_only: bool = False,
     timeout: float | None = None,
 ) -> list[dict[str, Any]]:
-    params: dict[str, Any] = {"max_depth": max_depth}
+    params: dict[str, Any] = {"max_depth": max_depth, "topmost_only": topmost_only}
     if window_wid is not None:
         params["wid"] = window_wid
     return connection.app._conn.send(METHOD_WIDGET_TREE, params, timeout=timeout)
@@ -794,6 +795,7 @@ def _snapshot_result(
     *,
     target: str | None = None,
     depth: int = 10,
+    topmost_only: bool = False,
     timeout: float | None = None,
 ) -> dict[str, Any]:
     target_params = _target_params(managed_connection, target, max_depth=depth) if target is not None else None
@@ -806,6 +808,7 @@ def _snapshot_result(
                 managed_connection,
                 max_depth=depth,
                 window_wid=managed_connection.active_window_wid,
+                topmost_only=topmost_only,
                 timeout=timeout,
             ),
             depth=depth,
@@ -1088,18 +1091,20 @@ if FastMCP is not None:
     def snapshot(
         target: str | None = None,
         depth: int = 10,
+        topmost_only: bool = False,
         save_to: str | None = None,
     ) -> dict[str, Any]:
         """Return a text snapshot of the current active window or one target."""
 
         connection_state = _get_connection(_SERVER_STATE)
         active_window = _active_window_summary(connection_state)
-        payload = _snapshot_result(connection_state, target=target, depth=depth)
+        payload = _snapshot_result(connection_state, target=target, depth=depth, topmost_only=topmost_only)
         result = {
             "ok": True,
             "session": _session_summary(connection_state),
             "window": active_window,
             "target": target,
+            "topmost_only": topmost_only,
             **payload,
         }
         if save_to is not None:
@@ -1114,6 +1119,7 @@ if FastMCP is not None:
         include_methods: bool = False,
         include_properties: bool = False,
         depth: int = 10,
+        topmost_only: bool = False,
     ) -> dict[str, Any]:
         """Inspect one target or return the current active window tree in debug mode."""
 
@@ -1127,6 +1133,7 @@ if FastMCP is not None:
                     connection_state,
                     max_depth=depth,
                     window_wid=connection_state.active_window_wid,
+                    topmost_only=topmost_only,
                 ),
             }
 
