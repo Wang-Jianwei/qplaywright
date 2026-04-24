@@ -298,28 +298,36 @@ def _create_overlay_manager_class():
 
             core_color = QColor(20, 132, 255, 180)
             ring_base = QColor(20, 132, 255, 220)
-            frame_color = QColor(20, 132, 255, 215)
+            frame_color = QColor(20, 132, 255, 150)
 
             if self._session_agent_name:
-                frame_rect = self.rect().adjusted(3, 3, -3, -3)
-                painter.setPen(QPen(frame_color, 3))
+                frame_rect = self.rect().adjusted(1, 1, -1, -1)
+                painter.setPen(QPen(frame_color, 2))
                 painter.setBrush(Qt.NoBrush)
-                painter.drawRoundedRect(frame_rect, 14, 14)
+                painter.drawRoundedRect(frame_rect, 10, 10)
 
                 label_text = f"正在与 Agent {self._session_agent_name} 共享"
+                font = painter.font()
+                if font.pointSizeF() > 0:
+                    font.setPointSizeF(max(8.5, font.pointSizeF() - 1.5))
+                elif font.pixelSize() > 0:
+                    font.setPixelSize(max(11, font.pixelSize() - 2))
+                else:
+                    font.setPointSizeF(8.5)
+                painter.setFont(font)
                 metrics = painter.fontMetrics()
-                badge_width = metrics.horizontalAdvance(label_text) + 28
-                badge_height = metrics.height() + 14
-                badge_rect = self.rect().adjusted(14, 14, -(self.width() - 14 - badge_width), -(self.height() - 14 - badge_height))
+                badge_width = metrics.horizontalAdvance(label_text) + 18
+                badge_height = metrics.height() + 8
+                badge_rect = self.rect().adjusted(8, 8, -(self.width() - 8 - badge_width), -(self.height() - 8 - badge_height))
 
                 painter.setPen(Qt.NoPen)
-                painter.setBrush(QColor(9, 29, 61, 224))
-                painter.drawRoundedRect(badge_rect, 10, 10)
+                painter.setBrush(QColor(9, 29, 61, 150))
+                painter.drawRoundedRect(badge_rect, 8, 8)
                 painter.setPen(QPen(frame_color, 1))
                 painter.setBrush(Qt.NoBrush)
-                painter.drawRoundedRect(badge_rect, 10, 10)
-                painter.setPen(QColor(255, 255, 255, 245))
-                painter.drawText(badge_rect.adjusted(14, 0, -14, 0), Qt.AlignVCenter | Qt.AlignLeft, label_text)
+                painter.drawRoundedRect(badge_rect, 8, 8)
+                painter.setPen(QColor(255, 255, 255, 230))
+                painter.drawText(badge_rect.adjusted(9, 0, -9, 0), Qt.AlignVCenter | Qt.AlignLeft, label_text)
 
             for started_at, center, pulse_count in self._pulse_records:
                 elapsed = time.monotonic() - started_at

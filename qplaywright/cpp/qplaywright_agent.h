@@ -1203,28 +1203,36 @@ private:
 
             const QColor coreColor(20, 132, 255, 180);
             const QColor ringColor(20, 132, 255, 220);
-            const QColor frameColor(20, 132, 255, 215);
+            const QColor frameColor(20, 132, 255, 150);
 
             if (!m_sharedAgentName.isEmpty()) {
-                const QRect frameRect = rect().adjusted(3, 3, -3, -3);
-                painter.setPen(QPen(frameColor, 3));
+                const QRect frameRect = rect().adjusted(1, 1, -1, -1);
+                painter.setPen(QPen(frameColor, 2));
                 painter.setBrush(Qt::NoBrush);
-                painter.drawRoundedRect(frameRect, 14, 14);
+                painter.drawRoundedRect(frameRect, 10, 10);
 
                 const QString labelText = QStringLiteral("正在与 Agent %1 共享").arg(m_sharedAgentName);
+                QFont badgeFont = painter.font();
+                if (badgeFont.pointSizeF() > 0.0)
+                    badgeFont.setPointSizeF(qMax(8.5, badgeFont.pointSizeF() - 1.5));
+                else if (badgeFont.pixelSize() > 0)
+                    badgeFont.setPixelSize(qMax(11, badgeFont.pixelSize() - 2));
+                else
+                    badgeFont.setPointSizeF(8.5);
+                painter.setFont(badgeFont);
                 const QFontMetrics metrics = painter.fontMetrics();
-                const int badgeWidth = metrics.horizontalAdvance(labelText) + 28;
-                const int badgeHeight = metrics.height() + 14;
-                const QRect badgeRect(14, 14, badgeWidth, badgeHeight);
+                const int badgeWidth = metrics.horizontalAdvance(labelText) + 18;
+                const int badgeHeight = metrics.height() + 8;
+                const QRect badgeRect(8, 8, badgeWidth, badgeHeight);
 
                 painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(9, 29, 61, 224));
-                painter.drawRoundedRect(badgeRect, 10, 10);
+                painter.setBrush(QColor(9, 29, 61, 150));
+                painter.drawRoundedRect(badgeRect, 8, 8);
                 painter.setPen(QPen(frameColor, 1));
                 painter.setBrush(Qt::NoBrush);
-                painter.drawRoundedRect(badgeRect, 10, 10);
-                painter.setPen(QColor(255, 255, 255, 245));
-                painter.drawText(badgeRect.adjusted(14, 0, -14, 0), Qt::AlignVCenter | Qt::AlignLeft, labelText);
+                painter.drawRoundedRect(badgeRect, 8, 8);
+                painter.setPen(QColor(255, 255, 255, 230));
+                painter.drawText(badgeRect.adjusted(9, 0, -9, 0), Qt::AlignVCenter | Qt::AlignLeft, labelText);
             }
 
             const qint64 now = m_clock.elapsed();
