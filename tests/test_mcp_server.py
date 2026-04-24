@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import anyio
 import json
 
 import pytest
@@ -1063,12 +1064,68 @@ def test_main_cli_dispatches_to_cli_runner(monkeypatch):
 def test_main_serve_mode_keeps_existing_transport_flow(monkeypatch):
     calls = {}
 
+    def fake_run_transport(transport):
+        calls["run_transport"] = transport
+        return 0
+
     monkeypatch.setattr(mcp_server, "_configure_stdio_for_mcp", lambda transport: calls.setdefault("transport", transport))
-    monkeypatch.setattr(mcp_server.mcp, "run", lambda *, transport: calls.setdefault("run_transport", transport))
+    monkeypatch.setattr(mcp_server, "_run_mcp_transport", fake_run_transport)
 
-    mcp_server.main(["--transport", "streamable-http"])
+    with pytest.raises(SystemExit) as exc_info:
+        mcp_server.main(["--transport", "streamable-http"])
 
+    assert exc_info.value.code == 0
     assert calls == {"transport": "streamable-http", "run_transport": "streamable-http"}
+
+
+def test_run_mcp_transport_returns_nonzero_on_unexpected_exception(monkeypatch):
+    class FakeMcp:
+        def run(self, *, transport):
+            raise RuntimeError(f"boom on {transport}")
+
+    monkeypatch.setattr(mcp_server, "mcp", FakeMcp())
+
+    assert mcp_server._run_mcp_transport("stdio") == 1
+
+
+@pytest.mark.anyio
+async def test_patched_mcp_session_receive_loop_ignores_cancelled_notification():
+    read_send, read_recv = anyio.create_memory_object_stream(1)
+    write_send, _ = anyio.create_memory_object_stream(1)
+    incoming_send, incoming_recv = anyio.create_memory_object_stream(1)
+    received_notifications = []
+
+    class FakeSession:
+        def __init__(self):
+            self._read_stream = read_recv
+            self._write_stream = write_send
+            self._incoming_message_stream_writer = incoming_send
+            self._response_streams = {}
+            self._receive_request_type = None
+            self._receive_notification_type = mcp_server.ClientNotification
+
+        async def _received_request(self, responder):
+            raise AssertionError("request branch should not run")
+
+        async def _received_notification(self, notification):
+            received_notifications.append(notification)
+
+    await read_send.send(
+        mcp_server.JSONRPCMessage(
+            mcp_server.JSONRPCNotification(
+                jsonrpc="2.0",
+                method="notifications/cancelled",
+                params={"requestId": 2, "reason": "timeout"},
+            )
+        )
+    )
+    await read_send.aclose()
+
+    await mcp_server._patched_mcp_session_receive_loop(FakeSession())
+
+    assert received_notifications == []
+    with pytest.raises(anyio.EndOfStream):
+        await incoming_recv.receive()
 
 
 def test_screenshot_clip_kwargs_validates_required_fields():

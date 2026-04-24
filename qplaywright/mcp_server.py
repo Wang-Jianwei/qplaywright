@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from pydantic import ValidationError
+
 from qplaywright.protocol import (
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -42,11 +44,31 @@ WindowAction = Literal["list", "select", "resize", "close"]
 
 try:
     from mcp.server.fastmcp import FastMCP
+    from mcp.shared.session import BaseSession, RequestResponder
+    from mcp.types import (
+        ClientNotification,
+        JSONRPCError,
+        JSONRPCMessage,
+        JSONRPCNotification,
+        JSONRPCRequest,
+        JSONRPCResponse,
+    )
 except ImportError as exc:  # pragma: no cover - exercised only without the extra installed
     FastMCP = None  # type: ignore[assignment]
+    BaseSession = None  # type: ignore[assignment]
+    RequestResponder = None  # type: ignore[assignment]
+    ClientNotification = None  # type: ignore[assignment]
+    JSONRPCError = None  # type: ignore[assignment]
+    JSONRPCMessage = None  # type: ignore[assignment]
+    JSONRPCNotification = None  # type: ignore[assignment]
+    JSONRPCRequest = None  # type: ignore[assignment]
+    JSONRPCResponse = None  # type: ignore[assignment]
     _MCP_IMPORT_ERROR: ImportError | None = exc
 else:
     _MCP_IMPORT_ERROR = None
+
+
+_MCP_CANCEL_NOTIFICATION_METHOD = "notifications/cancelled"
 
 
 @dataclass
@@ -89,6 +111,115 @@ class ServerState:
 
 _SERVER_STATE = ServerState()
 atexit.register(_SERVER_STATE.close_all)
+
+
+def _mcp_client_notification_supports_cancelled() -> bool:
+    if ClientNotification is None:
+        return True
+    try:
+        ClientNotification.model_validate(
+            {
+                "method": _MCP_CANCEL_NOTIFICATION_METHOD,
+                "params": {"requestId": 1, "reason": "timeout"},
+            }
+        )
+    except Exception:
+        return False
+    return True
+
+
+def _decode_client_notification(session: Any, payload: dict[str, Any]) -> Any | None:
+    method = payload.get("method")
+    if method == _MCP_CANCEL_NOTIFICATION_METHOD:
+        params = payload.get("params") or {}
+        LOGGER.info(
+            "Ignoring MCP client cancellation notification for requestId=%s",
+            params.get("requestId"),
+        )
+        return None
+
+    try:
+        return session._receive_notification_type.model_validate(payload)
+    except ValidationError as exc:
+        LOGGER.warning("Ignoring invalid MCP client notification %r: %s", method, exc)
+        return None
+
+
+async def _patched_mcp_session_receive_loop(session: Any) -> None:
+    assert JSONRPCRequest is not None
+    assert JSONRPCNotification is not None
+    assert RequestResponder is not None
+
+    async with (
+        session._read_stream,
+        session._write_stream,
+        session._incoming_message_stream_writer,
+    ):
+        async for message in session._read_stream:
+            if isinstance(message, Exception):
+                await session._incoming_message_stream_writer.send(message)
+            elif isinstance(message.root, JSONRPCRequest):
+                validated_request = session._receive_request_type.model_validate(
+                    message.root.model_dump(by_alias=True, mode="json", exclude_none=True)
+                )
+                responder = RequestResponder(
+                    request_id=message.root.id,
+                    request_meta=validated_request.root.params.meta if validated_request.root.params else None,
+                    request=validated_request,
+                    session=session,
+                )
+
+                await session._received_request(responder)
+                if not responder._responded:
+                    await session._incoming_message_stream_writer.send(responder)
+            elif isinstance(message.root, JSONRPCNotification):
+                payload = message.root.model_dump(by_alias=True, mode="json", exclude_none=True)
+                notification = _decode_client_notification(session, payload)
+                if notification is None:
+                    continue
+
+                await session._received_notification(notification)
+                await session._incoming_message_stream_writer.send(notification)
+            else:
+                stream = session._response_streams.pop(message.root.id, None)
+                if stream:
+                    await stream.send(message.root)
+                else:
+                    await session._incoming_message_stream_writer.send(
+                        RuntimeError(f"Received response with an unknown request ID: {message}")
+                    )
+
+
+def _install_mcp_stdio_cancel_compat() -> None:
+    if BaseSession is None or getattr(BaseSession, "_qplaywright_cancel_compat_installed", False):
+        return
+    if _mcp_client_notification_supports_cancelled():
+        return
+
+    BaseSession._receive_loop = _patched_mcp_session_receive_loop  # type: ignore[method-assign]
+    BaseSession._qplaywright_cancel_compat_installed = True  # type: ignore[attr-defined]
+    LOGGER.info(
+        "Installed qplaywright MCP compatibility patch for unsupported %s notifications",
+        _MCP_CANCEL_NOTIFICATION_METHOD,
+    )
+
+
+def _run_mcp_transport(transport: str) -> int:
+    assert mcp is not None
+    runner: Any = mcp
+
+    try:
+        runner.run(transport=transport)
+    except BaseExceptionGroup as exc:
+        LOGGER.error("qplaywright MCP server exited unexpectedly on %s transport: %s", transport, exc)
+        return 1
+    except Exception as exc:
+        LOGGER.error("qplaywright MCP server exited unexpectedly on %s transport: %s", transport, exc)
+        return 1
+    return 0
+
+
+_install_mcp_stdio_cancel_compat()
 
 
 def _list_windows_raw(connection: ManagedConnection, *, timeout: float | None = None) -> list[dict[str, Any]]:
@@ -1540,7 +1671,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv_list)
     LOGGER.debug("Starting qplaywright MCP server with transport=%s", args.transport)
     _configure_stdio_for_mcp(args.transport)
-    mcp.run(transport=args.transport)
+    raise SystemExit(_run_mcp_transport(args.transport))
 
 
 if __name__ == "__main__":
