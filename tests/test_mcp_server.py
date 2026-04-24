@@ -563,6 +563,33 @@ def test_inspect_locator_handles_empty_and_present_results():
     assert with_methods["properties"]["myText"] == "pressme"
 
 
+def test_inspect_locator_omits_empty_text_and_value_for_a11y_only_widget():
+    class A11yOnlyLocator(FakeLocator):
+        def text_content(self) -> str:
+            return ""
+
+        def input_value(self) -> str:
+            return ""
+
+        def all_text_contents(self) -> list[str]:
+            return []
+
+        def properties(self) -> dict[str, object]:
+            return {
+                "objectName": "measure_type_btn",
+                "accessibleName": "功率扫描",
+                "accessibleDescription": "切换测量类型为功率扫描",
+            }
+
+    result = mcp_server._inspect_locator(A11yOnlyLocator(count=1))
+
+    assert result["objectName"] == "measure_type_btn"
+    assert result["accessibleName"] == "功率扫描"
+    assert result["accessibleDescription"] == "切换测量类型为功率扫描"
+    assert "text" not in result
+    assert "value" not in result
+
+
 def test_invoke_locator_method_uses_first_match():
     result = mcp_server._invoke_locator_method(
         FakeLocator(count=1),

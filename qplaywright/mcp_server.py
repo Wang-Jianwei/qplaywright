@@ -535,10 +535,16 @@ def _inspect_locator(
             continue
         result[key] = value
 
+    text_content = first.text_content()
+    if text_content not in (None, ""):
+        result["text"] = text_content
+
+    input_value = first.input_value()
+    if input_value not in (None, ""):
+        result["value"] = input_value
+
     result.update(
         {
-            "text": first.text_content(),
-            "value": first.input_value(),
             "all_text_contents": locator.all_text_contents(),
             "is_visible": first.is_visible(),
             "is_enabled": first.is_enabled(),
