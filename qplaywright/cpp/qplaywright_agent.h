@@ -1211,7 +1211,7 @@ private:
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(frameRect, 14, 14);
 
-                const QString labelText = QStringLiteral("Shared with Agent %1").arg(m_sharedAgentName);
+                const QString labelText = QStringLiteral("正在与 Agent %1 共享").arg(m_sharedAgentName);
                 const QFontMetrics metrics = painter.fontMetrics();
                 const int badgeWidth = metrics.horizontalAdvance(labelText) + 28;
                 const int badgeHeight = metrics.height() + 14;

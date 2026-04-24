@@ -306,7 +306,7 @@ def _create_overlay_manager_class():
                 painter.setBrush(Qt.NoBrush)
                 painter.drawRoundedRect(frame_rect, 14, 14)
 
-                label_text = f"Shared with Agent {self._session_agent_name}"
+                label_text = f"正在与 Agent {self._session_agent_name} 共享"
                 metrics = painter.fontMetrics()
                 badge_width = metrics.horizontalAdvance(label_text) + 28
                 badge_height = metrics.height() + 14
