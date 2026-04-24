@@ -23,6 +23,8 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDialog>
+#include <QPointer>
 #include <QTextEdit>
 #include <QGroupBox>
 
@@ -189,6 +191,11 @@ public:
         connect(clearBtn, &QPushButton::clicked, this, &DemoWindow::onClearLog);
         btnRow->addWidget(clearBtn);
 
+        auto *openDialogBtn = new QPushButton("Open Dialog");
+        openDialogBtn->setObjectName("open_dialog_btn");
+        connect(openDialogBtn, &QPushButton::clicked, this, &DemoWindow::onOpenDialog);
+        btnRow->addWidget(openDialogBtn);
+
         auto *quitBtn = new QPushButton("Quit");
         quitBtn->setObjectName("quit_btn");
         connect(quitBtn, &QPushButton::clicked, this, &QWidget::close);
@@ -197,6 +204,64 @@ public:
     }
 
 private slots:
+    void onOpenDialog()
+    {
+        if (!m_dialog) {
+            m_dialog = new QDialog(this);
+            m_dialog->setObjectName("secondary_dialog");
+            m_dialog->setWindowTitle("QPlaywright Dialog Demo");
+            m_dialog->setModal(false);
+            m_dialog->resize(320, 180);
+
+            auto *layout = new QVBoxLayout(m_dialog);
+            layout->addWidget(new QLabel("Dialog note:"));
+
+            m_dialogInput = new QLineEdit(m_dialog);
+            m_dialogInput->setObjectName("dialog_input");
+            m_dialogInput->setPlaceholderText("Type dialog text");
+            layout->addWidget(m_dialogInput);
+
+            m_dialogStatus = new QLabel("Dialog status: Ready", m_dialog);
+            m_dialogStatus->setObjectName("dialog_status");
+            layout->addWidget(m_dialogStatus);
+
+            auto *dialogButtons = new QHBoxLayout;
+
+            auto *applyBtn = new QPushButton("Apply", m_dialog);
+            applyBtn->setObjectName("dialog_apply_btn");
+            connect(applyBtn, &QPushButton::clicked, this, &DemoWindow::onApplyDialogText);
+            dialogButtons->addWidget(applyBtn);
+
+            auto *closeBtn = new QPushButton("Close", m_dialog);
+            closeBtn->setObjectName("dialog_close_btn");
+            connect(closeBtn, &QPushButton::clicked, m_dialog, &QDialog::close);
+            dialogButtons->addWidget(closeBtn);
+
+            layout->addLayout(dialogButtons);
+
+            connect(m_dialog, &QDialog::finished, this, [this](int) {
+                m_status->setText("Status: Dialog closed");
+            });
+        }
+
+        const QPoint offset(40, 40);
+        m_dialog->move(mapToGlobal(rect().topLeft()) + offset);
+        m_dialog->show();
+        m_dialog->raise();
+        m_dialog->activateWindow();
+        m_status->setText("Status: Dialog opened");
+    }
+
+    void onApplyDialogText()
+    {
+        const QString dialogText = m_dialogInput ? m_dialogInput->text().trimmed() : QString();
+        if (m_dialogStatus) {
+            m_dialogStatus->setText(QString("Dialog status: %1").arg(dialogText.isEmpty() ? QStringLiteral("(empty)") : dialogText));
+        }
+        m_status->setText(QString("Status: Dialog updated to %1").arg(dialogText.isEmpty() ? QStringLiteral("(empty)") : dialogText));
+        m_log->append(QString("[INFO] Dialog updated: %1").arg(dialogText.isEmpty() ? QStringLiteral("(empty)") : dialogText));
+    }
+
     void onLogin()
     {
         QString username = m_username->text();
@@ -228,6 +293,9 @@ private:
     QComboBox *m_role;
     FancyAmountEdit *m_amountEditor;
     QPushButton *m_loginBtn;
+    QPointer<QDialog> m_dialog;
+    QPointer<QLineEdit> m_dialogInput;
+    QPointer<QLabel> m_dialogStatus;
     QLabel *m_status;
     QTextEdit *m_log;
 };
