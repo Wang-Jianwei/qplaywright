@@ -1565,11 +1565,13 @@ private:
 
         if (method == "check") {
             QWidget *w = resolveOne(params);
+            moveVisualCursorToWidget(w, 1);
             if (auto *btn = qobject_cast<QAbstractButton *>(w)) btn->setChecked(true);
             return true;
         }
         if (method == "uncheck") {
             QWidget *w = resolveOne(params);
+            moveVisualCursorToWidget(w, 1);
             if (auto *btn = qobject_cast<QAbstractButton *>(w)) btn->setChecked(false);
             return true;
         }
@@ -1907,8 +1909,15 @@ private:
         QApplication::processEvents();
     }
 
+    void moveVisualCursorToWidget(QWidget *w, int pulseCount = 0)
+    {
+        QWidget *target = primaryEventTarget(w);
+        updateVisualFeedback(target, target->rect().center(), pulseCount);
+    }
+
     void fillWidget(QWidget *w, const QString &value)
     {
+        moveVisualCursorToWidget(w);
         if (auto *edit = qobject_cast<QLineEdit *>(w)) {
             edit->clear();
             edit->setText(value);
@@ -1927,6 +1936,7 @@ private:
 
     void typeText(QWidget *w, const QString &text, int delay)
     {
+        moveVisualCursorToWidget(w);
         w->setFocus();
         QApplication::processEvents();
         QTest::keyClicks(w, text, Qt::NoModifier, delay);
@@ -1952,6 +1962,7 @@ private:
             {"Alt", Qt::Key_Alt}, {"Meta", Qt::Key_Meta},
         };
 
+        moveVisualCursorToWidget(w);
         w->setFocus();
         QApplication::processEvents();
 
@@ -1971,6 +1982,8 @@ private:
         auto *combo = qobject_cast<QComboBox *>(w);
         if (!combo)
             throw std::runtime_error("Widget is not a QComboBox");
+
+        moveVisualCursorToWidget(w, 1);
 
         if (params.contains("value"))
             combo->setCurrentText(params["value"].toString());

@@ -379,6 +379,11 @@ def _move_visual_cursor(widget, pos, *, pulse_count: int = 0) -> None:
     manager.move_cursor(widget, pos, pulse_count=pulse_count)
 
 
+def _move_visual_cursor_to_widget(widget, *, pulse_count: int = 0) -> None:
+    target = _primary_event_target(widget)
+    _move_visual_cursor(target, target.rect().center(), pulse_count=pulse_count)
+
+
 # --------------------------------------------------------------------------- #
 #  Widget ID registry — gives each widget a stable numeric ID                  #
 # --------------------------------------------------------------------------- #
@@ -719,6 +724,7 @@ def _handle_command(req: Request) -> Any:
     if method == METHOD_FILL:
         w = _resolve_one(params)
         value = params["value"]
+        _move_visual_cursor_to_widget(w)
         _fill_widget(w, value)
         return True
 
@@ -728,23 +734,27 @@ def _handle_command(req: Request) -> Any:
 
     if method == METHOD_CLEAR:
         w = _resolve_one(params)
+        _move_visual_cursor_to_widget(w)
         _fill_widget(w, "")
         return True
 
     if method == METHOD_CHECK:
         w = _resolve_one(params)
+        _move_visual_cursor_to_widget(w, pulse_count=1)
         if hasattr(w, "setChecked"):
             w.setChecked(True)
         return True
 
     if method == METHOD_UNCHECK:
         w = _resolve_one(params)
+        _move_visual_cursor_to_widget(w, pulse_count=1)
         if hasattr(w, "setChecked"):
             w.setChecked(False)
         return True
 
     if method == METHOD_SELECT_OPTION:
         w = _resolve_one(params)
+        _move_visual_cursor_to_widget(w, pulse_count=1)
         _select_option(w, params)
         return True
 
@@ -752,6 +762,7 @@ def _handle_command(req: Request) -> Any:
         w = _resolve_one(params)
         text = params["text"]
         delay = params.get("delay", 0)
+        _move_visual_cursor_to_widget(w)
         _type_text(w, text, delay)
         return True
 
@@ -761,6 +772,7 @@ def _handle_command(req: Request) -> Any:
         else:
             w = _resolve_press_target(params)
         key = params["key"]
+        _move_visual_cursor_to_widget(w)
         _press_key(w, key)
         return True
 
