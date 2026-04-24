@@ -33,6 +33,7 @@
 #include <QScreen>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QLinearGradient>
 #include <QMutex>
 #include <QPainter>
 #include <QPen>
@@ -1277,7 +1278,21 @@ private:
 
             if (!m_sharedAgentName.isEmpty()) {
                 const QRect frameRect = rect().adjusted(1, 1, -1, -1);
-                painter.setPen(QPen(frameColor, 2));
+                QLinearGradient glowGradient(frameRect.topLeft(), frameRect.bottomRight());
+                glowGradient.setColorAt(0.0, QColor(0, 245, 255, 60));
+                glowGradient.setColorAt(0.34, QColor(20, 132, 255, 65));
+                glowGradient.setColorAt(0.7, QColor(255, 76, 196, 60));
+                glowGradient.setColorAt(1.0, QColor(0, 245, 255, 55));
+                painter.setPen(QPen(QBrush(glowGradient), 6));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawRoundedRect(frameRect, 8, 8);
+
+                QLinearGradient frameGradient(frameRect.topLeft(), frameRect.bottomRight());
+                frameGradient.setColorAt(0.0, QColor(0, 245, 255, 185));
+                frameGradient.setColorAt(0.34, frameColor);
+                frameGradient.setColorAt(0.7, QColor(255, 76, 196, 175));
+                frameGradient.setColorAt(1.0, QColor(0, 245, 255, 180));
+                painter.setPen(QPen(QBrush(frameGradient), 2));
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(frameRect, 8, 8);
 
@@ -1299,7 +1314,7 @@ private:
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(QColor(9, 29, 61, 150));
                 painter.drawRoundedRect(badgeRect, 8, 8);
-                painter.setPen(QPen(frameColor, 1));
+                painter.setPen(QPen(QColor(140, 228, 255, 135), 1));
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(badgeRect, 8, 8);
                 painter.setPen(QColor(255, 255, 255, 210));

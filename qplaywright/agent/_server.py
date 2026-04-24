@@ -225,6 +225,7 @@ def _create_overlay_manager_class():
     QPainter = _QtGui.QPainter
     QColor = _QtGui.QColor
     QPen = _QtGui.QPen
+    QLinearGradient = _QtGui.QLinearGradient
     QPolygon = _QtGui.QPolygon
     QBrush = _QtGui.QBrush
 
@@ -320,7 +321,21 @@ def _create_overlay_manager_class():
 
             if self._session_agent_name:
                 frame_rect = self.rect().adjusted(1, 1, -1, -1)
-                painter.setPen(QPen(frame_color, 2))
+                glow_gradient = QLinearGradient(frame_rect.left(), frame_rect.top(), frame_rect.right(), frame_rect.bottom())
+                glow_gradient.setColorAt(0.0, QColor(0, 245, 255, 60))
+                glow_gradient.setColorAt(0.34, QColor(20, 132, 255, 65))
+                glow_gradient.setColorAt(0.7, QColor(255, 76, 196, 60))
+                glow_gradient.setColorAt(1.0, QColor(0, 245, 255, 55))
+                painter.setPen(QPen(QBrush(glow_gradient), 6))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRoundedRect(frame_rect, 10, 10)
+
+                frame_gradient = QLinearGradient(frame_rect.left(), frame_rect.top(), frame_rect.right(), frame_rect.bottom())
+                frame_gradient.setColorAt(0.0, QColor(0, 245, 255, 185))
+                frame_gradient.setColorAt(0.34, frame_color)
+                frame_gradient.setColorAt(0.7, QColor(255, 76, 196, 175))
+                frame_gradient.setColorAt(1.0, QColor(0, 245, 255, 180))
+                painter.setPen(QPen(QBrush(frame_gradient), 2))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawRoundedRect(frame_rect, 10, 10)
 
@@ -341,7 +356,7 @@ def _create_overlay_manager_class():
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QColor(9, 29, 61, 150))
                 painter.drawRoundedRect(badge_rect, 8, 8)
-                painter.setPen(QPen(frame_color, 1))
+                painter.setPen(QPen(QColor(140, 228, 255, 135), 1))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawRoundedRect(badge_rect, 8, 8)
                 painter.setPen(QColor(255, 255, 255, 230))
