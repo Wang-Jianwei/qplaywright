@@ -112,11 +112,51 @@ private:
 };
 ```
 
+`ensureOverlay()` / `dropOverlay()` 需要满足两个实现约束：
+
+1. `QPointer<AutomationOverlay>` 只能保证 value 变成 null，不能自动清理 `QHash` 里的 key；因此 `dropOverlay()` 必须同时 `m_overlays.remove(targetWindow)`，而不是只关闭 overlay 实例。
+2. `ensureOverlay()` 可能在 overlay 被销毁后再次命中同一个窗口 key，因此它必须把“从未创建过”和“曾创建但 value 已经是 null”这两种情况统一处理。
+
+推荐语义如下：
+
+```cpp
+AutomationOverlay *ensureOverlay(QWidget *targetWindow)
+{
+    auto it = m_overlays.find(targetWindow);
+    if (it != m_overlays.end() && !it.value().isNull())
+        return it.value().data();
+
+    AutomationOverlay *overlay = new AutomationOverlay(targetWindow);
+    m_overlays.insert(targetWindow, overlay);
+    targetWindow->removeEventFilter(this);
+    targetWindow->installEventFilter(this);
+    QObject::connect(targetWindow, &QObject::destroyed, this, [this, targetWindow] {
+        dropOverlay(targetWindow);
+    });
+    return overlay;
+}
+
+void dropOverlay(QWidget *targetWindow)
+{
+    auto it = m_overlays.find(targetWindow);
+    if (it == m_overlays.end())
+        return;
+
+    if (!it.value().isNull()) {
+        targetWindow->removeEventFilter(this);
+        it.value()->closeOverlay();
+        it.value()->deleteLater();
+    }
+    m_overlays.erase(it);
+}
+```
+
 设计原则：
 
 1. key 使用目标窗口指针，而不是 registry wid。
 2. overlay 生命周期由窗口对象生命周期驱动。
 3. handler 不再直接管理 overlay 实例，只通过 manager 调用。
+4. eventFilter 的安装与移除必须幂等，避免 overlay 重建后同一 filter 被重复安装。
 
 ### 3. 几何同步模型
 
@@ -208,6 +248,11 @@ private:
 
 如果第 0 步都不能稳定通过，再回头查 flags / 几何 / 焦点，而不是立刻放弃 top-level 模型。
 
+时间边界：
+
+1. 第 0 步验证预期应在 1-2 小时内完成。
+2. 如果超过半天仍无法稳定通过，不继续盲改，立即记录具体失败现象并重新评估方向。
+
 ### 第 1 步：引入 manager
 
 在第 0 步通过后，新增 `AutomationOverlayManager`，把窗口映射、eventFilter、overlay 生命周期移入 manager。
@@ -216,7 +261,7 @@ private:
 
 1. 新增 manager 类。
 2. handler 只保留 manager 持有和视觉反馈转发。
-3. 每个目标窗口在首次使用时安装 eventFilter。
+3. 每个目标窗口在首次使用时安装 eventFilter，并保证重复重建时不重复安装。
 4. 通过 `destroyed` 信号回收 overlay 与 filter 关联状态。
 
 ### 第 2 步：迁移 screenshot 关联逻辑
