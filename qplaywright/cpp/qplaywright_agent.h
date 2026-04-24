@@ -2491,8 +2491,8 @@ private slots:
         qDebug() << "[QPlaywright] Client disconnected";
         QMetaObject::invokeMethod(
             m_handler,
-            [handler = m_handler, sessionId = m_sessionId] {
-                handler->onClientDisconnected(sessionId);
+            [this] {
+                m_handler->onClientDisconnected(m_sessionId);
             },
             Qt::BlockingQueuedConnection
         );
