@@ -1046,8 +1046,14 @@ public:
     void setVisualFeedbackEnabled(bool enabled)
     {
         m_visualFeedbackEnabled = enabled;
-        if (m_overlayManager)
-            m_overlayManager->setEnabled(enabled);
+        if (!enabled) {
+            if (m_overlayManager)
+                m_overlayManager->setEnabled(false);
+            return;
+        }
+
+        ensureOverlayManager()->setEnabled(true);
+        ensureOverlayManager()->setSharedAgentName(activeSessionAgentName());
     }
 
 public slots:
@@ -1059,13 +1065,24 @@ public slots:
     {
         QString method = request["method"].toString();
         QJsonObject params = request["params"].toObject();
+        const QString sessionId = params.take(QStringLiteral("_sessionId")).toString();
+        if (!sessionId.isEmpty())
+            markSessionActive(sessionId);
         int id = request["id"].toInt();
 
         QJsonObject response;
         response["id"] = id;
 
         try {
-            QJsonValue result = dispatch(method, params);
+            QJsonValue result;
+            if (method == "set_session_info") {
+                setSessionInfo(sessionId, params["agentName"].toString());
+                QJsonObject sessionInfo;
+                sessionInfo["agentName"] = activeSessionAgentName();
+                result = sessionInfo;
+            } else {
+                result = dispatch(method, params);
+            }
             response["result"] = result;
         } catch (const std::exception &e) {
             QJsonObject error;
@@ -1074,6 +1091,12 @@ public slots:
         }
 
         return response;
+    }
+
+public:
+    void onClientDisconnected(const QString &sessionId)
+    {
+        removeSessionInfo(sessionId);
     }
 
 private:
@@ -1150,6 +1173,16 @@ private:
             update();
         }
 
+        void setSharedAgentName(const QString &agentName)
+        {
+            const QString normalized = agentName.trimmed();
+            if (m_sharedAgentName == normalized)
+                return;
+            m_sharedAgentName = normalized;
+            syncToWindow(true);
+            update();
+        }
+
         void closeOverlay()
         {
             m_timer.stop();
@@ -1170,6 +1203,29 @@ private:
 
             const QColor coreColor(20, 132, 255, 180);
             const QColor ringColor(20, 132, 255, 220);
+            const QColor frameColor(20, 132, 255, 215);
+
+            if (!m_sharedAgentName.isEmpty()) {
+                const QRect frameRect = rect().adjusted(3, 3, -3, -3);
+                painter.setPen(QPen(frameColor, 3));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawRoundedRect(frameRect, 14, 14);
+
+                const QString labelText = QStringLiteral("Shared with Agent %1").arg(m_sharedAgentName);
+                const QFontMetrics metrics = painter.fontMetrics();
+                const int badgeWidth = metrics.horizontalAdvance(labelText) + 28;
+                const int badgeHeight = metrics.height() + 14;
+                const QRect badgeRect(14, 14, badgeWidth, badgeHeight);
+
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(9, 29, 61, 224));
+                painter.drawRoundedRect(badgeRect, 10, 10);
+                painter.setPen(QPen(frameColor, 1));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawRoundedRect(badgeRect, 10, 10);
+                painter.setPen(QColor(255, 255, 255, 245));
+                painter.drawText(badgeRect.adjusted(14, 0, -14, 0), Qt::AlignVCenter | Qt::AlignLeft, labelText);
+            }
 
             const qint64 now = m_clock.elapsed();
             for (const PulseRecord &pulse : m_pulses) {
@@ -1249,6 +1305,7 @@ private:
         }
 
         QPointer<QWidget> m_targetWindow;
+        QString m_sharedAgentName;
         QPoint m_cursorPos;
         bool m_cursorPosValid = false;
         QVector<PulseRecord> m_pulses;
@@ -1272,6 +1329,17 @@ private:
                 return;
             }
             syncVisibility();
+        }
+
+        void setSharedAgentName(const QString &agentName)
+        {
+            m_sharedAgentName = agentName.trimmed();
+            for (auto it = m_overlays.begin(); it != m_overlays.end(); ++it) {
+                if (!it.value().isNull())
+                    it.value()->setSharedAgentName(m_sharedAgentName);
+            }
+            if (!m_sharedAgentName.isEmpty())
+                syncVisibility();
         }
 
         void moveCursor(QWidget *widget, const QPoint &localPos, int pulseCount)
@@ -1347,9 +1415,13 @@ private:
         {
             auto it = m_overlays.find(targetWindow);
             if (it != m_overlays.end() && !it.value().isNull())
+            {
+                it.value()->setSharedAgentName(m_sharedAgentName);
                 return it.value().data();
+            }
 
             AutomationOverlay *overlay = new AutomationOverlay(targetWindow);
+            overlay->setSharedAgentName(m_sharedAgentName);
             m_overlays.insert(targetWindow, overlay);
             targetWindow->removeEventFilter(this);
             targetWindow->installEventFilter(this);
@@ -1380,6 +1452,24 @@ private:
 
         void syncVisibility()
         {
+            if (m_enabled && !m_sharedAgentName.isEmpty()) {
+                QWidget *activeWindow = QApplication::activeWindow();
+                if (activeWindow && !activeWindow->property(kAutomationOverlayProperty).toBool() && activeWindow->isVisible()) {
+                    m_activeWindow = activeWindow;
+                } else if (!m_activeWindow) {
+                    const auto windows = QApplication::topLevelWidgets();
+                    for (QWidget *window : windows) {
+                        if (!window->property(kAutomationOverlayProperty).toBool() && window->isVisible()) {
+                            m_activeWindow = window;
+                            break;
+                        }
+                    }
+                }
+
+                if (m_activeWindow)
+                    ensureOverlay(m_activeWindow);
+            }
+
             QList<QWidget *> staleKeys;
             for (auto it = m_overlays.begin(); it != m_overlays.end(); ++it) {
                 AutomationOverlay *overlay = it.value().data();
@@ -1394,6 +1484,8 @@ private:
                     continue;
                 }
 
+                overlay->setSharedAgentName(m_sharedAgentName);
+
                 if (m_enabled && targetWindow == m_activeWindow && targetWindow->isVisible())
                     overlay->syncToWindow();
                 else
@@ -1405,6 +1497,7 @@ private:
         }
 
         bool m_enabled = false;
+        QString m_sharedAgentName;
         QHash<QWidget *, QPointer<AutomationOverlay>> m_overlays;
         QPointer<QWidget> m_activeWindow;
     };
@@ -1433,6 +1526,69 @@ private:
         if (!m_overlayManager)
             m_overlayManager = new AutomationOverlayManager(this);
         return m_overlayManager;
+    }
+
+    void syncSessionOverlayState()
+    {
+        if (!m_visualFeedbackEnabled)
+            return;
+
+        ensureOverlayManager()->setEnabled(true);
+        ensureOverlayManager()->setSharedAgentName(activeSessionAgentName());
+    }
+
+    QString activeSessionAgentName() const
+    {
+        if (!m_activeSessionId.isEmpty()) {
+            auto it = m_sessionAgentNames.constFind(m_activeSessionId);
+            if (it != m_sessionAgentNames.constEnd())
+                return it.value();
+        }
+        if (!m_sessionAgentNames.isEmpty())
+            return m_sessionAgentNames.constBegin().value();
+        return QString();
+    }
+
+    void setSessionInfo(const QString &sessionId, const QString &agentName)
+    {
+        if (sessionId.isEmpty())
+            return;
+
+        const QString normalizedAgentName = agentName.trimmed();
+        if (normalizedAgentName.isEmpty()) {
+            m_sessionAgentNames.remove(sessionId);
+            if (m_activeSessionId == sessionId)
+                m_activeSessionId.clear();
+        } else {
+            m_sessionAgentNames.insert(sessionId, normalizedAgentName);
+            m_activeSessionId = sessionId;
+        }
+
+        if (m_activeSessionId.isEmpty() && !m_sessionAgentNames.isEmpty())
+            m_activeSessionId = m_sessionAgentNames.constBegin().key();
+
+        syncSessionOverlayState();
+    }
+
+    void markSessionActive(const QString &sessionId)
+    {
+        if (sessionId.isEmpty() || !m_sessionAgentNames.contains(sessionId) || m_activeSessionId == sessionId)
+            return;
+        m_activeSessionId = sessionId;
+        syncSessionOverlayState();
+    }
+
+    void removeSessionInfo(const QString &sessionId)
+    {
+        if (sessionId.isEmpty())
+            return;
+
+        m_sessionAgentNames.remove(sessionId);
+        if (m_activeSessionId == sessionId)
+            m_activeSessionId.clear();
+        if (m_activeSessionId.isEmpty() && !m_sessionAgentNames.isEmpty())
+            m_activeSessionId = m_sessionAgentNames.constBegin().key();
+        syncSessionOverlayState();
     }
 
     void updateVisualFeedback(QWidget *target, const QPoint &localPos, int pulseCount = 0)
@@ -2220,6 +2376,8 @@ private:
 
     bool m_visualFeedbackEnabled = false;
     QPointer<AutomationOverlayManager> m_overlayManager;
+    QHash<QString, QString> m_sessionAgentNames;
+    QString m_activeSessionId;
 };
 
 // -------------------------------------------------------------------------- //
@@ -2231,7 +2389,7 @@ class QPlaywrightClientConnection : public QObject
     Q_OBJECT
 public:
     QPlaywrightClientConnection(QTcpSocket *socket, QPlaywrightHandler *handler, QObject *parent = nullptr)
-        : QObject(parent), m_socket(socket), m_handler(handler)
+        : QObject(parent), m_socket(socket), m_handler(handler), m_sessionId(QString::number(socket->socketDescriptor()))
     {
         connect(m_socket, &QTcpSocket::readyRead, this, &QPlaywrightClientConnection::onReadyRead);
         connect(m_socket, &QTcpSocket::disconnected, this, &QPlaywrightClientConnection::onDisconnected);
@@ -2253,6 +2411,13 @@ private slots:
     void onDisconnected()
     {
         qDebug() << "[QPlaywright] Client disconnected";
+        QMetaObject::invokeMethod(
+            m_handler,
+            [handler = m_handler, sessionId = m_sessionId] {
+                handler->onClientDisconnected(sessionId);
+            },
+            Qt::BlockingQueuedConnection
+        );
         deleteLater();
     }
 
@@ -2267,6 +2432,9 @@ private:
         }
 
         QJsonObject request = doc.object();
+    QJsonObject params = request["params"].toObject();
+    params["_sessionId"] = m_sessionId;
+    request["params"] = params;
 
         // Invoke handler on the main thread (BlockingQueuedConnection ensures
         // we wait for the result while the handler runs on the GUI thread)
@@ -2304,6 +2472,7 @@ private:
     QTcpSocket *m_socket;
     QPlaywrightHandler *m_handler;
     QByteArray m_buffer;
+    QString m_sessionId;
 };
 
 // -------------------------------------------------------------------------- //

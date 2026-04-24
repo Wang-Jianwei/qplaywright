@@ -65,6 +65,7 @@ from qplaywright.protocol import (
     METHOD_WINDOW_CLOSE,
     METHOD_WAIT_FOR,
     METHOD_PING,
+    METHOD_SET_SESSION_INFO,
 )
 from qplaywright.agent._selector import (
     find_widgets,
@@ -99,6 +100,64 @@ _AUTOMATION_OVERLAY_OBJECT_NAME = "_qplaywright_automation_overlay"
 _AUTOMATION_OVERLAY_PROPERTY = "qplaywrightAutomationOverlay"
 _OVERLAY_MANAGER = None
 _OverlayManagerClass = None
+_SESSION_AGENT_NAMES: dict[str, str] = {}
+_ACTIVE_SESSION_ID: str | None = None
+
+
+def _active_session_agent_name() -> str:
+    if _ACTIVE_SESSION_ID and _ACTIVE_SESSION_ID in _SESSION_AGENT_NAMES:
+        return _SESSION_AGENT_NAMES[_ACTIVE_SESSION_ID]
+    if _SESSION_AGENT_NAMES:
+        fallback_session_id = next(reversed(_SESSION_AGENT_NAMES))
+        return _SESSION_AGENT_NAMES[fallback_session_id]
+    return ""
+
+
+def _sync_overlay_session_agent_name() -> None:
+    manager = _ensure_overlay_manager() if _VISUAL_FEEDBACK_ENABLED else _OVERLAY_MANAGER
+    if manager is not None:
+        manager.set_session_agent_name(_active_session_agent_name())
+
+
+def _set_session_agent_name(session_id: str, agent_name: str) -> None:
+    global _ACTIVE_SESSION_ID
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+
+    normalized_agent_name = str(agent_name or "").strip()
+    if normalized_agent_name:
+        _SESSION_AGENT_NAMES[normalized_session_id] = normalized_agent_name
+        _ACTIVE_SESSION_ID = normalized_session_id
+    else:
+        _SESSION_AGENT_NAMES.pop(normalized_session_id, None)
+        if _ACTIVE_SESSION_ID == normalized_session_id:
+            _ACTIVE_SESSION_ID = next(reversed(_SESSION_AGENT_NAMES), None)
+
+    _sync_overlay_session_agent_name()
+
+
+def _mark_session_active(session_id: str) -> None:
+    global _ACTIVE_SESSION_ID
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id or normalized_session_id not in _SESSION_AGENT_NAMES:
+        return
+    if _ACTIVE_SESSION_ID == normalized_session_id:
+        return
+    _ACTIVE_SESSION_ID = normalized_session_id
+    _sync_overlay_session_agent_name()
+
+
+def _remove_session_agent_name(session_id: str) -> None:
+    global _ACTIVE_SESSION_ID
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+
+    _SESSION_AGENT_NAMES.pop(normalized_session_id, None)
+    if _ACTIVE_SESSION_ID == normalized_session_id:
+        _ACTIVE_SESSION_ID = next(reversed(_SESSION_AGENT_NAMES), None)
+    _sync_overlay_session_agent_name()
 
 
 def _import_qt():
@@ -156,6 +215,7 @@ def _create_overlay_manager_class():
             super().__init__(None)
             self._target_window = target_window
             self._cursor_pos = None
+            self._session_agent_name = ""
             self._pulse_span = 0.22
             self._pulse_gap = 0.08
             self._pulse_records: list[tuple[float, Any, int]] = []
@@ -207,6 +267,14 @@ def _create_overlay_manager_class():
             self.sync_to_window(force_raise=True)
             self.update()
 
+        def set_session_agent_name(self, agent_name: str) -> None:
+            normalized = str(agent_name or "").strip()
+            if self._session_agent_name == normalized:
+                return
+            self._session_agent_name = normalized
+            self.sync_to_window(force_raise=True)
+            self.update()
+
         def close_overlay(self) -> None:
             self._timer.stop()
             self.hide()
@@ -230,6 +298,28 @@ def _create_overlay_manager_class():
 
             core_color = QColor(20, 132, 255, 180)
             ring_base = QColor(20, 132, 255, 220)
+            frame_color = QColor(20, 132, 255, 215)
+
+            if self._session_agent_name:
+                frame_rect = self.rect().adjusted(3, 3, -3, -3)
+                painter.setPen(QPen(frame_color, 3))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRoundedRect(frame_rect, 14, 14)
+
+                label_text = f"Shared with Agent {self._session_agent_name}"
+                metrics = painter.fontMetrics()
+                badge_width = metrics.horizontalAdvance(label_text) + 28
+                badge_height = metrics.height() + 14
+                badge_rect = self.rect().adjusted(14, 14, -(self.width() - 14 - badge_width), -(self.height() - 14 - badge_height))
+
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(9, 29, 61, 224))
+                painter.drawRoundedRect(badge_rect, 10, 10)
+                painter.setPen(QPen(frame_color, 1))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRoundedRect(badge_rect, 10, 10)
+                painter.setPen(QColor(255, 255, 255, 245))
+                painter.drawText(badge_rect.adjusted(14, 0, -14, 0), Qt.AlignVCenter | Qt.AlignLeft, label_text)
 
             for started_at, center, pulse_count in self._pulse_records:
                 elapsed = time.monotonic() - started_at
@@ -289,6 +379,7 @@ def _create_overlay_manager_class():
             self._app = app
             self._overlays: dict[int, Any] = {}
             self._active_window_id: int | None = None
+            self._session_agent_name = ""
             self._timer = QTimer(self)
             self._timer.timeout.connect(self._sync)
             self._timer.start(16)
@@ -307,13 +398,37 @@ def _create_overlay_manager_class():
             overlay = self._ensure_overlay(target_window)
             overlay.set_cursor_from_global(widget.mapToGlobal(pos), pulse_count=pulse_count)
 
+        def set_session_agent_name(self, agent_name: str) -> None:
+            normalized = str(agent_name or "").strip()
+            self._session_agent_name = normalized
+            for overlay in list(self._overlays.values()):
+                overlay.set_session_agent_name(normalized)
+            if normalized:
+                self._ensure_active_overlay()
+            self._sync()
+
+        def _ensure_active_overlay(self) -> None:
+            active_window = self._app.activeWindow() if hasattr(self._app, "activeWindow") else None
+            if active_window is not None and (_is_automation_overlay_widget(active_window) or not active_window.isVisible()):
+                active_window = None
+            if active_window is None:
+                visible_windows = _get_top_level_widgets()
+                if visible_windows:
+                    active_window = visible_windows[0]
+            if active_window is None:
+                return
+            self._active_window_id = id(active_window)
+            self._ensure_overlay(active_window)
+
         def _ensure_overlay(self, target_window):
             window_id = id(target_window)
             overlay = self._overlays.get(window_id)
             if overlay is not None:
+                overlay.set_session_agent_name(self._session_agent_name)
                 return overlay
 
             overlay = _AutomationOverlay(target_window)
+            overlay.set_session_agent_name(self._session_agent_name)
             self._overlays[window_id] = overlay
             target_window.destroyed.connect(lambda *_args, wid=window_id: self._drop_overlay(wid))
             overlay.sync_to_window()
@@ -325,7 +440,9 @@ def _create_overlay_manager_class():
                 overlay.close_overlay()
 
         def _sync(self) -> None:
-            if self._active_window_id is None:
+            if self._session_agent_name:
+                self._ensure_active_overlay()
+            elif self._active_window_id is None:
                 visible_windows = _get_top_level_widgets()
                 if visible_windows:
                     self._active_window_id = id(visible_windows[0])
@@ -626,13 +743,20 @@ def _handle_command(req: Request) -> Any:
     """Execute a command on the Qt main thread. Returns JSON-serializable result."""
     _import_qt()
     method = req.method
-    params = req.params
+    params = dict(req.params)
+    session_id = params.pop("_sessionId", "")
+    if session_id:
+        _mark_session_active(session_id)
     Qt = _QtCore.Qt
     QCursor = _QtGui.QCursor
 
     # -- Ping ----------------------------------------------------------------
     if method == METHOD_PING:
         return {"pong": True}
+
+    if method == METHOD_SET_SESSION_INFO:
+        _set_session_agent_name(str(session_id), str(params.get("agentName", "") or ""))
+        return {"agentName": _active_session_agent_name()}
 
     # -- Widget discovery ----------------------------------------------------
     if method == METHOD_FIND:
@@ -1276,6 +1400,7 @@ class _ClientHandler(threading.Thread):
         self.dispatcher = dispatcher
         self.command_event_cls = command_event_cls
         self._running = True
+        self._session_id = f"{addr[0]}:{addr[1]}:{id(self)}"
 
     def run(self):
         logger.info("Client connected: %s", self.addr)
@@ -1295,12 +1420,14 @@ class _ClientHandler(threading.Thread):
             pass
         finally:
             logger.info("Client disconnected: %s", self.addr)
+            _remove_session_agent_name(self._session_id)
             self.conn.close()
 
     def _process_line(self, line: bytes):
         try:
             d = decode_line(line)
             req = Request.from_dict(d)
+            req.params["_sessionId"] = self._session_id
         except Exception as e:
             resp = Response(id=0, error=f"Invalid request: {e}")
             self._send(resp)

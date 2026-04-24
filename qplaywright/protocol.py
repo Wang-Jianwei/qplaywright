@@ -317,6 +317,7 @@ METHOD_WINDOW_CLOSE = "window_close"
 # Utility
 METHOD_WAIT_FOR = "wait_for"
 METHOD_PING = "ping"
+METHOD_SET_SESSION_INFO = "set_session_info"
 
 
 # --------------------------------------------------------------------------- #

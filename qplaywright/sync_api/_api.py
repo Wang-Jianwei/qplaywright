@@ -22,6 +22,7 @@ from qplaywright.protocol import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     METHOD_PING,
+    METHOD_SET_SESSION_INFO,
     METHOD_LIST_WINDOWS,
     METHOD_WIDGET_TREE,
     METHOD_SCREENSHOT,
@@ -269,6 +270,7 @@ class QPlaywright:
         port: int = DEFAULT_PORT,
         *,
         timeout: float = 30.0,
+        agent_name: str | None = None,
     ) -> Application:
         """Connect to a running Qt application with QPlaywright agent embedded.
 
@@ -276,6 +278,8 @@ class QPlaywright:
             host: Agent host address.
             port: Agent port.
             timeout: Default timeout for operations (seconds).
+            agent_name: Optional label advertised to the Qt-side overlay when
+                visual feedback is enabled.
 
         Returns:
             An Application instance.
@@ -290,6 +294,8 @@ class QPlaywright:
                 conn.connect()
                 # Verify with ping
                 conn.send(METHOD_PING)
+                if agent_name:
+                    conn.send(METHOD_SET_SESSION_INFO, {"agentName": agent_name})
                 return Application(conn, timeout=timeout)
             except (ConnectionRefusedError, ConnectionError, OSError) as e:
                 last_error = e
@@ -307,6 +313,7 @@ class QPlaywright:
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
         timeout: float = 30.0,
+        agent_name: str | None = None,
     ) -> Application:
         """Launch a Qt application and connect to its agent.
 
@@ -318,12 +325,14 @@ class QPlaywright:
             host: Agent host address.
             port: Agent port.
             timeout: Connection timeout in seconds.
+            agent_name: Optional label advertised to the Qt-side overlay when
+                visual feedback is enabled.
 
         Returns:
             An Application instance.
         """
         self._process = subprocess.Popen([executable, *args])
-        return self.connect(host=host, port=port, timeout=timeout)
+        return self.connect(host=host, port=port, timeout=timeout, agent_name=agent_name)
 
     def close(self) -> None:
         """Clean up resources."""

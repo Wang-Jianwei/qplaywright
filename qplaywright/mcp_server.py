@@ -233,14 +233,16 @@ def connect_connection(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     timeout: float = 30.0,
+    agent_name: str | None = None,
 ) -> ManagedConnection:
     if state.connection is not None:
         state.connection.close()
 
     qplaywright = QPlaywright()
-    app = qplaywright.connect(host=host, port=port, timeout=timeout)
+    connection_name = (agent_name or "default").strip() or "default"
+    app = qplaywright.connect(host=host, port=port, timeout=timeout, agent_name=agent_name)
     connection = ManagedConnection(
-        name="default",
+        name=connection_name,
         qplaywright=qplaywright,
         app=app,
         host=host,
@@ -260,14 +262,23 @@ def launch_connection(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     timeout: float = 30.0,
+    agent_name: str | None = None,
 ) -> ManagedConnection:
     if state.connection is not None:
         state.connection.close()
 
     qplaywright = QPlaywright()
-    app = qplaywright.launch(executable, *(args or ()), host=host, port=port, timeout=timeout)
+    connection_name = (agent_name or "default").strip() or "default"
+    app = qplaywright.launch(
+        executable,
+        *(args or ()),
+        host=host,
+        port=port,
+        timeout=timeout,
+        agent_name=agent_name,
+    )
     connection = ManagedConnection(
-        name="default",
+        name=connection_name,
         qplaywright=qplaywright,
         app=app,
         host=host,
@@ -745,6 +756,7 @@ if FastMCP is not None:
         timeout: float = 30.0,
         executable: str | None = None,
         args: list[str] | None = None,
+        agent_name: str | None = "GitHub Copilot",
     ) -> dict[str, Any]:
         """Manage the active qplaywright session.
 
@@ -756,7 +768,13 @@ if FastMCP is not None:
         """
 
         if action == "attach":
-            connection_state = connect_connection(_SERVER_STATE, host=host, port=port, timeout=timeout)
+            connection_state = connect_connection(
+                _SERVER_STATE,
+                host=host,
+                port=port,
+                timeout=timeout,
+                agent_name=agent_name,
+            )
             windows = _window_summary(connection_state)
             return {
                 "ok": True,
@@ -775,6 +793,7 @@ if FastMCP is not None:
                 host=host,
                 port=port,
                 timeout=timeout,
+                agent_name=agent_name,
             )
             windows = _window_summary(connection_state)
             return {
