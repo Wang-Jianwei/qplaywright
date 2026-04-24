@@ -75,6 +75,7 @@
 #include <QStringList>
 #include <QVariant>
 #include <QVector>
+#include <QHash>
 
 #include <functional>
 
@@ -1045,17 +1046,8 @@ public:
     void setVisualFeedbackEnabled(bool enabled)
     {
         m_visualFeedbackEnabled = enabled;
-        if (!m_visualFeedbackEnabled) {
-            closeAutomationOverlay();
-            m_overlaySyncTimer.stop();
-            return;
-        }
-
-        if (!m_overlaySyncTimer.isActive()) {
-            m_overlaySyncTimer.setInterval(16);
-            QObject::connect(&m_overlaySyncTimer, &QTimer::timeout, this, &QPlaywrightHandler::syncAutomationOverlay, Qt::UniqueConnection);
-            m_overlaySyncTimer.start();
-        }
+        if (m_overlayManager)
+            m_overlayManager->setEnabled(enabled);
     }
 
 public slots:
@@ -1099,8 +1091,14 @@ private:
     {
     public:
         explicit AutomationOverlay(QWidget *targetWindow)
-            : QWidget(targetWindow), m_targetWindow(targetWindow)
+            : QWidget(nullptr), m_targetWindow(targetWindow)
         {
+            setWindowFlags(
+                Qt::Tool
+                | Qt::FramelessWindowHint
+                | Qt::WindowStaysOnTopHint
+                | Qt::WindowTransparentForInput
+            );
             setAttribute(Qt::WA_TransparentForMouseEvents, true);
             setAttribute(Qt::WA_NoSystemBackground, true);
             setAttribute(Qt::WA_TranslucentBackground, true);
@@ -1120,7 +1118,8 @@ private:
                 return;
             }
 
-            const QRect targetRect = m_targetWindow->rect();
+            const QPoint topLeft = m_targetWindow->mapToGlobal(m_targetWindow->rect().topLeft());
+            const QRect targetRect(topLeft, m_targetWindow->size());
             if (geometry() != targetRect) {
                 setGeometry(targetRect);
             }
@@ -1257,6 +1256,159 @@ private:
         QElapsedTimer m_clock;
     };
 
+    class AutomationOverlayManager : public QObject
+    {
+    public:
+        explicit AutomationOverlayManager(QObject *parent = nullptr)
+            : QObject(parent)
+        {
+        }
+
+        void setEnabled(bool enabled)
+        {
+            m_enabled = enabled;
+            if (!m_enabled) {
+                closeAll();
+                return;
+            }
+            syncVisibility();
+        }
+
+        void moveCursor(QWidget *widget, const QPoint &localPos, int pulseCount)
+        {
+            if (!m_enabled || !widget)
+                return;
+
+            QWidget *targetWindow = widget->window();
+            if (!targetWindow)
+                return;
+
+            m_activeWindow = targetWindow;
+            AutomationOverlay *overlay = ensureOverlay(targetWindow);
+            if (!overlay)
+                return;
+
+            syncVisibility();
+            overlay->setCursorFromGlobal(widget->mapToGlobal(localPos), pulseCount);
+        }
+
+        AutomationOverlay *overlayForWindow(QWidget *targetWindow) const
+        {
+            auto it = m_overlays.find(targetWindow);
+            if (it == m_overlays.end() || it.value().isNull())
+                return nullptr;
+            return it.value().data();
+        }
+
+        void closeAll()
+        {
+            const QList<QWidget *> keys = m_overlays.keys();
+            for (QWidget *targetWindow : keys)
+                dropOverlay(targetWindow);
+            m_activeWindow = nullptr;
+        }
+
+    protected:
+        bool eventFilter(QObject *watched, QEvent *event) override
+        {
+            QWidget *targetWindow = qobject_cast<QWidget *>(watched);
+            if (!targetWindow)
+                return QObject::eventFilter(watched, event);
+
+            AutomationOverlay *overlay = overlayForWindow(targetWindow);
+            if (!overlay)
+                return QObject::eventFilter(watched, event);
+
+            switch (event->type()) {
+            case QEvent::Move:
+            case QEvent::Resize:
+            case QEvent::Show:
+            case QEvent::WindowStateChange:
+                if (m_enabled && targetWindow == m_activeWindow && targetWindow->isVisible())
+                    overlay->syncToWindow(event->type() == QEvent::Show);
+                else
+                    overlay->hide();
+                break;
+            case QEvent::Hide:
+            case QEvent::Close:
+                overlay->hide();
+                if (targetWindow == m_activeWindow)
+                    m_activeWindow = nullptr;
+                break;
+            default:
+                break;
+            }
+
+            return QObject::eventFilter(watched, event);
+        }
+
+    private:
+        AutomationOverlay *ensureOverlay(QWidget *targetWindow)
+        {
+            auto it = m_overlays.find(targetWindow);
+            if (it != m_overlays.end() && !it.value().isNull())
+                return it.value().data();
+
+            AutomationOverlay *overlay = new AutomationOverlay(targetWindow);
+            m_overlays.insert(targetWindow, overlay);
+            targetWindow->removeEventFilter(this);
+            targetWindow->installEventFilter(this);
+            QObject::connect(targetWindow, &QObject::destroyed, this, [this, targetWindow] {
+                dropOverlay(targetWindow, false);
+            });
+            return overlay;
+        }
+
+        void dropOverlay(QWidget *targetWindow, bool removeFilter = true)
+        {
+            auto it = m_overlays.find(targetWindow);
+            if (it == m_overlays.end())
+                return;
+
+            if (removeFilter && targetWindow)
+                targetWindow->removeEventFilter(this);
+
+            if (!it.value().isNull()) {
+                it.value()->closeOverlay();
+                it.value()->deleteLater();
+            }
+
+            m_overlays.erase(it);
+            if (targetWindow == m_activeWindow)
+                m_activeWindow = nullptr;
+        }
+
+        void syncVisibility()
+        {
+            QList<QWidget *> staleKeys;
+            for (auto it = m_overlays.begin(); it != m_overlays.end(); ++it) {
+                AutomationOverlay *overlay = it.value().data();
+                if (!overlay) {
+                    staleKeys.append(it.key());
+                    continue;
+                }
+
+                QWidget *targetWindow = overlay->targetWindow();
+                if (!targetWindow) {
+                    staleKeys.append(it.key());
+                    continue;
+                }
+
+                if (m_enabled && targetWindow == m_activeWindow && targetWindow->isVisible())
+                    overlay->syncToWindow();
+                else
+                    overlay->hide();
+            }
+
+            for (QWidget *staleKey : staleKeys)
+                dropOverlay(staleKey, false);
+        }
+
+        bool m_enabled = false;
+        QHash<QWidget *, QPointer<AutomationOverlay>> m_overlays;
+        QPointer<QWidget> m_activeWindow;
+    };
+
     bool isAutomationOverlayWidget(QWidget *widget) const
     {
         if (!widget)
@@ -1276,36 +1428,11 @@ private:
         return widgets;
     }
 
-    void closeAutomationOverlay()
+    AutomationOverlayManager *ensureOverlayManager()
     {
-        if (m_overlay) {
-            m_overlay->closeOverlay();
-            m_overlay->deleteLater();
-            m_overlay = nullptr;
-        }
-    }
-
-    void syncAutomationOverlay()
-    {
-        if (!m_visualFeedbackEnabled) {
-            closeAutomationOverlay();
-            return;
-        }
-
-        if (!m_activeOverlayWindow || !m_activeOverlayWindow->isVisible()) {
-            m_activeOverlayWindow = nullptr;
-            closeAutomationOverlay();
-            return;
-        }
-
-        if (!m_overlay || m_overlay->targetWindow() != m_activeOverlayWindow) {
-            QWidget *targetWindow = m_activeOverlayWindow;
-            closeAutomationOverlay();
-            m_activeOverlayWindow = targetWindow;
-            m_overlay = new AutomationOverlay(targetWindow);
-        }
-
-        m_overlay->syncToWindow();
+        if (!m_overlayManager)
+            m_overlayManager = new AutomationOverlayManager(this);
+        return m_overlayManager;
     }
 
     void updateVisualFeedback(QWidget *target, const QPoint &localPos, int pulseCount = 0)
@@ -1313,12 +1440,8 @@ private:
         if (!m_visualFeedbackEnabled || !target)
             return;
 
-        m_activeOverlayWindow = target->window();
-        syncAutomationOverlay();
-        if (!m_overlay)
-            return;
-
-        m_overlay->setCursorFromGlobal(target->mapToGlobal(localPos), pulseCount);
+        ensureOverlayManager()->setEnabled(true);
+        ensureOverlayManager()->moveCursor(target, localPos, pulseCount);
         QApplication::processEvents();
     }
 
@@ -1650,12 +1773,13 @@ private:
             const bool hasClipHeight = params.contains("height") && !params.value("height").isNull();
 
             QPixmap pixmap;
+            AutomationOverlay *overlay = m_overlayManager ? m_overlayManager->overlayForWindow(w->window()) : nullptr;
             const bool hideOverlayForCapture =
-                m_overlay &&
-                m_overlay->isVisible() &&
-                m_overlay->targetWindow() == w->window();
+                overlay &&
+                overlay->isVisible() &&
+                overlay->targetWindow() == w->window();
             if (hideOverlayForCapture) {
-                m_overlay->hide();
+                overlay->hide();
                 QApplication::processEvents();
             }
             if (hasClipX || hasClipY || hasClipWidth || hasClipHeight) {
@@ -1674,9 +1798,8 @@ private:
                 pixmap = w->grab();
             }
             if (hideOverlayForCapture) {
-                m_overlay->show();
-                m_overlay->raise();
-                m_overlay->update();
+                overlay->syncToWindow(true);
+                overlay->update();
                 QApplication::processEvents();
             }
             QString path = params["path"].toString();
@@ -2071,9 +2194,7 @@ private:
     }
 
     bool m_visualFeedbackEnabled = false;
-    QTimer m_overlaySyncTimer;
-    QPointer<QWidget> m_activeOverlayWindow;
-    QPointer<AutomationOverlay> m_overlay;
+    QPointer<AutomationOverlayManager> m_overlayManager;
 };
 
 // -------------------------------------------------------------------------- //
