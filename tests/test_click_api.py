@@ -30,6 +30,20 @@ class FakeMetaObject:
         return self._class_name
 
 
+class FakeMaskRegion:
+    def __init__(self, *, empty: bool = True, contains=None):
+        self._empty = empty
+        self._contains = contains
+
+    def isEmpty(self) -> bool:
+        return self._empty
+
+    def contains(self, point: FakePoint) -> bool:
+        if self._contains is None:
+            return True
+        return bool(self._contains(point))
+
+
 class FakeClickWidget:
     def __init__(
         self,
@@ -41,6 +55,8 @@ class FakeClickWidget:
         global_origin: FakePoint = FakePoint(100, 200),
         center: FakePoint = FakePoint(10, 12),
         size: tuple[int, int] = (40, 40),
+        mask_region: FakeMaskRegion | None = None,
+        mouse_transparent: bool = False,
     ):
         self._class_name = class_name
         self._parent = parent
@@ -49,6 +65,8 @@ class FakeClickWidget:
         self._global_origin = global_origin
         self._center = center
         self._size = size
+        self._mask_region = mask_region or FakeMaskRegion()
+        self._mouse_transparent = mouse_transparent
         self._child = None
         self._viewport = None
         self.focus_calls: list[tuple[object, ...]] = []
@@ -70,6 +88,12 @@ class FakeClickWidget:
 
     def height(self) -> int:
         return self._size[1]
+
+    def mask(self):
+        return self._mask_region
+
+    def testAttribute(self, attribute) -> bool:
+        return attribute == "transparent" and self._mouse_transparent
 
     def mapToGlobal(self, point: FakePoint) -> FakePoint:
         return FakePoint(self._global_origin.x + point.x, self._global_origin.y + point.y)
@@ -137,7 +161,14 @@ def _install_fake_qt(monkeypatch, *, widget_at=None):
     monkeypatch.setattr(
         server,
         "_QtCore",
-        SimpleNamespace(Qt=SimpleNamespace(LeftButton="left", NoModifier="none", MouseFocusReason="mouse")),
+        SimpleNamespace(
+            Qt=SimpleNamespace(
+                LeftButton="left",
+                NoModifier="none",
+                MouseFocusReason="mouse",
+                WA_TransparentForMouseEvents="transparent",
+            )
+        ),
     )
 
 
@@ -210,5 +241,53 @@ def test_is_topmost_visible_widget_accepts_partial_visibility_when_non_center_sa
         return widget
 
     _install_fake_qt(monkeypatch, widget_at=widget_at)
+
+    assert server._is_topmost_visible_widget(widget) is True
+
+
+def test_is_topmost_visible_widget_ignores_samples_outside_mask(monkeypatch):
+    masked_hole = FakeMaskRegion(empty=False, contains=lambda point: point == FakePoint(0, 0))
+    widget = FakeClickWidget(
+        "QPushButton",
+        global_origin=FakePoint(100, 200),
+        center=FakePoint(20, 20),
+        size=(40, 40),
+        mask_region=masked_hole,
+    )
+
+    _install_fake_qt(monkeypatch, widget_at=None)
+
+    assert server._is_topmost_visible_widget(widget) is False
+
+
+def test_resolve_click_target_rejects_masked_center(monkeypatch):
+    masked_hole = FakeMaskRegion(empty=False, contains=lambda point: point != FakePoint(10, 12))
+    widget = FakeClickWidget("QPushButton", mask_region=masked_hole)
+
+    _install_fake_qt(monkeypatch, widget_at=None)
+
+    with pytest.raises(ValueError, match="masked out"):
+        server._resolve_click_target(widget)
+
+
+def test_resolve_click_target_skips_mouse_transparent_hit(monkeypatch):
+    transparent_overlay = FakeClickWidget("DecorationOverlay", mouse_transparent=True)
+    widget = FakeClickWidget("QPushButton")
+    widget.setChildAt(transparent_overlay)
+
+    _install_fake_qt(monkeypatch, widget_at=transparent_overlay)
+
+    target, pos = server._resolve_click_target(widget)
+
+    assert target is widget
+    assert pos == FakePoint(10, 12)
+
+
+def test_is_topmost_visible_widget_ignores_mouse_transparent_hit(monkeypatch):
+    transparent_overlay = FakeClickWidget("DecorationOverlay", mouse_transparent=True)
+    widget = FakeClickWidget("QPushButton")
+    widget.setChildAt(transparent_overlay)
+
+    _install_fake_qt(monkeypatch, widget_at=transparent_overlay)
 
     assert server._is_topmost_visible_widget(widget) is True

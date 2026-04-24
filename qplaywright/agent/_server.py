@@ -194,6 +194,24 @@ def _is_automation_overlay_widget(widget) -> bool:
     return bool(_qt_property(widget, _AUTOMATION_OVERLAY_PROPERTY))
 
 
+def _is_mouse_transparent_widget(widget) -> bool:
+    if widget is None or _QtCore is None:
+        return False
+
+    qt = getattr(_QtCore, "Qt", None)
+    attribute = getattr(qt, "WA_TransparentForMouseEvents", None)
+    if attribute is None:
+        return False
+
+    test_attribute = getattr(widget, "testAttribute", None)
+    if callable(test_attribute):
+        try:
+            return bool(test_attribute(attribute))
+        except Exception:
+            return False
+    return False
+
+
 def _create_overlay_manager_class():
     _import_qt()
     assert _QtWidgets is not None
@@ -1078,6 +1096,25 @@ def _offset_point(point, dx: int, dy: int):
     return point_type(x_value + dx, y_value + dy)
 
 
+def _point_within_widget_mask(widget, local_point) -> bool:
+    mask_fn = getattr(widget, "mask", None)
+    if not callable(mask_fn):
+        return True
+
+    region = mask_fn()
+    if region is None:
+        return True
+
+    is_empty = getattr(region, "isEmpty", None)
+    if callable(is_empty) and is_empty():
+        return True
+
+    contains = getattr(region, "contains", None)
+    if callable(contains):
+        return bool(contains(local_point))
+    return True
+
+
 def _sample_local_points(widget) -> list:
     center = widget.rect().center()
 
@@ -1103,16 +1140,21 @@ def _sample_local_points(widget) -> list:
 
 
 def _topmost_hit_at_point(target, local_point):
+    if not _point_within_widget_mask(target, local_point):
+        return None
+
     global_pos = target.mapToGlobal(local_point)
 
     hit = None
     widget_at = getattr(_QApplication, "widgetAt", None)
     if callable(widget_at):
         hit = widget_at(global_pos)
-    if _is_automation_overlay_widget(hit):
+    if _is_automation_overlay_widget(hit) or _is_mouse_transparent_widget(hit):
         hit = None
     if hit is None and hasattr(target, "childAt"):
         hit = target.childAt(local_point)
+    if _is_mouse_transparent_widget(hit):
+        hit = None
     if hit is None:
         hit = target
     return hit
@@ -1128,6 +1170,8 @@ def _is_topmost_visible_widget(widget) -> bool:
 
     for sample_point in _sample_local_points(target):
         hit = _topmost_hit_at_point(target, sample_point)
+        if hit is None:
+            continue
         if hasattr(hit, "isVisible") and not hit.isVisible():
             continue
         if _is_same_or_descendant_widget(hit, target):
@@ -1150,18 +1194,17 @@ def _resolve_click_target(widget):
         )
 
     center = target.rect().center()
+    if not _point_within_widget_mask(target, center):
+        raise ValueError(
+            f"Cannot click widget of type {_widget_class_name(widget)}: center point is masked out"
+        )
     global_pos = target.mapToGlobal(center)
 
-    hit = None
-    widget_at = getattr(_QApplication, "widgetAt", None)
-    if callable(widget_at):
-        hit = widget_at(global_pos)
-    if _is_automation_overlay_widget(hit):
-        hit = None
-    if hit is None and hasattr(target, "childAt"):
-        hit = target.childAt(center)
+    hit = _topmost_hit_at_point(target, center)
     if hit is None:
-        hit = target
+        raise ValueError(
+            f"Cannot click widget of type {_widget_class_name(widget)}: center point does not resolve to an event target"
+        )
 
     if not _is_same_or_descendant_widget(hit, target):
         raise ValueError(

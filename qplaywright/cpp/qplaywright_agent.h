@@ -2196,6 +2196,11 @@ private:
         return false;
     }
 
+    bool isMouseTransparentWidget(QWidget *widget)
+    {
+        return widget && widget->testAttribute(Qt::WA_TransparentForMouseEvents);
+    }
+
     QVector<QPoint> sampleLocalPoints(QWidget *target)
     {
         const QPoint center = target->rect().center();
@@ -2215,15 +2220,28 @@ private:
         return samples;
     }
 
+    bool pointWithinWidgetMask(QWidget *target, const QPoint &localPoint)
+    {
+        const QRegion region = target->mask();
+        if (region.isEmpty())
+            return true;
+        return region.contains(localPoint);
+    }
+
     QWidget *topmostHitAtPoint(QWidget *target, const QPoint &localPoint)
     {
+        if (!pointWithinWidgetMask(target, localPoint))
+            return nullptr;
+
         const QPoint globalPos = target->mapToGlobal(localPoint);
 
         QWidget *hit = QApplication::widgetAt(globalPos);
-        if (isAutomationOverlayWidget(hit))
+        if (isAutomationOverlayWidget(hit) || isMouseTransparentWidget(hit))
             hit = nullptr;
         if (!hit)
             hit = target->childAt(localPoint);
+        if (isMouseTransparentWidget(hit))
+            hit = nullptr;
         if (!hit)
             hit = target;
         return hit;
@@ -2238,6 +2256,8 @@ private:
         const QVector<QPoint> samples = sampleLocalPoints(target);
         for (const QPoint &samplePoint : samples) {
             QWidget *hit = topmostHitAtPoint(target, samplePoint);
+            if (!hit)
+                continue;
             if (!hit->isVisible())
                 continue;
             if (isSameOrDescendantWidget(hit, target))
@@ -2269,14 +2289,20 @@ private:
         }
 
         QPoint center = target->rect().center();
+        if (!pointWithinWidgetMask(target, center)) {
+            throw std::runtime_error(
+                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
+                "; center point is masked out"
+            );
+        }
         QPoint globalPos = target->mapToGlobal(center);
-        QWidget *hit = QApplication::widgetAt(globalPos);
-        if (isAutomationOverlayWidget(hit))
-            hit = nullptr;
-        if (!hit)
-            hit = target->childAt(center);
-        if (!hit)
-            hit = target;
+        QWidget *hit = topmostHitAtPoint(target, center);
+        if (!hit) {
+            throw std::runtime_error(
+                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
+                "; center point does not resolve to an event target"
+            );
+        }
 
         if (!isSameOrDescendantWidget(hit, target)) {
             throw std::runtime_error(
