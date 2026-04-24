@@ -306,30 +306,76 @@ def _invoke_method(widget, request: dict):
     return _execute_prepared_call(widget, prepared_call)
 
 
+def _callable_attr_value(widget, attr: str):
+    fn = getattr(widget, attr, None)
+    if not callable(fn):
+        return None
+    return fn()
+
+
+def _has_meaningful_value(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value != ""
+    if isinstance(value, (list, tuple, dict, set)):
+        return bool(value)
+    return True
+
+
+def _set_if_meaningful(payload: dict, key: str, value) -> None:
+    if _has_meaningful_value(value):
+        payload[key] = value
+
+
+def _widget_accessible_name(widget) -> str:
+    value = _callable_attr_value(widget, "accessibleName")
+    return str(value) if value else ""
+
+
+def _widget_accessible_description(widget) -> str:
+    value = _callable_attr_value(widget, "accessibleDescription")
+    return str(value) if value else ""
+
+
+def _widget_window_title(widget) -> str:
+    value = _callable_attr_value(widget, "windowTitle")
+    return str(value) if value else ""
+
+
+def _widget_placeholder_text(widget) -> str:
+    value = _callable_attr_value(widget, "placeholderText")
+    return str(value) if value else ""
+
+
+def _widget_tool_tip(widget) -> str:
+    value = _callable_attr_value(widget, "toolTip")
+    return str(value) if value else ""
+
+
+def _widget_current_text(widget) -> str:
+    value = _callable_attr_value(widget, "currentText")
+    return str(value) if value else ""
+
+
 def _widget_value(widget):
     if hasattr(widget, "value"):
         return widget.value()
     if hasattr(widget, "currentText"):
         return widget.currentText()
-    return _widget_text(widget)
+    for attr in ("text", "toPlainText"):
+        value = _callable_attr_value(widget, attr)
+        if value is not None:
+            return str(value)
+    return ""
 
 
 def _widget_text(widget) -> str:
-    """Extract the visible text from a widget, trying common Qt accessors."""
-    for attr in ("text", "title", "windowTitle", "placeholderText", "toolTip"):
-        fn = getattr(widget, attr, None)
-        if callable(fn):
-            val = fn()
-            if val:
-                return str(val)
-    # QComboBox current text
-    if hasattr(widget, "currentText"):
-        return str(widget.currentText())
-    # QLabel via accessible name
-    if hasattr(widget, "accessibleName"):
-        name = widget.accessibleName()
-        if name:
-            return name
+    """Extract only the widget's real visible text from native text APIs."""
+    for attr in ("text", "title", "toPlainText"):
+        value = _callable_attr_value(widget, attr)
+        if value:
+            return str(value)
     return ""
 
 
@@ -372,6 +418,14 @@ def _matches_has_text(widget, text: str) -> bool:
     return text.lower() in _widget_text(widget).lower()
 
 
+def _matches_accessible_name(widget, text: str) -> bool:
+    return _widget_accessible_name(widget) == text
+
+
+def _matches_accessible_description(widget, text: str) -> bool:
+    return _widget_accessible_description(widget) == text
+
+
 def _matches_class(widget, class_name: str) -> bool:
     return class_name in _class_hierarchy(widget)
 
@@ -389,6 +443,8 @@ _REGEX_SELECTOR = re.compile(
     r"role=(?P<role>\w+)"            # role=button
     r"|text=(?P<text>.+)"            # text=Submit  or  text=/regex/flags
     r"|has-text=(?P<has_text>.+)"    # has-text=Submit
+    r"|a11y-name=(?P<a11y_name>.+)"  # a11y-name=Submit
+    r"|a11y-desc=(?P<a11y_desc>.+)"  # a11y-desc=Help text
     r"|name=(?P<name>\w+)"           # name=objectName
     r"|#(?P<id>\w+)"                 # #objectName
     r"|\.(?P<cls>\w+)"               # .ClassName
@@ -438,6 +494,12 @@ def match_widget(widget, selector_str: str, *, has_text: str | None = None) -> b
     if "has_text" in parsed and not _matches_has_text(widget, parsed["has_text"]):
         return False
 
+    if "a11y_name" in parsed and not _matches_accessible_name(widget, parsed["a11y_name"]):
+        return False
+
+    if "a11y_desc" in parsed and not _matches_accessible_description(widget, parsed["a11y_desc"]):
+        return False
+
     if "name" in parsed and not _matches_object_name(widget, parsed["name"]):
         return False
 
@@ -483,8 +545,6 @@ def widget_to_dict(widget, *, depth: int = 0, max_depth: int = 50) -> dict:
     """Serialize a widget to a JSON-friendly dict."""
     info: dict = {
         "class": _widget_class_name(widget),
-        "objectName": widget.objectName() or "",
-        "text": _widget_text(widget),
         "visible": widget.isVisible(),
         "enabled": widget.isEnabled(),
         "geometry": {
@@ -495,6 +555,14 @@ def widget_to_dict(widget, *, depth: int = 0, max_depth: int = 50) -> dict:
         },
     }
 
+    _set_if_meaningful(info, "objectName", widget.objectName())
+    _set_if_meaningful(info, "text", _widget_text(widget))
+    _set_if_meaningful(info, "accessibleName", _widget_accessible_name(widget))
+    _set_if_meaningful(info, "accessibleDescription", _widget_accessible_description(widget))
+    _set_if_meaningful(info, "windowTitle", _widget_window_title(widget))
+    _set_if_meaningful(info, "placeholderText", _widget_placeholder_text(widget))
+    _set_if_meaningful(info, "toolTip", _widget_tool_tip(widget))
+
     declared_role = _declared_role(widget)
     if declared_role:
         info["roles"] = [declared_role]
@@ -503,7 +571,7 @@ def widget_to_dict(widget, *, depth: int = 0, max_depth: int = 50) -> dict:
         info["checked"] = widget.isChecked()
 
     if hasattr(widget, "currentText"):
-        info["currentText"] = widget.currentText()
+        _set_if_meaningful(info, "currentText", _widget_current_text(widget))
         info["currentIndex"] = widget.currentIndex()
 
     if hasattr(widget, "value"):

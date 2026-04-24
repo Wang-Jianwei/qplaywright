@@ -384,6 +384,26 @@ def _inspect_locator(
         return result
 
     first = locator.first()
+    properties = first.properties()
+
+    for key in (
+        "text",
+        "accessibleName",
+        "accessibleDescription",
+        "currentText",
+        "currentIndex",
+        "objectName",
+        "checked",
+        "value",
+        "windowTitle",
+        "placeholderText",
+        "toolTip",
+    ):
+        value = properties.get(key)
+        if value is None or value == "":
+            continue
+        result[key] = value
+
     result.update(
         {
             "text": first.text_content(),
@@ -404,7 +424,7 @@ def _inspect_locator(
         result["methods"] = first.methods()
 
     if include_properties:
-        result["properties"] = first.properties()
+        result["properties"] = properties
 
     return result
 
@@ -419,7 +439,7 @@ def _invoke_locator_method(
     if count == 0:
         raise ValueError(
             "No widget found for invoke. Use snapshot or inspect first, then target with selectors like "
-            "#objectName, role=button, text=Submit, has-text=partial, or .QLabel."
+            "#objectName, role=button, text=Submit, has-text=partial, a11y-name=Submit, or .QLabel."
         )
 
     result = locator.first().invoke(method_name, args or {})
@@ -431,7 +451,7 @@ def _invoke_locator_method(
 
 
 def _target_not_found_message(connection: ManagedConnection, target: str | None, *, element: str | None = None) -> str:
-    examples = "#objectName, role=button, text=Submit, has-text=partial, .QLabel"
+    examples = "#objectName, role=button, text=Submit, has-text=partial, a11y-name=Submit, .QLabel"
     candidate = (target or element or "").strip()
     if candidate and _SNAPSHOT_REF_PATTERN.match(candidate) and candidate not in connection.snapshot_refs:
         return (
@@ -456,6 +476,8 @@ def _selector_help_text() -> str:
         "- role=button\n"
         "- text=Submit\n"
         "- has-text=partial\n"
+        "- a11y-name=Submit\n"
+        "- a11y-desc=Help text\n"
         "- #objectName\n"
         "- name=objectName\n"
         "- .QLabel\n\n"
@@ -481,9 +503,10 @@ def _format_widget_snapshot(nodes: list[dict[str, Any]], *, depth: int = 10, lev
         elif node.get("class"):
             selector = f" target=.{node['class']}"
 
-        text = node.get("text") or ""
-        text_part = f' "{text}"' if text else ""
-        line = f"{'  ' * level}- {node.get('class', '?')}{text_part}{selector}"
+        label, marker = _snapshot_display_label(node)
+        text_part = f' "{label}"' if label else ""
+        marker_part = f" {marker}" if marker else ""
+        line = f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{selector}"
         lines.append(line)
 
         children = node.get("children") or []
@@ -516,14 +539,37 @@ def _snapshot_target_hint(node: dict[str, Any]) -> str:
     return ""
 
 
+def _snapshot_display_label(node: dict[str, Any]) -> tuple[str, str]:
+    text = node.get("text") or ""
+    if text:
+        return text, ""
+
+    accessible_name = node.get("accessibleName") or ""
+    if accessible_name:
+        return accessible_name, "[a11y]"
+
+    for key in ("currentText", "windowTitle", "value"):
+        value = node.get(key)
+        if value is None or value == "":
+            continue
+        return str(value), ""
+
+    return "", ""
+
+
 def _snapshot_entry(node: dict[str, Any], ref: str | None) -> dict[str, Any]:
-    return {
+    entry = {
         "ref": ref,
         "wid": node.get("wid"),
         "target": _snapshot_target_hint(node) or None,
         "class": node.get("class", ""),
-        "text": node.get("text", ""),
     }
+    for key in ("text", "accessibleName", "accessibleDescription", "currentText", "windowTitle", "value"):
+        value = node.get(key)
+        if value is None or value == "":
+            continue
+        entry[key] = value
+    return entry
 
 
 def _render_snapshot_tree(
@@ -554,10 +600,11 @@ def _render_snapshot_tree(
         ref_part = f" [ref={ref}]" if ref else ""
         target_hint = _snapshot_target_hint(node)
         target_part = f" target={target_hint}" if target_hint else ""
-        text = node.get("text") or ""
-        text_part = f' "{text}"' if text else ""
+        label, marker = _snapshot_display_label(node)
+        text_part = f' "{label}"' if label else ""
+        marker_part = f" {marker}" if marker else ""
         active_part = " [active]" if wid == connection.active_window_wid else ""
-        lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{active_part}{ref_part}{target_part}")
+        lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{active_part}{ref_part}{target_part}")
         refs.append(_snapshot_entry(node, ref))
 
         child_lines, child_refs = _render_snapshot_tree(

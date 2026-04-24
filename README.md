@@ -135,3 +135,9 @@ python -m build --no-isolation
 - The Python package has zero mandatory runtime dependencies.
 - Qt bindings are imported lazily by the Python agent.
 - The C++ agent is header-only, but because it contains `Q_OBJECT`, it must still be listed in your CMake sources for AUTOMOC.
+
+## Additional Docs
+
+- `docs/mcp.md`: current MCP server contract and tool surface
+- `docs/custom_widgets.md`: explicit method-based custom widget automation contract
+- `docs/accessibility_semantics.md`: recommended use of `accessibleName`, `accessibleDescription`, and future `accessibleIdentifier` for agent-friendly Qt UIs

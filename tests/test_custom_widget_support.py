@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
 import qplaywright.agent._selector as selector
 from qplaywright.protocol import QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlaywrightMethodArg
 
@@ -51,7 +53,7 @@ class FakeWidget:
         super_class=None,
     ):
         self._meta = FakeMetaObject(class_name, super_class=super_class, properties=qt_properties)
-        self._properties = dict(properties or {})
+        self._properties: dict[str, Any] = dict(properties or {})
         self._dynamic_properties = list(dynamic_properties or [])
         self._object_name = object_name
 
@@ -93,6 +95,18 @@ class FakeWidget:
     def accessibleName(self) -> str:
         return str(self._properties.get("accessibleName", ""))
 
+    def accessibleDescription(self) -> str:
+        return str(self._properties.get("accessibleDescription", ""))
+
+    def windowTitle(self) -> str:
+        return str(self._properties.get("windowTitle", ""))
+
+    def placeholderText(self) -> str:
+        return str(self._properties.get("placeholderText", ""))
+
+    def toolTip(self) -> str:
+        return str(self._properties.get("toolTip", ""))
+
 
 class FakeTextWidget(FakeWidget):
     def text(self) -> str:
@@ -102,6 +116,14 @@ class FakeTextWidget(FakeWidget):
 class FakeValueWidget(FakeWidget):
     def value(self):
         return self._properties["value"]
+
+
+class FakeComboWidget(FakeWidget):
+    def currentText(self) -> str:
+        return str(self._properties.get("currentText", ""))
+
+    def currentIndex(self) -> int:
+        return int(cast(int, self._properties.get("currentIndex", -1)))
 
 
 def _metadata(*, role: str = "", methods: list[dict] | None = None) -> QPlaywrightClassMetadata:
@@ -196,6 +218,47 @@ def test_widget_text_still_uses_standard_accessors():
     assert selector._widget_text(widget) == "Fancy Value"
 
 
+def test_text_and_a11y_selectors_stay_separate():
+    a11y_only = FakeWidget(properties={"accessibleName": "Power Sweep", "accessibleDescription": "切换测量类型"})
+    visible_text = FakeTextWidget(properties={"text": "Power Sweep"})
+
+    assert selector.match_widget(a11y_only, "text=Power Sweep") is False
+    assert selector.match_widget(a11y_only, "a11y-name=Power Sweep") is True
+    assert selector.match_widget(a11y_only, "a11y-desc=切换测量类型") is True
+    assert selector.match_widget(visible_text, "a11y-name=Power Sweep") is False
+
+
+def test_widget_to_dict_keeps_a11y_and_title_fields_distinct_from_text():
+    widget = FakeWidget(
+        object_name="scan_btn",
+        properties={
+            "accessibleName": "功率扫描",
+            "accessibleDescription": "切换测量类型为功率扫描",
+            "windowTitle": "ignored-title",
+            "toolTip": "tooltip",
+        },
+    )
+
+    payload = selector.widget_to_dict(widget, max_depth=0)
+
+    assert "text" not in payload
+    assert payload["objectName"] == "scan_btn"
+    assert payload["accessibleName"] == "功率扫描"
+    assert payload["accessibleDescription"] == "切换测量类型为功率扫描"
+    assert payload["windowTitle"] == "ignored-title"
+    assert payload["toolTip"] == "tooltip"
+
+
+def test_widget_to_dict_preserves_current_index_without_rewriting_current_text_as_text():
+    widget = FakeComboWidget(properties={"currentText": "Admin", "currentIndex": 0})
+
+    payload = selector.widget_to_dict(widget, max_depth=0)
+
+    assert "text" not in payload
+    assert payload["currentText"] == "Admin"
+    assert payload["currentIndex"] == 0
+
+
 def test_widget_properties_include_qt_and_dynamic_properties():
     widget = FakeWidget(
         properties={
@@ -211,4 +274,5 @@ def test_widget_properties_include_qt_and_dynamic_properties():
 
     assert payload["text"] == "Painter label"
     assert payload["myText"] == "pressme"
-    assert payload["qplaywrightClassMetadata"]["role"] == "button"
+    metadata = cast(dict[str, object], payload["qplaywrightClassMetadata"])
+    assert metadata["role"] == "button"

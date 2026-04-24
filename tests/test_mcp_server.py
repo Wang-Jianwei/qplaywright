@@ -122,6 +122,8 @@ class FakeLocator:
     def properties(self) -> dict[str, object]:
         return {
             "objectName": self._target or "amount_editor",
+            "accessibleName": "Amount editor",
+            "accessibleDescription": "输入金额",
             "myText": "pressme",
         }
 
@@ -551,6 +553,8 @@ def test_inspect_locator_handles_empty_and_present_results():
     assert present["count"] == 2
     assert present["text"] == "Save"
     assert present["value"] == "ready"
+    assert present["objectName"] == "amount_editor"
+    assert present["accessibleName"] == "Amount editor"
     assert present["property_value"] == "attr:placeholderText"
 
     with_methods = mcp_server._inspect_locator(FakeLocator(count=1), include_methods=True, include_properties=True)
@@ -852,6 +856,22 @@ def test_format_widget_snapshot_includes_selector_hints():
     assert 'QPushButton "Login" target=#login_btn' in snapshot
 
 
+def test_format_widget_snapshot_marks_accessibility_derived_labels():
+    snapshot = mcp_server._format_widget_snapshot(
+        [
+            {
+                "class": "MenuButton",
+                "objectName": "measure_type_btn",
+                "accessibleName": "功率扫描",
+                "children": [],
+            }
+        ],
+        depth=3,
+    )
+
+    assert 'MenuButton "功率扫描" [a11y] target=#measure_type_btn' in snapshot
+
+
 def test_snapshot_payload_creates_stable_refs():
     connection = mcp_server.ManagedConnection(
         name="demo",
@@ -904,10 +924,10 @@ def test_snapshot_payload_preserves_existing_ref_bindings():
 
     payload = mcp_server._snapshot_payload(
         connection,
-        [{"wid": 1, "class": "DemoWindow", "objectName": "", "text": "Title", "children": []}],
+        [{"wid": 1, "class": "DemoWindow", "objectName": "", "windowTitle": "Title", "children": []}],
     )
 
-    assert payload["refs"] == [{"ref": "e2", "wid": 1, "target": ".DemoWindow", "class": "DemoWindow", "text": "Title"}]
+    assert payload["refs"] == [{"ref": "e2", "wid": 1, "target": ".DemoWindow", "class": "DemoWindow", "windowTitle": "Title"}]
     assert connection.snapshot_refs == {"e1": 99, "e2": 1}
     assert connection.snapshot_wids == {99: "e1", 1: "e2"}
 
@@ -1189,7 +1209,7 @@ def test_target_not_found_message_includes_selector_examples():
 
     assert "No widget found for target '#missing_btn'" in message
     assert "snapshot or inspect" in message
-    assert "#objectName, role=button, text=Submit, has-text=partial, .QLabel" in message
+    assert "#objectName, role=button, text=Submit, has-text=partial, a11y-name=Submit, .QLabel" in message
 
 
 def test_cli_tool_help_includes_action_level_session_and_window_guidance():

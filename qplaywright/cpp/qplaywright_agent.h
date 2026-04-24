@@ -831,7 +831,7 @@ inline bool matchesRole(const QWidget *widget, const QString &role)
 
 inline QString widgetText(const QWidget *widget)
 {
-    // Try common accessors
+    // Only real visible text belongs to the text channel.
     if (auto *btn = qobject_cast<const QAbstractButton *>(widget))
         return btn->text();
     if (auto *label = qobject_cast<const QLabel *>(widget))
@@ -842,20 +842,69 @@ inline QString widgetText(const QWidget *widget)
         return te->toPlainText();
     if (auto *pte = qobject_cast<const QPlainTextEdit *>(widget))
         return pte->toPlainText();
-    if (auto *cb = qobject_cast<const QComboBox *>(widget))
-        return cb->currentText();
     if (auto *gb = qobject_cast<const QGroupBox *>(widget))
         return gb->title();
     if (auto *tw = qobject_cast<const QTabWidget *>(widget))
         return tw->tabText(tw->currentIndex());
-    if (auto *spin = qobject_cast<const QSpinBox *>(widget))
-        return QString::number(spin->value());
-    if (auto *dspin = qobject_cast<const QDoubleSpinBox *>(widget))
-        return QString::number(dspin->value());
-    // Fallback: window title
-    QString title = widget->windowTitle();
-    if (!title.isEmpty()) return title;
+    return QString();
+}
+
+inline QString widgetAccessibleName(const QWidget *widget)
+{
     return widget->accessibleName();
+}
+
+inline QString widgetAccessibleDescription(const QWidget *widget)
+{
+    return widget->accessibleDescription();
+}
+
+inline QString widgetCurrentText(const QWidget *widget)
+{
+    if (auto *combo = qobject_cast<const QComboBox *>(widget))
+        return combo->currentText();
+    return QString();
+}
+
+inline QVariant widgetValue(const QWidget *widget)
+{
+    if (auto *spin = qobject_cast<const QSpinBox *>(widget))
+        return spin->value();
+    if (auto *dspin = qobject_cast<const QDoubleSpinBox *>(widget))
+        return dspin->value();
+    if (auto *slider = qobject_cast<const QSlider *>(widget))
+        return slider->value();
+    return QVariant();
+}
+
+inline QString widgetInputValue(const QWidget *widget)
+{
+    if (auto *combo = qobject_cast<const QComboBox *>(widget))
+        return combo->currentText();
+    if (auto *edit = qobject_cast<const QLineEdit *>(widget))
+        return edit->text();
+    if (auto *te = qobject_cast<const QTextEdit *>(widget))
+        return te->toPlainText();
+    if (auto *pte = qobject_cast<const QPlainTextEdit *>(widget))
+        return pte->toPlainText();
+    return widgetText(widget);
+}
+
+inline QString widgetPlaceholderText(const QWidget *widget)
+{
+    if (auto *edit = qobject_cast<const QLineEdit *>(widget))
+        return edit->placeholderText();
+    return QString();
+}
+
+inline QString widgetToolTip(const QWidget *widget)
+{
+    return widget->toolTip();
+}
+
+inline QString widgetWindowTitle(const QWidget *widget)
+{
+    return widget->windowTitle();
 }
 
 } // namespace QPlaywrightRoles
@@ -867,7 +916,7 @@ inline QString widgetText(const QWidget *widget)
 namespace QPlaywrightSelector {
 
 struct Selector {
-    QString type;   // "role", "text", "has_text", "name", "id", "cls"
+    QString type;   // "role", "text", "has_text", "a11y_name", "a11y_desc", "name", "id", "cls"
     QString value;
 };
 
@@ -879,6 +928,10 @@ inline Selector parse(const QString &sel)
         return {"text", sel.mid(5)};
     if (sel.startsWith("has-text="))
         return {"has_text", sel.mid(9)};
+    if (sel.startsWith("a11y-name="))
+        return {"a11y_name", sel.mid(10)};
+    if (sel.startsWith("a11y-desc="))
+        return {"a11y_desc", sel.mid(10)};
     if (sel.startsWith("name="))
         return {"name", sel.mid(5)};
     if (sel.startsWith('#'))
@@ -897,6 +950,10 @@ inline bool matches(const QWidget *widget, const Selector &sel)
         return QPlaywrightRoles::widgetText(widget) == sel.value;
     if (sel.type == "has_text")
         return QPlaywrightRoles::widgetText(widget).contains(sel.value, Qt::CaseInsensitive);
+    if (sel.type == "a11y_name")
+        return QPlaywrightRoles::widgetAccessibleName(widget) == sel.value;
+    if (sel.type == "a11y_desc")
+        return QPlaywrightRoles::widgetAccessibleDescription(widget) == sel.value;
     if (sel.type == "name" || sel.type == "id")
         return widget->objectName() == sel.value;
     if (sel.type == "cls") {
@@ -946,14 +1003,32 @@ inline void findWidgets(QWidget *root, const QString &selectorStr,
 
 namespace QPlaywrightSerializer {
 
+inline void setJsonStringIfNotEmpty(QJsonObject &obj, const char *key, const QString &value)
+{
+    if (!value.isEmpty())
+        obj[key] = value;
+}
+
+inline void setJsonVariantIfValid(QJsonObject &obj, const char *key, const QVariant &value)
+{
+    if (value.isValid())
+        obj[key] = QJsonValue::fromVariant(value);
+}
+
 inline QJsonObject widgetToJson(const QWidget *w, int depth = 0, int maxDepth = 10)
 {
     QJsonObject obj;
     obj["class"] = QString::fromLatin1(w->metaObject()->className());
-    obj["objectName"] = w->objectName();
-    obj["text"] = QPlaywrightRoles::widgetText(w);
     obj["visible"] = w->isVisible();
     obj["enabled"] = w->isEnabled();
+
+    setJsonStringIfNotEmpty(obj, "objectName", w->objectName());
+    setJsonStringIfNotEmpty(obj, "text", QPlaywrightRoles::widgetText(w));
+    setJsonStringIfNotEmpty(obj, "accessibleName", QPlaywrightRoles::widgetAccessibleName(w));
+    setJsonStringIfNotEmpty(obj, "accessibleDescription", QPlaywrightRoles::widgetAccessibleDescription(w));
+    setJsonStringIfNotEmpty(obj, "windowTitle", QPlaywrightRoles::widgetWindowTitle(w));
+    setJsonStringIfNotEmpty(obj, "placeholderText", QPlaywrightRoles::widgetPlaceholderText(w));
+    setJsonStringIfNotEmpty(obj, "toolTip", QPlaywrightRoles::widgetToolTip(w));
 
     const QString role = QPlaywrightMetadata::classMetadata(w).role().trimmed().toLower();
     if (!role.isEmpty()) {
@@ -974,16 +1049,11 @@ inline QJsonObject widgetToJson(const QWidget *w, int depth = 0, int maxDepth = 
     if (auto *rb = qobject_cast<const QRadioButton *>(w))
         obj["checked"] = rb->isChecked();
     if (auto *combo = qobject_cast<const QComboBox *>(w)) {
-        obj["currentText"] = combo->currentText();
+        setJsonStringIfNotEmpty(obj, "currentText", combo->currentText());
         obj["currentIndex"] = combo->currentIndex();
     }
 
-    if (auto *spin = qobject_cast<const QSpinBox *>(w))
-        obj["value"] = spin->value();
-    if (auto *dspin = qobject_cast<const QDoubleSpinBox *>(w))
-        obj["value"] = dspin->value();
-    if (auto *slider = qobject_cast<const QSlider *>(w))
-        obj["value"] = slider->value();
+    setJsonVariantIfValid(obj, "value", QPlaywrightRoles::widgetValue(w));
 
     if (depth < maxDepth) {
         QJsonArray children;
@@ -1209,10 +1279,11 @@ private:
                 const QRect frameRect = rect().adjusted(1, 1, -1, -1);
                 painter.setPen(QPen(frameColor, 2));
                 painter.setBrush(Qt::NoBrush);
-                painter.drawRoundedRect(frameRect, 10, 10);
+                painter.drawRoundedRect(frameRect, 8, 8);
 
                 const QString labelText = QStringLiteral("正在与 Agent %1 共享").arg(m_sharedAgentName);
                 QFont badgeFont = painter.font();
+                badgeFont.setFamily(qApp->font().family());
                 if (badgeFont.pointSizeF() > 0.0)
                     badgeFont.setPointSizeF(qMax(8.5, badgeFont.pointSizeF() - 1.5));
                 else if (badgeFont.pixelSize() > 0)
@@ -1231,7 +1302,7 @@ private:
                 painter.setPen(QPen(frameColor, 1));
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(badgeRect, 8, 8);
-                painter.setPen(QColor(255, 255, 255, 230));
+                painter.setPen(QColor(255, 255, 255, 210));
                 painter.drawText(badgeRect.adjusted(9, 0, -9, 0), Qt::AlignVCenter | Qt::AlignLeft, labelText);
             }
 
@@ -1663,10 +1734,16 @@ private:
         QJsonObject obj;
         obj["wid"] = reg.registerWidget(w);
         obj["class"] = QString::fromLatin1(w->metaObject()->className());
-        obj["objectName"] = w->objectName();
-        obj["text"] = QPlaywrightRoles::widgetText(w);
         obj["visible"] = w->isVisible();
         obj["enabled"] = w->isEnabled();
+
+        QPlaywrightSerializer::setJsonStringIfNotEmpty(obj, "objectName", w->objectName());
+        QPlaywrightSerializer::setJsonStringIfNotEmpty(obj, "text", QPlaywrightRoles::widgetText(w));
+        QPlaywrightSerializer::setJsonStringIfNotEmpty(obj, "accessibleName", QPlaywrightRoles::widgetAccessibleName(w));
+        QPlaywrightSerializer::setJsonStringIfNotEmpty(obj, "accessibleDescription", QPlaywrightRoles::widgetAccessibleDescription(w));
+        QPlaywrightSerializer::setJsonStringIfNotEmpty(obj, "windowTitle", QPlaywrightRoles::widgetWindowTitle(w));
+        QPlaywrightSerializer::setJsonStringIfNotEmpty(obj, "placeholderText", QPlaywrightRoles::widgetPlaceholderText(w));
+        QPlaywrightSerializer::setJsonStringIfNotEmpty(obj, "toolTip", QPlaywrightRoles::widgetToolTip(w));
 
         const QString role = QPlaywrightMetadata::classMetadata(w).role().trimmed().toLower();
         if (!role.isEmpty()) {
@@ -1687,16 +1764,11 @@ private:
         if (auto *rb = qobject_cast<const QRadioButton *>(w))
             obj["checked"] = rb->isChecked();
         if (auto *combo = qobject_cast<const QComboBox *>(w)) {
-            obj["currentText"] = combo->currentText();
+            QPlaywrightSerializer::setJsonStringIfNotEmpty(obj, "currentText", combo->currentText());
             obj["currentIndex"] = combo->currentIndex();
         }
 
-        if (auto *spin = qobject_cast<const QSpinBox *>(w))
-            obj["value"] = spin->value();
-        if (auto *dspin = qobject_cast<const QDoubleSpinBox *>(w))
-            obj["value"] = dspin->value();
-        if (auto *slider = qobject_cast<const QSlider *>(w))
-            obj["value"] = slider->value();
+        QPlaywrightSerializer::setJsonVariantIfValid(obj, "value", QPlaywrightRoles::widgetValue(w));
 
         if (depth < maxDepth) {
             QJsonArray children;
@@ -1775,11 +1847,9 @@ private:
 
         if (method == "get_value") {
             QWidget *w = resolveOne(params);
-            if (auto *spin = qobject_cast<QSpinBox *>(w)) return spin->value();
-            if (auto *dspin = qobject_cast<QDoubleSpinBox *>(w)) return dspin->value();
-            if (auto *slider = qobject_cast<QSlider *>(w)) return slider->value();
-            if (auto *combo = qobject_cast<QComboBox *>(w)) return combo->currentText();
-            return QPlaywrightRoles::widgetText(w);
+            QVariant value = QPlaywrightRoles::widgetValue(w);
+            if (value.isValid()) return QJsonValue::fromVariant(value);
+            return QPlaywrightRoles::widgetInputValue(w);
         }
 
         if (method == "get_methods") {

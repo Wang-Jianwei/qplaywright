@@ -100,6 +100,16 @@ Single source of truth for method names, selector syntax, and the role→Qt clas
 
 Both agents maintain a `wid` registry (widget pointer → stable integer). The client can cache `wid` values to skip repeated selector resolution.
 
+### Widget Semantic Stack
+
+Widget automation metadata is organized in three layers (see `docs/accessibility_semantics.md` for full details):
+
+1. **Stable identity** — `objectName`, explicit metadata, future `accessibleIdentifier` (Qt 6.9+)
+2. **Human-readable semantics** — `accessibleName`, `accessibleDescription` (for custom-painted / icon-only controls)
+3. **Structured business behavior** — `qplaywrightClassMetadata` property + `invoke()` methods
+
+These layers are additive, not exclusive. When adding custom widgets, set accessibility metadata for agent understanding and `qplaywrightClassMetadata` for structured business actions.
+
 ### Key Files
 
 | File | Purpose |

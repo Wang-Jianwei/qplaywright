@@ -328,6 +328,8 @@ METHOD_SET_SESSION_INFO = "set_session_info"
 #   role=button          →  match by widget role (QPushButton, QToolButton → button)
 #   text=Submit          →  match by visible text (exact)
 #   text=/sub/i          →  match by text (regex, case-insensitive)
+#   a11y-name=Submit     →  match by accessibleName (exact)
+#   a11y-desc=Help text  →  match by accessibleDescription (exact)
 #   #objectName          →  match by QObject.objectName()
 #   .ClassName           →  match by metaObject()->className()
 #   name=objectName      →  alias for #objectName
