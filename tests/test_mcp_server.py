@@ -512,6 +512,7 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
     assert result["ok"] is True
     assert result["window"]["wid"] == 11
     assert result["topmost_only"] is True
+    assert result["warnings"] == [mcp_server._TOPMOST_ONLY_WARNING]
     assert result["save_to"] == "snapshot.txt"
 
 
@@ -543,7 +544,32 @@ def test_inspect_without_target_returns_active_window_tree(monkeypatch):
         "target": None,
         "depth": 6,
         "tree": [{"wid": 11, "class": "DemoWindow", "children": []}],
+        "warnings": [mcp_server._TOPMOST_ONLY_WARNING],
     }
+
+
+def test_snapshot_omits_topmost_warning_for_targeted_snapshot(monkeypatch):
+    state = mcp_server.ServerState()
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(
+        mcp_server,
+        "_snapshot_result",
+        lambda managed_connection, **kwargs: {"snapshot": "- Target [ref=e1]", "refs": [{"ref": "e1"}]},
+    )
+
+    result = mcp_server.snapshot(target="#amount", topmost_only=True)
+
+    assert "warnings" not in result
 
 
 def test_inspect_locator_handles_empty_and_present_results():

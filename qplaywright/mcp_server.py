@@ -38,6 +38,10 @@ LOGGER = logging.getLogger(__name__)
 
 _SNAPSHOT_REF_PATTERN = re.compile(r"^e\d+$")
 _ACTION_POSTPROCESS_TIMEOUT = 2.0
+_TOPMOST_ONLY_WARNING = (
+    "topmost_only is an approximate frontmost-visible filter and may omit widgets or content. "
+    "Rerun with topmost_only=false when you need a complete tree."
+)
 
 SessionAction = Literal["attach", "launch", "close", "status"]
 WindowAction = Literal["list", "select", "resize", "close"]
@@ -824,6 +828,14 @@ def _snapshot_result(
     return _snapshot_payload(managed_connection, [node], depth=depth)
 
 
+def _topmost_only_warnings(*, topmost_only: bool, target: str | None = None) -> list[str]:
+    if not topmost_only:
+        return []
+    if target is not None:
+        return []
+    return [_TOPMOST_ONLY_WARNING]
+
+
 def _press_key_without_target(connection: ManagedConnection, *, key: str) -> None:
     client = getattr(connection.app, "_conn", None)
     if client is None:
@@ -1094,7 +1106,11 @@ if FastMCP is not None:
         topmost_only: bool = False,
         save_to: str | None = None,
     ) -> dict[str, Any]:
-        """Return a text snapshot of the current active window or one target."""
+        """Return a text snapshot of the current active window or one target.
+
+        When topmost_only is true, the window-wide snapshot becomes an approximate
+        frontmost-visible view and may be incomplete.
+        """
 
         connection_state = _get_connection(_SERVER_STATE)
         active_window = _active_window_summary(connection_state)
@@ -1107,6 +1123,9 @@ if FastMCP is not None:
             "topmost_only": topmost_only,
             **payload,
         }
+        warnings = _topmost_only_warnings(topmost_only=topmost_only, target=target)
+        if warnings:
+            result["warnings"] = warnings
         if save_to is not None:
             result["save_to"] = _write_text_file(save_to, payload["snapshot"])
         return result
@@ -1121,11 +1140,15 @@ if FastMCP is not None:
         depth: int = 10,
         topmost_only: bool = False,
     ) -> dict[str, Any]:
-        """Inspect one target or return the current active window tree in debug mode."""
+        """Inspect one target or return the current active window tree in debug mode.
+
+        When topmost_only is true and target is omitted, the returned tree is an
+        approximate frontmost-visible view and may be incomplete.
+        """
 
         connection_state = _get_connection(_SERVER_STATE)
         if target is None:
-            return {
+            result = {
                 "ok": True,
                 "target": None,
                 "depth": depth,
@@ -1136,6 +1159,10 @@ if FastMCP is not None:
                     topmost_only=topmost_only,
                 ),
             }
+            warnings = _topmost_only_warnings(topmost_only=topmost_only, target=None)
+            if warnings:
+                result["warnings"] = warnings
+            return result
 
         locator = _resolve_locator(connection_state, target=target)
         result = _inspect_locator(
