@@ -1050,6 +1050,25 @@ def _observe_action_target_state(
     return _compact_action_state(locator)
 
 
+def _normalize_choose_selectors(
+    *,
+    value: str | None,
+    index: int | None,
+    label: str | None,
+) -> tuple[str | None, int | None, str | None]:
+    has_meaningful_string = any(
+        isinstance(candidate, str) and candidate.strip() != ""
+        for candidate in (value, label)
+    )
+    if has_meaningful_string or index is not None:
+        if isinstance(value, str) and value.strip() == "":
+            value = None
+        if isinstance(label, str) and label.strip() == "":
+            label = None
+
+    return value, index, label
+
+
 def _normalize_wait_expected(condition: str, expected: str | int | bool | None) -> str | int | bool:
     if expected is None:
         raise ValueError("expected is required when condition is provided")
@@ -1612,6 +1631,8 @@ if FastMCP is not None:
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Select a combobox option by value, index, or label."""
+
+        value, index, label = _normalize_choose_selectors(value=value, index=index, label=label)
 
         selector_count = sum(candidate is not None for candidate in (value, index, label))
         if selector_count != 1:

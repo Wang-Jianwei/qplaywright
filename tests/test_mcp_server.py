@@ -970,6 +970,34 @@ def test_wait_rejects_undocumented_condition(monkeypatch):
         mcp_server.wait(target="#status_label", condition="text_matches", expected="ok")
 
 
+def test_choose_ignores_blank_unused_string_selectors(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    locator = FakeLocator(count=1)
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
+    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(
+        mcp_server,
+        "_list_windows_raw",
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
+    )
+
+    result = mcp_server.choose(target="#currency", value="", label="CNY")
+
+    assert locator.action_calls == [("select_option", {"value": None, "index": None, "label": "CNY"})]
+    assert result["ok"] is True
+    assert result["label"] == "CNY"
+    assert result["value"] is None
+
+
 @pytest.mark.parametrize(
     ("tool_name", "call_kwargs", "expected_calls", "expected_payload"),
     [
