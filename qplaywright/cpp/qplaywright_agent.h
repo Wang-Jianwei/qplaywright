@@ -1228,6 +1228,12 @@ private:
 
         void syncToWindow(bool forceRaise = false)
         {
+            if (!m_managerActive) {
+                m_timer.stop();
+                hide();
+                return;
+            }
+
             if (!isOverlayTargetWindowVisible(m_targetWindow.data())) {
                 hide();
                 return;
@@ -1263,6 +1269,22 @@ private:
                 m_pulses.append({m_clock.elapsed(), m_cursorPos, pulseCount});
             syncToWindow(true);
             update();
+        }
+
+        void setManagerActive(bool active)
+        {
+            if (m_managerActive == active)
+                return;
+
+            m_managerActive = active;
+            if (!m_managerActive) {
+                m_pulses.clear();
+                m_timer.stop();
+                hide();
+                return;
+            }
+
+            syncToWindow();
         }
 
         void setSharedAgentName(const QString &agentName)
@@ -1408,7 +1430,9 @@ private:
             if (writeIndex != m_pulses.size())
                 m_pulses.resize(writeIndex);
 
-            if (!isOverlayTargetWindowVisible(m_targetWindow.data())) {
+            if (!m_managerActive || !isOverlayTargetWindowVisible(m_targetWindow.data())) {
+                if (!m_managerActive)
+                    m_pulses.clear();
                 hide();
                 if (m_pulses.isEmpty())
                     m_timer.stop();
@@ -1422,6 +1446,7 @@ private:
         QPointer<QWidget> m_targetWindow;
         QString m_sharedAgentName;
         QPoint m_cursorPos;
+        bool m_managerActive = false;
         bool m_cursorPosValid = false;
         QVector<PulseRecord> m_pulses;
         QTimer m_timer;
@@ -1475,6 +1500,7 @@ private:
                 return;
 
             syncVisibility();
+            overlay->setManagerActive(true);
             overlay->setCursorFromGlobal(widget->mapToGlobal(localPos), pulseCount);
         }
 
@@ -1513,11 +1539,11 @@ private:
                 if (m_enabled && targetWindow == m_activeWindow && isOverlayTargetWindowVisible(targetWindow))
                     overlay->syncToWindow(event->type() == QEvent::Show);
                 else
-                    overlay->hide();
+                    overlay->setManagerActive(false);
                 break;
             case QEvent::Hide:
             case QEvent::Close:
-                overlay->hide();
+                overlay->setManagerActive(false);
                 if (targetWindow == m_activeWindow)
                     m_activeWindow = nullptr;
                 break;
@@ -1535,11 +1561,13 @@ private:
             if (it != m_overlays.end() && !it.value().isNull())
             {
                 it.value()->setSharedAgentName(m_sharedAgentName);
+                it.value()->setManagerActive(targetWindow == m_activeWindow);
                 return it.value().data();
             }
 
             AutomationOverlay *overlay = new AutomationOverlay(targetWindow);
             overlay->setSharedAgentName(m_sharedAgentName);
+            overlay->setManagerActive(targetWindow == m_activeWindow);
             m_overlays.insert(targetWindow, overlay);
             targetWindow->removeEventFilter(this);
             targetWindow->installEventFilter(this);
@@ -1604,15 +1632,14 @@ private:
                 }
 
                 overlay->setSharedAgentName(m_sharedAgentName);
+                const bool isActive = m_enabled && targetWindow == m_activeWindow;
+                overlay->setManagerActive(isActive);
 
                 if (!isOverlayTargetWindowVisible(targetWindow)) {
                     if (targetWindow == m_activeWindow)
                         m_activeWindow = nullptr;
-                    overlay->hide();
-                } else if (m_enabled && targetWindow == m_activeWindow)
+                } else if (isActive)
                     overlay->syncToWindow();
-                else
-                    overlay->hide();
             }
 
             for (QWidget *staleKey : staleKeys)
