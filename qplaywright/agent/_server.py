@@ -98,10 +98,13 @@ _QApplication = None
 _VISUAL_FEEDBACK_ENABLED = False
 _AUTOMATION_OVERLAY_OBJECT_NAME = "_qplaywright_automation_overlay"
 _AUTOMATION_OVERLAY_PROPERTY = "qplaywrightAutomationOverlay"
-_OVERLAY_EDGE_PADDING = 6
-_OVERLAY_FRAME_OUTSET = 6
-_OVERLAY_BADGE_GAP = 6
-_OVERLAY_BADGE_LEFT_INSET = 8
+_OVERLAY_EDGE_PADDING = 3
+_OVERLAY_FRAME_OUTSET = 3
+_OVERLAY_BADGE_GAP = 3
+_OVERLAY_BADGE_LEFT_INSET = 6
+_OVERLAY_BADGE_TOP_INSET = 6
+_OVERLAY_CORNER_RADIUS = 6
+_OVERLAY_BADGE_RADIUS = 7
 _OVERLAY_MANAGER = None
 _OverlayManagerClass = None
 _SESSION_AGENT_NAMES: dict[str, str] = {}
@@ -278,6 +281,37 @@ def _create_overlay_manager_class():
                 font.setPointSizeF(7.5)
             return font
 
+        def _is_maximized_window(self) -> bool:
+            if self._target_window is None:
+                return False
+            if hasattr(self._target_window, "isMaximized") and self._target_window.isMaximized():
+                return True
+            if hasattr(self._target_window, "windowState") and self._target_window.windowState() & Qt.WindowMaximized:
+                return True
+            return False
+
+        def _wrapped_global_rect(self):
+            if self._target_window is None:
+                return QRect()
+
+            content_top_left = self._target_window.mapToGlobal(self._target_window.rect().topLeft())
+            content_global_rect = QRect(content_top_left, self._target_window.size())
+            if not hasattr(self._target_window, "frameGeometry"):
+                return content_global_rect
+
+            frame_global_rect = self._target_window.frameGeometry()
+            if (
+                frame_global_rect.isValid()
+                and frame_global_rect.contains(content_global_rect)
+                and (
+                    frame_global_rect.topLeft() != content_global_rect.topLeft()
+                    or frame_global_rect.size() != content_global_rect.size()
+                )
+            ):
+                return QRect(frame_global_rect)
+
+            return content_global_rect
+
         def _layout_metrics(self) -> dict[str, Any]:
             badge_text = self._badge_text()
             badge_font = self._badge_font()
@@ -288,37 +322,66 @@ def _create_overlay_manager_class():
                 badge_width = metrics.horizontalAdvance(badge_text) + 18
                 badge_height = metrics.height() + 8
 
-            badge_reserve = badge_height + _OVERLAY_BADGE_GAP if badge_text else 0
-            target_rect = QRect(
+            wrapped_global_rect = self._wrapped_global_rect()
+            content_top_left = self._target_window.mapToGlobal(self._target_window.rect().topLeft()) if self._target_window is not None else QPoint(0, 0)
+            content_offset = content_top_left - wrapped_global_rect.topLeft()
+            is_maximized = self._is_maximized_window()
+            badge_reserve = badge_height + _OVERLAY_BADGE_GAP if badge_text and not is_maximized else 0
+            wrapped_rect = QRect(
                 _OVERLAY_EDGE_PADDING + _OVERLAY_FRAME_OUTSET,
                 _OVERLAY_EDGE_PADDING + _OVERLAY_FRAME_OUTSET + badge_reserve,
+                wrapped_global_rect.width(),
+                wrapped_global_rect.height(),
+            )
+            frame_rect = wrapped_rect.adjusted(
+                -_OVERLAY_FRAME_OUTSET,
+                -_OVERLAY_FRAME_OUTSET,
+                _OVERLAY_FRAME_OUTSET,
+                _OVERLAY_FRAME_OUTSET,
+            )
+            target_rect = QRect(
+                wrapped_rect.left() + content_offset.x(),
+                wrapped_rect.top() + content_offset.y(),
                 self._target_window.width() if self._target_window is not None else 0,
                 self._target_window.height() if self._target_window is not None else 0,
-            )
-            frame_rect = target_rect.adjusted(
-                -_OVERLAY_FRAME_OUTSET,
-                -_OVERLAY_FRAME_OUTSET,
-                _OVERLAY_FRAME_OUTSET,
-                _OVERLAY_FRAME_OUTSET,
             )
             badge_rect = QRect()
             overlay_width = frame_rect.right() + _OVERLAY_EDGE_PADDING + 1
             overlay_height = frame_rect.bottom() + _OVERLAY_EDGE_PADDING + 1
             if badge_text:
-                badge_rect = QRect(
-                    frame_rect.left() + _OVERLAY_BADGE_LEFT_INSET,
-                    frame_rect.top() - _OVERLAY_BADGE_GAP - badge_height,
-                    badge_width,
-                    badge_height,
-                )
+                if is_maximized:
+                    badge_band_top = frame_rect.top() + _OVERLAY_BADGE_TOP_INSET
+                    badge_band_bottom = max(
+                        badge_band_top,
+                        target_rect.top() - _OVERLAY_BADGE_TOP_INSET - badge_height,
+                    )
+                    centered_badge_top = frame_rect.top() + (target_rect.top() - frame_rect.top() - badge_height) // 2
+                    badge_top = min(max(centered_badge_top, badge_band_top), badge_band_bottom)
+                    badge_rect = QRect(
+                        frame_rect.center().x() - badge_width // 2,
+                        badge_top,
+                        badge_width,
+                        badge_height,
+                    )
+                else:
+                    badge_rect = QRect(
+                        frame_rect.left() + _OVERLAY_BADGE_LEFT_INSET,
+                        frame_rect.top() - _OVERLAY_BADGE_GAP - badge_height,
+                        badge_width,
+                        badge_height,
+                    )
                 overlay_width = max(overlay_width, badge_rect.right() + _OVERLAY_EDGE_PADDING + 1)
+                overlay_height = max(overlay_height, badge_rect.bottom() + _OVERLAY_EDGE_PADDING + 1)
 
             return {
                 "target_rect": target_rect,
+                "wrapped_rect": wrapped_rect,
+                "wrapped_global_rect": wrapped_global_rect,
                 "frame_rect": frame_rect,
                 "badge_rect": badge_rect,
                 "badge_font": badge_font,
                 "badge_text": badge_text,
+                "is_maximized": is_maximized,
                 "overlay_width": overlay_width,
                 "overlay_height": overlay_height,
             }
@@ -346,11 +409,10 @@ def _create_overlay_manager_class():
                 return
 
             layout = self._layout_metrics()
-            top_left = self._target_window.mapToGlobal(self._target_window.rect().topLeft())
             self._content_origin = layout["target_rect"].topLeft()
             rect = self.geometry()
-            geometry_x = top_left.x() - self._content_origin.x()
-            geometry_y = top_left.y() - self._content_origin.y()
+            geometry_x = layout["wrapped_global_rect"].x() - layout["wrapped_rect"].x()
+            geometry_y = layout["wrapped_global_rect"].y() - layout["wrapped_rect"].y()
             if rect.x() != geometry_x or rect.y() != geometry_y or rect.width() != layout["overlay_width"] or rect.height() != layout["overlay_height"]:
                 self.setGeometry(geometry_x, geometry_y, layout["overlay_width"], layout["overlay_height"])
 
@@ -427,7 +489,7 @@ def _create_overlay_manager_class():
                 glow_gradient.setColorAt(1.0, QColor(0, 245, 255, 55))
                 painter.setPen(QPen(QBrush(glow_gradient), 6))
                 painter.setBrush(Qt.NoBrush)
-                painter.drawRoundedRect(frame_rect, 10, 10)
+                painter.drawRoundedRect(frame_rect, _OVERLAY_CORNER_RADIUS, _OVERLAY_CORNER_RADIUS)
 
                 frame_gradient = QLinearGradient(frame_rect.left(), frame_rect.top(), frame_rect.right(), frame_rect.bottom())
                 frame_gradient.setColorAt(0.0, QColor(0, 245, 255, 185))
@@ -436,17 +498,17 @@ def _create_overlay_manager_class():
                 frame_gradient.setColorAt(1.0, QColor(0, 245, 255, 180))
                 painter.setPen(QPen(QBrush(frame_gradient), 2))
                 painter.setBrush(Qt.NoBrush)
-                painter.drawRoundedRect(frame_rect, 10, 10)
+                painter.drawRoundedRect(frame_rect, _OVERLAY_CORNER_RADIUS, _OVERLAY_CORNER_RADIUS)
 
                 painter.setFont(layout["badge_font"])
                 badge_rect = layout["badge_rect"]
 
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QColor(9, 29, 61, 150))
-                painter.drawRoundedRect(badge_rect, 8, 8)
+                painter.drawRoundedRect(badge_rect, _OVERLAY_BADGE_RADIUS, _OVERLAY_BADGE_RADIUS)
                 painter.setPen(QPen(QColor(140, 228, 255, 135), 1))
                 painter.setBrush(Qt.NoBrush)
-                painter.drawRoundedRect(badge_rect, 8, 8)
+                painter.drawRoundedRect(badge_rect, _OVERLAY_BADGE_RADIUS, _OVERLAY_BADGE_RADIUS)
                 painter.setPen(QColor(255, 255, 255, 230))
                 painter.drawText(badge_rect.adjusted(9, 0, -9, 0), Qt.AlignVCenter | Qt.AlignLeft, layout["badge_text"])
 

@@ -1174,10 +1174,13 @@ public:
 private:
     static constexpr const char *kAutomationOverlayObjectName = "_qplaywright_automation_overlay";
     static constexpr const char *kAutomationOverlayProperty = "qplaywrightAutomationOverlay";
-    static constexpr int kOverlayEdgePadding = 6;
-    static constexpr int kOverlayFrameOutset = 6;
-    static constexpr int kOverlayBadgeGap = 6;
-    static constexpr int kOverlayBadgeLeftInset = 8;
+    static constexpr int kOverlayEdgePadding = 3;
+    static constexpr int kOverlayFrameOutset = 3;
+    static constexpr int kOverlayBadgeGap = 3;
+    static constexpr int kOverlayBadgeLeftInset = 6;
+    static constexpr int kOverlayBadgeTopInset = 6;
+    static constexpr int kOverlayCornerRadius = 6;
+    static constexpr int kOverlayBadgeRadius = 7;
 
     static bool isOverlayTargetWindowVisible(QWidget *widget)
     {
@@ -1271,11 +1274,10 @@ private:
             }
 
             const LayoutMetrics layout = layoutMetrics();
-            const QPoint topLeft = m_targetWindow->mapToGlobal(m_targetWindow->rect().topLeft());
             m_contentOrigin = layout.targetRect.topLeft();
             const QRect targetRect(
-                topLeft.x() - m_contentOrigin.x(),
-                topLeft.y() - m_contentOrigin.y(),
+                layout.wrappedGlobalRect.x() - layout.wrappedRect.x(),
+                layout.wrappedGlobalRect.y() - layout.wrappedRect.y(),
                 layout.overlayWidth,
                 layout.overlayHeight
             );
@@ -1367,7 +1369,7 @@ private:
                 glowGradient.setColorAt(1.0, QColor(0, 245, 255, 55));
                 painter.setPen(QPen(QBrush(glowGradient), 6));
                 painter.setBrush(Qt::NoBrush);
-                painter.drawRoundedRect(frameRect, 8, 8);
+                painter.drawRoundedRect(frameRect, kOverlayCornerRadius, kOverlayCornerRadius);
 
                 QLinearGradient frameGradient(frameRect.topLeft(), frameRect.bottomRight());
                 frameGradient.setColorAt(0.0, QColor(0, 245, 255, 185));
@@ -1376,17 +1378,17 @@ private:
                 frameGradient.setColorAt(1.0, QColor(0, 245, 255, 180));
                 painter.setPen(QPen(QBrush(frameGradient), 2));
                 painter.setBrush(Qt::NoBrush);
-                painter.drawRoundedRect(frameRect, 8, 8);
+                painter.drawRoundedRect(frameRect, kOverlayCornerRadius, kOverlayCornerRadius);
 
                 painter.setFont(layout.badgeFont);
                 const QRect badgeRect = layout.badgeRect;
 
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(QColor(9, 29, 61, 150));
-                painter.drawRoundedRect(badgeRect, 8, 8);
+                painter.drawRoundedRect(badgeRect, kOverlayBadgeRadius, kOverlayBadgeRadius);
                 painter.setPen(QPen(QColor(140, 228, 255, 135), 1));
                 painter.setBrush(Qt::NoBrush);
-                painter.drawRoundedRect(badgeRect, 8, 8);
+                painter.drawRoundedRect(badgeRect, kOverlayBadgeRadius, kOverlayBadgeRadius);
                 painter.setPen(QColor(255, 255, 255, 210));
                 painter.drawText(badgeRect.adjusted(9, 0, -9, 0), Qt::AlignVCenter | Qt::AlignLeft, layout.badgeText);
             }
@@ -1449,10 +1451,13 @@ private:
         struct LayoutMetrics
         {
             QRect targetRect;
+            QRect wrappedRect;
+            QRect wrappedGlobalRect;
             QRect frameRect;
             QRect badgeRect;
             QFont badgeFont;
             QString badgeText;
+            bool isMaximized = false;
             int overlayWidth = 0;
             int overlayHeight = 0;
         };
@@ -1477,6 +1482,37 @@ private:
             return font;
         }
 
+        bool isMaximizedWindow() const
+        {
+            if (!m_targetWindow)
+                return false;
+            if (m_targetWindow->isMaximized())
+                return true;
+            return m_targetWindow->windowState().testFlag(Qt::WindowMaximized);
+        }
+
+        QRect wrappedGlobalRect() const
+        {
+            if (!m_targetWindow)
+                return QRect();
+
+            const QPoint contentTopLeft = m_targetWindow->mapToGlobal(m_targetWindow->rect().topLeft());
+            const QRect contentGlobalRect(contentTopLeft, m_targetWindow->size());
+            const QRect frameGlobalRect = m_targetWindow->frameGeometry();
+            if (
+                frameGlobalRect.isValid()
+                && frameGlobalRect.contains(contentGlobalRect)
+                && (
+                    frameGlobalRect.topLeft() != contentGlobalRect.topLeft()
+                    || frameGlobalRect.size() != contentGlobalRect.size()
+                )
+            ) {
+                return frameGlobalRect;
+            }
+
+            return contentGlobalRect;
+        }
+
         LayoutMetrics layoutMetrics() const
         {
             LayoutMetrics layout;
@@ -1491,14 +1527,24 @@ private:
                 badgeHeight = metrics.height() + 8;
             }
 
-            const int badgeReserve = layout.badgeText.isEmpty() ? 0 : badgeHeight + kOverlayBadgeGap;
-            layout.targetRect = QRect(
+            layout.wrappedGlobalRect = wrappedGlobalRect();
+            const QPoint contentTopLeft = m_targetWindow ? m_targetWindow->mapToGlobal(m_targetWindow->rect().topLeft()) : QPoint();
+            const QPoint contentOffset = contentTopLeft - layout.wrappedGlobalRect.topLeft();
+            layout.isMaximized = isMaximizedWindow();
+            const int badgeReserve = (!layout.badgeText.isEmpty() && !layout.isMaximized) ? badgeHeight + kOverlayBadgeGap : 0;
+            layout.wrappedRect = QRect(
                 kOverlayEdgePadding + kOverlayFrameOutset,
                 kOverlayEdgePadding + kOverlayFrameOutset + badgeReserve,
+                layout.wrappedGlobalRect.width(),
+                layout.wrappedGlobalRect.height()
+            );
+            layout.targetRect = QRect(
+                layout.wrappedRect.left() + contentOffset.x(),
+                layout.wrappedRect.top() + contentOffset.y(),
                 m_targetWindow ? m_targetWindow->width() : 0,
                 m_targetWindow ? m_targetWindow->height() : 0
             );
-            layout.frameRect = layout.targetRect.adjusted(
+            layout.frameRect = layout.wrappedRect.adjusted(
                 -kOverlayFrameOutset,
                 -kOverlayFrameOutset,
                 kOverlayFrameOutset,
@@ -1508,13 +1554,30 @@ private:
             layout.overlayHeight = layout.frameRect.bottom() + kOverlayEdgePadding + 1;
 
             if (!layout.badgeText.isEmpty()) {
-                layout.badgeRect = QRect(
-                    layout.frameRect.left() + kOverlayBadgeLeftInset,
-                    layout.frameRect.top() - kOverlayBadgeGap - badgeHeight,
-                    badgeWidth,
-                    badgeHeight
-                );
+                if (layout.isMaximized) {
+                    const int badgeBandTop = layout.frameRect.top() + kOverlayBadgeTopInset;
+                    const int badgeBandBottom = qMax(
+                        badgeBandTop,
+                        layout.targetRect.top() - kOverlayBadgeTopInset - badgeHeight
+                    );
+                    const int centeredBadgeTop = layout.frameRect.top() + (layout.targetRect.top() - layout.frameRect.top() - badgeHeight) / 2;
+                    const int badgeTop = qMin(qMax(centeredBadgeTop, badgeBandTop), badgeBandBottom);
+                    layout.badgeRect = QRect(
+                        layout.frameRect.center().x() - badgeWidth / 2,
+                        badgeTop,
+                        badgeWidth,
+                        badgeHeight
+                    );
+                } else {
+                    layout.badgeRect = QRect(
+                        layout.frameRect.left() + kOverlayBadgeLeftInset,
+                        layout.frameRect.top() - kOverlayBadgeGap - badgeHeight,
+                        badgeWidth,
+                        badgeHeight
+                    );
+                }
                 layout.overlayWidth = qMax(layout.overlayWidth, layout.badgeRect.right() + kOverlayEdgePadding + 1);
+                layout.overlayHeight = qMax(layout.overlayHeight, layout.badgeRect.bottom() + kOverlayEdgePadding + 1);
             }
 
             return layout;
@@ -2639,8 +2702,6 @@ private:
             Qt::NoModifier
         );
 #endif
-        QApplication::sendEvent(target, &event);
-        QApplication::processEvents();
     }
 
     void selectOption(QWidget *w, const QJsonObject &params)
@@ -2765,8 +2826,8 @@ private slots:
             int idx = m_buffer.indexOf('\n');
             QByteArray line = m_buffer.left(idx).trimmed();
             m_buffer = m_buffer.mid(idx + 1);
-            if (line.isEmpty()) continue;
-            processLine(line);
+            if (!line.isEmpty())
+                processLine(line);
         }
     }
 
@@ -2849,7 +2910,6 @@ private:
  *   QPlaywrightAgent::start(19876, "127.0.0.1", true);
  * @endcode
  *
- * The agent runs a TCP server on the specified port. Each client connection
  * is handled in a dedicated QThread, with commands dispatched to the main
  * thread via BlockingQueuedConnection for thread-safe widget access.
  */
@@ -2859,7 +2919,6 @@ class QPlaywrightAgent : public QObject
 public:
     /**
      * @brief Start the agent on the given port.
-     * @param port TCP port to listen on (default: 19876)
      * @param host Host to bind to (default: 127.0.0.1)
      * @param visualFeedback Whether to show click feedback rings in the UI.
      * @return Pointer to the agent instance (owned by QApplication)
