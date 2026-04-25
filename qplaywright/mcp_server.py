@@ -6,6 +6,7 @@ northbound MCP tool layer so MCP hosts can connect to a running Qt app,
 inspect windows, and interact with widgets via the existing selector model.
 """
 
+import base64
 import builtins
 import argparse
 import atexit
@@ -14,11 +15,15 @@ import contextlib
 import json
 import logging
 import re
+import shutil
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
 from pydantic import ValidationError
 
@@ -42,6 +47,7 @@ _TOPMOST_ONLY_WARNING = (
     "topmost_only is an approximate frontmost-visible filter and may omit widgets or content. "
     "Rerun with topmost_only=false when you need a complete tree."
 )
+_SCREENSHOT_TEMP_DIR = Path(tempfile.gettempdir()) / "qplaywright_screenshots" / uuid4().hex
 
 SessionAction = Literal["attach", "launch", "close", "status"]
 WindowAction = Literal["list", "select", "resize", "close"]
@@ -115,6 +121,13 @@ class ServerState:
 
 _SERVER_STATE = ServerState()
 atexit.register(_SERVER_STATE.close_all)
+
+
+def _cleanup_screenshot_temp_dir() -> None:
+    shutil.rmtree(_SCREENSHOT_TEMP_DIR, ignore_errors=True)
+
+
+atexit.register(_cleanup_screenshot_temp_dir)
 
 
 def _mcp_client_notification_supports_cancelled() -> bool:
@@ -595,6 +608,29 @@ def _inspect_locator(
     return result
 
 
+def _compact_action_state(locator: Any) -> dict[str, Any]:
+    inspected = _inspect_locator(locator)
+    state = {
+        "exists": inspected["exists"],
+        "count": inspected["count"],
+    }
+
+    for source_key, target_key in (
+        ("is_visible", "visible"),
+        ("is_enabled", "enabled"),
+        ("is_checked", "checked"),
+        ("text", "text"),
+        ("currentText", "currentText"),
+        ("value", "value"),
+    ):
+        value = inspected.get(source_key)
+        if value is None or value == "":
+            continue
+        state[target_key] = value
+
+    return state
+
+
 def _invoke_locator_method(
     locator: Any,
     *,
@@ -809,6 +845,34 @@ def _write_text_file(path: str, content: str) -> str:
     return str(target_path)
 
 
+def _next_managed_screenshot_path() -> Path:
+    _SCREENSHOT_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    return _SCREENSHOT_TEMP_DIR / f"screenshot-{timestamp}-{uuid4().hex[:8]}.png"
+
+
+def _normalize_screenshot_result(result: Any) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        raise TypeError(f"Unexpected screenshot result type: {type(result)!r}")
+
+    path = result.get("path")
+    if isinstance(path, str) and path:
+        normalized = dict(result)
+        normalized.pop("data", None)
+        return normalized
+
+    data = result.get("data")
+    if not isinstance(data, str) or not data:
+        raise ValueError("Screenshot result did not include a file path or image data")
+
+    target_path = _next_managed_screenshot_path()
+    target_path.write_bytes(base64.b64decode(data))
+
+    normalized = {key: value for key, value in result.items() if key != "data"}
+    normalized["path"] = str(target_path)
+    return normalized
+
+
 def _target_params(connection: ManagedConnection, target: str, **extra: Any) -> dict[str, Any]:
     if _SNAPSHOT_REF_PATTERN.match(target):
         ref_wid = connection.snapshot_refs.get(target)
@@ -910,10 +974,21 @@ def _observe_action_window_state(
     }
 
 
+def _observe_action_target_state(
+    managed_connection: ManagedConnection,
+    *,
+    target: str,
+) -> dict[str, Any]:
+    locator = _resolve_locator(managed_connection, target=target)
+    return _compact_action_state(locator)
+
+
 def _finalize_action_result(
     managed_connection: ManagedConnection,
     *,
+    include_state: bool = False,
     include_snapshot: bool = False,
+    state_target: str | None = None,
     snapshot_target: str | None = None,
     snapshot_depth: int = 3,
     **payload: Any,
@@ -930,6 +1005,16 @@ def _finalize_action_result(
         post_action_warnings.append(
             f"post-action window state unavailable: {exc}. Window state is unknown; retry snapshot if you need to confirm focus or modal changes."
         )
+
+    if include_state:
+        if state_target is None:
+            result["state"] = None
+        else:
+            try:
+                result["state"] = _observe_action_target_state(managed_connection, target=state_target)
+            except Exception as exc:
+                result["state"] = None
+                post_action_warnings.append(f"post-action target state unavailable: {exc}")
 
     if not include_snapshot:
         if post_action_warnings:
@@ -1067,10 +1152,12 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE)
 
         if action == "list":
+            windows = _window_summary(connection_state)
             return {
                 "ok": True,
                 "action": action,
-                "windows": _window_summary(connection_state),
+                "windows": windows,
+                "active_window": _active_window_summary(connection_state, windows=windows),
             }
 
         if action == "select":
@@ -1209,6 +1296,7 @@ if FastMCP is not None:
     def click(
         target: str,
         count: int = 1,
+        include_state: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Click or double-click the first widget matched by a target."""
@@ -1224,7 +1312,9 @@ if FastMCP is not None:
             locator.click()
         return _finalize_action_result(
             connection_state,
+            include_state=include_state,
             include_snapshot=include_snapshot,
+            state_target=target,
             snapshot_target=target,
             ok=True,
             count=count,
@@ -1239,6 +1329,7 @@ if FastMCP is not None:
         mode: str = "replace",
         delay: int = 0,
         submit: bool = False,
+        include_state: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Input text into the first matched input-like widget."""
@@ -1264,7 +1355,9 @@ if FastMCP is not None:
 
         return _finalize_action_result(
             connection_state,
+            include_state=include_state,
             include_snapshot=include_snapshot,
+            state_target=target,
             snapshot_target=target,
             ok=True,
             target=target,
@@ -1280,6 +1373,7 @@ if FastMCP is not None:
         target: str,
         method: str,
         args: dict[str, Any] | None = None,
+        include_state: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Invoke one exposed custom widget method by exact name."""
@@ -1289,7 +1383,9 @@ if FastMCP is not None:
         result = _invoke_locator_method(locator, method_name=method, args=args)
         return _finalize_action_result(
             connection_state,
+            include_state=include_state,
             include_snapshot=include_snapshot,
+            state_target=target,
             snapshot_target=target,
             ok=True,
             target=target,
@@ -1301,6 +1397,7 @@ if FastMCP is not None:
     def press_key(
         key: str,
         target: str | None = None,
+        include_state: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Send a single key press to the first matched widget."""
@@ -1313,7 +1410,9 @@ if FastMCP is not None:
             locator.press(key)
         return _finalize_action_result(
             connection_state,
+            include_state=include_state,
             include_snapshot=include_snapshot,
+            state_target=target,
             snapshot_target=target,
             ok=True,
             target=target,
@@ -1325,6 +1424,7 @@ if FastMCP is not None:
     def set_checked(
         target: str,
         checked: bool,
+        include_state: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Check or uncheck the first matched checkable widget."""
@@ -1337,7 +1437,9 @@ if FastMCP is not None:
             locator.uncheck()
         return _finalize_action_result(
             connection_state,
+            include_state=include_state,
             include_snapshot=include_snapshot,
+            state_target=target,
             snapshot_target=target,
             ok=True,
             target=target,
@@ -1351,6 +1453,7 @@ if FastMCP is not None:
         value: str | None = None,
         index: int | None = None,
         label: str | None = None,
+        include_state: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Select a combobox option by value, index, or label."""
@@ -1364,7 +1467,9 @@ if FastMCP is not None:
         locator.select_option(value=value, index=index, label=label)
         return _finalize_action_result(
             connection_state,
+            include_state=include_state,
             include_snapshot=include_snapshot,
+            state_target=target,
             snapshot_target=target,
             ok=True,
             target=target,
@@ -1379,6 +1484,7 @@ if FastMCP is not None:
         target: str,
         state: str = "visible",
         timeout: float | None = None,
+        include_state: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Wait until a widget reaches a supported state."""
@@ -1398,7 +1504,9 @@ if FastMCP is not None:
         }
         return _finalize_action_result(
             connection_state,
+            include_state=include_state,
             include_snapshot=include_snapshot,
+            state_target=target,
             snapshot_target=target,
             **payload,
         )
@@ -1449,6 +1557,7 @@ if FastMCP is not None:
                 result = locator.screenshot(path=path)
             else:
                 result = locator.screenshot()
+        result = _normalize_screenshot_result(result)
         result["ok"] = True
         result["target"] = target
         result["active_window"] = _active_window_summary(live_connection)
@@ -1458,6 +1567,7 @@ if FastMCP is not None:
     @mcp.tool()
     def hover(
         target: str,
+        include_state: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Hover over the first widget matched by a target."""
@@ -1467,7 +1577,9 @@ if FastMCP is not None:
         locator.hover()
         return _finalize_action_result(
             connection_state,
+            include_state=include_state,
             include_snapshot=include_snapshot,
+            state_target=target,
             snapshot_target=target,
             ok=True,
             target=target,
@@ -1479,6 +1591,7 @@ if FastMCP is not None:
         target: str,
         delta_x: int = 0,
         delta_y: int = 0,
+        include_state: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Send a mouse wheel scroll event to the first matched widget."""
@@ -1491,7 +1604,9 @@ if FastMCP is not None:
         locator.scroll(delta_x=delta_x, delta_y=delta_y)
         return _finalize_action_result(
             connection_state,
+            include_state=include_state,
             include_snapshot=include_snapshot,
+            state_target=target,
             snapshot_target=target,
             ok=True,
             target=target,
@@ -1803,6 +1918,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     click_parser = subparsers.add_parser("click", help="Click the first widget matched by a target.")
     click_parser.add_argument("target")
     click_parser.add_argument("--count", type=int, choices=(1, 2), default=1)
+    click_parser.add_argument("--include-state", action="store_true")
     click_parser.add_argument("--include-snapshot", action="store_true")
 
     input_parser = subparsers.add_parser("input", help="Input text into the first matched widget.")
@@ -1811,6 +1927,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     input_parser.add_argument("--mode", choices=("replace", "append"), default="replace")
     input_parser.add_argument("--delay", type=int, default=0)
     input_parser.add_argument("--submit", action="store_true")
+    input_parser.add_argument("--include-state", action="store_true")
     input_parser.add_argument("--include-snapshot", action="store_true")
 
     inspect_parser = subparsers.add_parser("inspect", help="Inspect one target or return the current window tree.")
@@ -1825,17 +1942,20 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     invoke_parser.add_argument("target")
     invoke_parser.add_argument("method")
     invoke_parser.add_argument("--args", default="{}")
+    invoke_parser.add_argument("--include-state", action="store_true")
     invoke_parser.add_argument("--include-snapshot", action="store_true")
 
     press_key_parser = subparsers.add_parser("press_key", help="Send a key press to the matched widget.")
     press_key_parser.add_argument("key")
     press_key_parser.add_argument("--target")
+    press_key_parser.add_argument("--include-state", action="store_true")
     press_key_parser.add_argument("--include-snapshot", action="store_true")
 
     set_checked_parser = subparsers.add_parser("set_checked", help="Check or uncheck the matched widget.")
     set_checked_parser.add_argument("target")
     set_checked_parser.add_argument("--checked", action="store_true")
     set_checked_parser.add_argument("--unchecked", action="store_true")
+    set_checked_parser.add_argument("--include-state", action="store_true")
     set_checked_parser.add_argument("--include-snapshot", action="store_true")
 
     choose_parser = subparsers.add_parser("choose", help="Select a combobox option by value, index, or label.")
@@ -1844,12 +1964,14 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     choose_group.add_argument("--value")
     choose_group.add_argument("--index", type=int)
     choose_group.add_argument("--label")
+    choose_parser.add_argument("--include-state", action="store_true")
     choose_parser.add_argument("--include-snapshot", action="store_true")
 
     wait_parser = subparsers.add_parser("wait", help="Wait until a widget reaches a supported state.")
     wait_parser.add_argument("target")
     wait_parser.add_argument("--state", default="visible", choices=("visible", "hidden", "enabled", "disabled", "checked", "unchecked"))
     wait_parser.add_argument("--timeout", type=float)
+    wait_parser.add_argument("--include-state", action="store_true")
     wait_parser.add_argument("--include-snapshot", action="store_true")
 
     screenshot_parser = subparsers.add_parser("screenshot", help="Capture a screenshot of the window or a widget.")
@@ -1862,12 +1984,14 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
 
     hover_parser = subparsers.add_parser("hover", help="Hover over the first matched widget.")
     hover_parser.add_argument("target")
+    hover_parser.add_argument("--include-state", action="store_true")
     hover_parser.add_argument("--include-snapshot", action="store_true")
 
     scroll_parser = subparsers.add_parser("scroll", help="Send a mouse wheel scroll event to the matched widget.")
     scroll_parser.add_argument("target")
     scroll_parser.add_argument("--delta-x", type=int, default=0)
     scroll_parser.add_argument("--delta-y", type=int, default=0)
+    scroll_parser.add_argument("--include-state", action="store_true")
     scroll_parser.add_argument("--include-snapshot", action="store_true")
 
     return parser
@@ -1891,6 +2015,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "target": namespace.target,
             "method": namespace.method,
             "args": json.loads(namespace.args),
+            "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
 
@@ -1898,6 +2023,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         return "press_key", {
             "key": namespace.key,
             "target": namespace.target,
+            "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
 
@@ -1908,11 +2034,16 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         return "set_checked", {
             "target": namespace.target,
             "checked": checked,
+            "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
 
     if command == "choose":
-        arguments = {"target": namespace.target, "include_snapshot": namespace.include_snapshot}
+        arguments = {
+            "target": namespace.target,
+            "include_state": namespace.include_state,
+            "include_snapshot": namespace.include_snapshot,
+        }
         for field_name in ("value", "index", "label"):
             value = getattr(namespace, field_name, None)
             if value is not None:
@@ -1924,6 +2055,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "target": namespace.target,
             "state": namespace.state,
             "timeout": namespace.timeout,
+            "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
 
@@ -1941,6 +2073,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
     if command == "hover":
         return "hover", {
             "target": namespace.target,
+            "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
 
@@ -1949,6 +2082,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "target": namespace.target,
             "delta_x": namespace.delta_x,
             "delta_y": namespace.delta_y,
+            "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
 
@@ -1991,6 +2125,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         return "click", {
             "target": namespace.target,
             "count": namespace.count,
+            "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
 
@@ -2001,6 +2136,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "mode": namespace.mode,
             "delay": namespace.delay,
             "submit": namespace.submit,
+            "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
 

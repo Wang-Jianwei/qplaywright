@@ -171,6 +171,14 @@ When `include_snapshot=true`, the response also includes:
 - `snapshot`
 - `refs`
 
+Action tools also support `include_state=false` by default.
+When `include_state=true`, the response includes a compact target-level `state`
+payload such as `exists`, `count`, `visible`, `enabled`, `checked`, `text`,
+`currentText`, and `value` when those fields are available.
+
+`include_state` and `include_snapshot` are independent and may both be `true`
+in the same request.
+
 ## Tool Details
 
 ### session
@@ -244,7 +252,7 @@ Resize also requires:
 - `width`
 - `height`
 
-`list`, `select`, `resize`, and `close` return window summaries using:
+All returned window summaries use:
 
 - `wid`
 - `title`
@@ -252,6 +260,9 @@ Resize also requires:
 - `geometry`
 - `is_active`
 - `is_modal`
+
+`window list` returns both `windows` and `active_window`.
+`window select`, `window resize`, and `window close` return `active_window`.
 
 ### snapshot
 
@@ -321,6 +332,7 @@ Common action request shape:
 ```json
 {
   "target": "e12",
+  "include_state": false,
   "include_snapshot": true
 }
 ```
@@ -354,7 +366,8 @@ Request:
 
 When `target` is omitted, the current active window is captured.
 When clipping fields are provided, all of `x`, `y`, `width`, and `height` must be present.
-When `path` is omitted, the response returns inline PNG data in `data` instead of a saved file path.
+When `path` is omitted, the MCP server writes the capture to a managed temporary PNG file and returns that file path.
+These managed screenshot files live under a dedicated qplaywright temp directory and are cleaned up when the MCP server exits.
 
 ## End-to-End Demo
 

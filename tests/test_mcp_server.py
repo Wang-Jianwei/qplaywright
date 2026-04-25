@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import anyio
 import json
+from pathlib import Path
 
 import pytest
 
@@ -456,6 +458,7 @@ def test_window_tool_lists_selects_resizes_and_closes(monkeypatch):
     closed = mcp_server.window(action="close", wid=22)
 
     assert [window["wid"] for window in listed["windows"]] == [11, 22]
+    assert listed["active_window"]["wid"] == 11
     assert listed["windows"][0]["is_active"] is True
     assert listed["windows"][1]["is_modal"] is True
     assert listed["windows"][0]["geometry"] == {"x": None, "y": None, "width": None, "height": None}
@@ -464,9 +467,11 @@ def test_window_tool_lists_selects_resizes_and_closes(monkeypatch):
     assert selected["active_window"]["geometry"] == {"x": None, "y": None, "width": None, "height": None}
     assert selected["refs_cleared"] is True
     assert resized["active_window"]["wid"] == 22
+    assert "windows" not in resized
     assert first.resized_to is None
     assert second.resized_to == (800, 600)
     assert closed["active_window"]["wid"] == 11
+    assert "windows" not in closed
     assert second.closed is True
 
 
@@ -687,6 +692,86 @@ def test_wait_can_include_snapshot(monkeypatch):
     assert result["target"] == "#status_label"
     assert result["window_changed"] is False
     assert result["active_window"]["wid"] == 11
+    assert result["snapshot"] == "- DemoWindow [ref=e1]"
+    assert result["refs"] == [{"ref": "e1"}]
+
+
+def test_finalize_action_result_can_include_compact_state(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    locator = FakeLocator(count=1)
+
+    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(
+        mcp_server,
+        "_list_windows_raw",
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
+    )
+
+    result = mcp_server._finalize_action_result(
+        connection,
+        include_state=True,
+        state_target="#submit",
+        ok=True,
+        target="#submit",
+    )
+
+    assert result["ok"] is True
+    assert result["window_changed"] is False
+    assert result["active_window"]["wid"] == 11
+    assert result["state"] == {
+        "exists": True,
+        "count": 1,
+        "visible": True,
+        "enabled": False,
+        "checked": True,
+        "text": "Save",
+        "value": "ready",
+    }
+
+
+def test_finalize_action_result_can_include_state_and_snapshot_together(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    locator = FakeLocator(count=1)
+
+    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(
+        mcp_server,
+        "_list_windows_raw",
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "_action_result_with_snapshot",
+        lambda managed_connection, **payload: payload | {"snapshot": "- DemoWindow [ref=e1]", "refs": [{"ref": "e1"}]},
+    )
+
+    result = mcp_server._finalize_action_result(
+        connection,
+        include_state=True,
+        include_snapshot=True,
+        state_target="#submit",
+        snapshot_target="#submit",
+        ok=True,
+        target="#submit",
+    )
+
+    assert result["state"]["visible"] is True
     assert result["snapshot"] == "- DemoWindow [ref=e1]"
     assert result["refs"] == [{"ref": "e1"}]
 
@@ -1155,6 +1240,48 @@ def test_screenshot_returns_schema_fields(monkeypatch):
     assert result["active_window"]["is_active"] is True
 
 
+def test_screenshot_without_path_writes_managed_temp_file(monkeypatch, tmp_path):
+    state = mcp_server.ServerState()
+    window = FakeWindow(11, "Main")
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([window]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    locator = FakeLocator(count=1)
+    image_bytes = b"fake-png-data"
+
+    def fake_screenshot(**kwargs):
+        locator.screenshot_calls.append(kwargs)
+        return {
+            "data": base64.b64encode(image_bytes).decode(),
+            "width": 120,
+            "height": 40,
+        }
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(mcp_server, "_SCREENSHOT_TEMP_DIR", tmp_path / "qplaywright_screenshots")
+    monkeypatch.setattr(locator, "screenshot", fake_screenshot)
+
+    result = mcp_server.screenshot(target="#amount")
+
+    assert locator.screenshot_calls == [{}]
+    assert result["ok"] is True
+    assert result["target"] == "#amount"
+    assert "data" not in result
+    screenshot_path = Path(result["path"])
+    assert screenshot_path.exists()
+    assert screenshot_path.read_bytes() == image_bytes
+    assert result["width"] == 120
+    assert result["height"] == 40
+    assert result["active_window"]["wid"] == 11
+
+
 def test_run_cli_invokes_tool_and_prints_json(monkeypatch, capsys):
     monkeypatch.setattr(
         mcp_server,
@@ -1338,12 +1465,14 @@ def test_run_cli_typed_click_and_input(monkeypatch, capsys):
     assert click_payload == {
         "ok": True,
         "count": 2,
+        "include_state": False,
         "include_snapshot": True,
         "target": "text=Start",
     }
     assert input_payload == {
         "ok": True,
         "delay": 25,
+        "include_state": False,
         "include_snapshot": False,
         "mode": "append",
         "submit": True,
@@ -1353,7 +1482,7 @@ def test_run_cli_typed_click_and_input(monkeypatch, capsys):
     assert captured == [
         (
             "click",
-            {"target": "text=Start", "count": 2, "include_snapshot": True},
+            {"target": "text=Start", "count": 2, "include_state": False, "include_snapshot": True},
         ),
         (
             "input",
@@ -1363,10 +1492,39 @@ def test_run_cli_typed_click_and_input(monkeypatch, capsys):
                 "mode": "append",
                 "delay": 25,
                 "submit": True,
+                "include_state": False,
                 "include_snapshot": False,
             },
         ),
     ]
+
+
+def test_run_cli_typed_click_supports_include_state(monkeypatch, capsys):
+    captured = {}
+
+    def fake_click(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True, **kwargs}
+
+    monkeypatch.setattr(mcp_server, "click", fake_click)
+
+    exit_code = mcp_server._run_cli(["click", "text=Start", "--include-state"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "target": "text=Start",
+        "count": 1,
+        "include_state": True,
+        "include_snapshot": False,
+    }
+    assert captured == {
+        "target": "text=Start",
+        "count": 1,
+        "include_state": True,
+        "include_snapshot": False,
+    }
 
 
 def test_main_cli_dispatches_to_cli_runner(monkeypatch):
