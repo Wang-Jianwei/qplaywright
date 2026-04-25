@@ -1119,6 +1119,25 @@ def test_press_key_without_target_uses_active_window_transport(monkeypatch):
     assert result["key"] == "Enter"
 
 
+def test_mcp_tool_input_schema_describes_all_parameters():
+    assert mcp_server.mcp is not None
+
+    async def list_tools():
+        assert mcp_server.mcp is not None
+        return await mcp_server.mcp.list_tools()
+
+    tools = anyio.run(list_tools)
+    dumped = [tool.model_dump(mode="json") for tool in tools]
+
+    for tool in dumped:
+        properties = tool["inputSchema"].get("properties", {})
+        for property_name, schema in properties.items():
+            assert schema.get("description"), f"{tool['name']}.{property_name} is missing description"
+
+    click_tool = next(tool for tool in dumped if tool["name"] == "click")
+    assert "post-action snapshot" in click_tool["inputSchema"]["properties"]["include_snapshot"]["description"]
+
+
 def test_summarize_windows_uses_geometry_payload():
     connection = mcp_server.ManagedConnection(
         name="demo",

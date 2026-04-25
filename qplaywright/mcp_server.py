@@ -23,10 +23,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from qplaywright.protocol import (
     DEFAULT_HOST,
@@ -66,6 +66,198 @@ _ALLOWED_WAIT_CONDITIONS = {
     "checked_equals",
     "count_equals",
 }
+
+SessionActionArg = Annotated[
+    SessionAction,
+    Field(description="Session action to run: attach, launch, close, or status."),
+]
+HostArg = Annotated[
+    str,
+    Field(description="Host where the qplaywright agent is listening."),
+]
+PortArg = Annotated[
+    int,
+    Field(description="TCP port where the qplaywright agent is listening."),
+]
+TimeoutSecondsArg = Annotated[
+    float,
+    Field(description="Timeout in seconds for the session operation."),
+]
+ExecutableArg = Annotated[
+    str | None,
+    Field(description="Executable path to launch when action is launch."),
+]
+LaunchArgsArg = Annotated[
+    list[str] | None,
+    Field(description="Optional command-line arguments passed to the launched executable."),
+]
+AgentNameArg = Annotated[
+    str | None,
+    Field(description="Agent name reported to the remote qplaywright agent."),
+]
+
+WindowActionArg = Annotated[
+    WindowAction,
+    Field(description="Window action to run: list, select, resize, or close."),
+]
+WindowIndexArg = Annotated[
+    int | None,
+    Field(description="Zero-based window index used for selection or targeting."),
+]
+WindowWidArg = Annotated[
+    int | None,
+    Field(description="Exact window wid used for selection or targeting."),
+]
+WindowTitleArg = Annotated[
+    str | None,
+    Field(description="Case-insensitive window title substring used for selection or targeting."),
+]
+WindowWidthArg = Annotated[
+    int | None,
+    Field(description="Target window width in pixels for resize."),
+]
+WindowHeightArg = Annotated[
+    int | None,
+    Field(description="Target window height in pixels for resize."),
+]
+
+WidgetTargetArg = Annotated[
+    str,
+    Field(description="Widget selector or snapshot ref target, such as #objectName, role=button, text=Submit, or e1."),
+]
+OptionalWidgetTargetArg = Annotated[
+    str | None,
+    Field(description="Optional widget selector or snapshot ref target. Omit to use the active window or focused widget when supported."),
+]
+DepthArg = Annotated[
+    int,
+    Field(description="Maximum widget tree depth to include in the returned snapshot or inspect tree."),
+]
+TopmostOnlyArg = Annotated[
+    bool,
+    Field(description="When true, return an approximate frontmost-visible view instead of the full active window tree."),
+]
+IncludeInfrastructureArg = Annotated[
+    bool,
+    Field(description="When true, include Qt infrastructure helper widgets that are normally filtered out."),
+]
+SaveToArg = Annotated[
+    str | None,
+    Field(description="Optional filesystem path where the text snapshot should be written."),
+]
+PropertyArg = Annotated[
+    str | None,
+    Field(description="Optional widget property name to read alongside the standard inspect payload."),
+]
+IncludeMethodsArg = Annotated[
+    bool,
+    Field(description="When true, include exposed custom widget methods in inspect output."),
+]
+IncludePropertiesArg = Annotated[
+    bool,
+    Field(description="When true, include the raw widget property map in inspect output."),
+]
+
+ClickCountArg = Annotated[
+    int,
+    Field(description="Click count. Use 1 for a single click or 2 for a double click."),
+]
+InputTextArg = Annotated[
+    str,
+    Field(description="Text to input into the matched widget."),
+]
+InputModeArg = Annotated[
+    str,
+    Field(description="Input mode. Use replace to overwrite existing content or append to type after it."),
+]
+InputDelayArg = Annotated[
+    int,
+    Field(description="Delay in milliseconds between typed characters when keyboard typing is used."),
+]
+SubmitArg = Annotated[
+    bool,
+    Field(description="When true, press Enter after the input action."),
+]
+IncludeStateArg = Annotated[
+    bool,
+    Field(description="When true, include a compact post-action target state in result.state."),
+]
+IncludeSnapshotArg = Annotated[
+    bool,
+    Field(description="When true, include a post-action snapshot and refs in the result. If the action changes windows, the snapshot falls back to the active window."),
+]
+MethodArg = Annotated[
+    str,
+    Field(description="Exact exposed custom widget method name to invoke."),
+]
+InvokeArgsArg = Annotated[
+    dict[str, Any] | None,
+    Field(description="Optional keyword argument object passed to the custom widget method."),
+]
+KeyArg = Annotated[
+    str,
+    Field(description="Qt or keyboard key name to press, such as Enter, Tab, Escape, or Ctrl+A."),
+]
+CheckedArg = Annotated[
+    bool,
+    Field(description="Whether the matched checkable widget should end up checked."),
+]
+ChooseValueArg = Annotated[
+    str | None,
+    Field(description="Combobox option value to select. Provide exactly one of value, index, or label."),
+]
+ChooseIndexArg = Annotated[
+    int | None,
+    Field(description="Combobox option index to select. Provide exactly one of value, index, or label."),
+]
+ChooseLabelArg = Annotated[
+    str | None,
+    Field(description="Combobox option label or current text to select. Provide exactly one of value, index, or label."),
+]
+WaitStateArg = Annotated[
+    str | None,
+    Field(description="Built-in wait state to wait for: visible, hidden, enabled, disabled, checked, or unchecked."),
+]
+WaitConditionArg = Annotated[
+    str | None,
+    Field(description="Higher-level wait condition such as text_equals, text_contains, current_text_equals, current_text_contains, value_equals, checked_equals, or count_equals."),
+]
+WaitExpectedArg = Annotated[
+    str | int | bool | None,
+    Field(description="Expected value used with condition. Its type depends on the selected condition."),
+]
+OptionalTimeoutArg = Annotated[
+    float | None,
+    Field(description="Optional timeout in seconds for the operation. When omitted, the active session timeout is used."),
+]
+ScreenshotPathArg = Annotated[
+    str | None,
+    Field(description="Optional output file path for the screenshot. When omitted, the server materializes or returns a managed file path."),
+]
+ClipXArg = Annotated[
+    int | None,
+    Field(description="Optional left coordinate in pixels for screenshot clipping."),
+]
+ClipYArg = Annotated[
+    int | None,
+    Field(description="Optional top coordinate in pixels for screenshot clipping."),
+]
+ClipWidthArg = Annotated[
+    int | None,
+    Field(description="Optional clip width in pixels for screenshot clipping."),
+]
+ClipHeightArg = Annotated[
+    int | None,
+    Field(description="Optional clip height in pixels for screenshot clipping."),
+]
+DeltaXArg = Annotated[
+    int,
+    Field(description="Horizontal mouse wheel delta to send to the matched widget."),
+]
+DeltaYArg = Annotated[
+    int,
+    Field(description="Vertical mouse wheel delta to send to the matched widget."),
+]
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -1222,13 +1414,13 @@ if FastMCP is not None:
 
     @mcp.tool()
     def session(
-        action: SessionAction,
-        host: str = DEFAULT_HOST,
-        port: int = DEFAULT_PORT,
-        timeout: float = 30.0,
-        executable: str | None = None,
-        args: list[str] | None = None,
-        agent_name: str | None = "GitHub Copilot",
+        action: SessionActionArg,
+        host: HostArg = DEFAULT_HOST,
+        port: PortArg = DEFAULT_PORT,
+        timeout: TimeoutSecondsArg = 30.0,
+        executable: ExecutableArg = None,
+        args: LaunchArgsArg = None,
+        agent_name: AgentNameArg = "GitHub Copilot",
     ) -> dict[str, Any]:
         """Manage the active qplaywright session.
 
@@ -1294,12 +1486,12 @@ if FastMCP is not None:
 
     @mcp.tool()
     def window(
-        action: WindowAction,
-        index: int | None = None,
-        wid: int | None = None,
-        title: str | None = None,
-        width: int | None = None,
-        height: int | None = None,
+        action: WindowActionArg,
+        index: WindowIndexArg = None,
+        wid: WindowWidArg = None,
+        title: WindowTitleArg = None,
+        width: WindowWidthArg = None,
+        height: WindowHeightArg = None,
     ) -> dict[str, Any]:
         """Manage top-level windows in the current session.
 
@@ -1376,11 +1568,11 @@ if FastMCP is not None:
 
     @mcp.tool()
     def snapshot(
-        target: str | None = None,
-        depth: int = 10,
-        topmost_only: bool = False,
-        include_infrastructure: bool = False,
-        save_to: str | None = None,
+        target: OptionalWidgetTargetArg = None,
+        depth: DepthArg = 10,
+        topmost_only: TopmostOnlyArg = False,
+        include_infrastructure: IncludeInfrastructureArg = False,
+        save_to: SaveToArg = None,
     ) -> dict[str, Any]:
         """Return a text snapshot of the current active window or one target.
 
@@ -1416,13 +1608,13 @@ if FastMCP is not None:
 
     @mcp.tool()
     def inspect(
-        target: str | None = None,
-        property: str | None = None,
-        include_methods: bool = False,
-        include_properties: bool = False,
-        depth: int = 10,
-        topmost_only: bool = False,
-        include_infrastructure: bool = False,
+        target: OptionalWidgetTargetArg = None,
+        property: PropertyArg = None,
+        include_methods: IncludeMethodsArg = False,
+        include_properties: IncludePropertiesArg = False,
+        depth: DepthArg = 10,
+        topmost_only: TopmostOnlyArg = False,
+        include_infrastructure: IncludeInfrastructureArg = False,
     ) -> dict[str, Any]:
         """Inspect one target or return the current active window tree in debug mode.
 
@@ -1468,10 +1660,10 @@ if FastMCP is not None:
 
     @mcp.tool()
     def click(
-        target: str,
-        count: int = 1,
-        include_state: bool = False,
-        include_snapshot: bool = False,
+        target: WidgetTargetArg,
+        count: ClickCountArg = 1,
+        include_state: IncludeStateArg = False,
+        include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
         """Click or double-click the first widget matched by a target."""
 
@@ -1498,13 +1690,13 @@ if FastMCP is not None:
 
     @mcp.tool()
     def input(
-        target: str,
-        text: str,
-        mode: str = "replace",
-        delay: int = 0,
-        submit: bool = False,
-        include_state: bool = False,
-        include_snapshot: bool = False,
+        target: WidgetTargetArg,
+        text: InputTextArg,
+        mode: InputModeArg = "replace",
+        delay: InputDelayArg = 0,
+        submit: SubmitArg = False,
+        include_state: IncludeStateArg = False,
+        include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
         """Input text into the first matched input-like widget."""
 
@@ -1544,11 +1736,11 @@ if FastMCP is not None:
 
     @mcp.tool()
     def invoke(
-        target: str,
-        method: str,
-        args: dict[str, Any] | None = None,
-        include_state: bool = False,
-        include_snapshot: bool = False,
+        target: WidgetTargetArg,
+        method: MethodArg,
+        args: InvokeArgsArg = None,
+        include_state: IncludeStateArg = False,
+        include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
         """Invoke one exposed custom widget method by exact name."""
 
@@ -1569,10 +1761,10 @@ if FastMCP is not None:
         )
     @mcp.tool()
     def press_key(
-        key: str,
-        target: str | None = None,
-        include_state: bool = False,
-        include_snapshot: bool = False,
+        key: KeyArg,
+        target: OptionalWidgetTargetArg = None,
+        include_state: IncludeStateArg = False,
+        include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
         """Send a single key press to the first matched widget."""
 
@@ -1596,10 +1788,10 @@ if FastMCP is not None:
 
     @mcp.tool()
     def set_checked(
-        target: str,
-        checked: bool,
-        include_state: bool = False,
-        include_snapshot: bool = False,
+        target: WidgetTargetArg,
+        checked: CheckedArg,
+        include_state: IncludeStateArg = False,
+        include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
         """Check or uncheck the first matched checkable widget."""
 
@@ -1623,12 +1815,12 @@ if FastMCP is not None:
 
     @mcp.tool()
     def choose(
-        target: str,
-        value: str | None = None,
-        index: int | None = None,
-        label: str | None = None,
-        include_state: bool = False,
-        include_snapshot: bool = False,
+        target: WidgetTargetArg,
+        value: ChooseValueArg = None,
+        index: ChooseIndexArg = None,
+        label: ChooseLabelArg = None,
+        include_state: IncludeStateArg = False,
+        include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
         """Select a combobox option by value, index, or label."""
 
@@ -1657,13 +1849,13 @@ if FastMCP is not None:
 
     @mcp.tool()
     def wait(
-        target: str,
-        state: str | None = None,
-        condition: str | None = None,
-        expected: str | int | bool | None = None,
-        timeout: float | None = None,
-        include_state: bool = False,
-        include_snapshot: bool = False,
+        target: WidgetTargetArg,
+        state: WaitStateArg = None,
+        condition: WaitConditionArg = None,
+        expected: WaitExpectedArg = None,
+        timeout: OptionalTimeoutArg = None,
+        include_state: IncludeStateArg = False,
+        include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
         """Wait until a widget reaches a supported state."""
 
@@ -1723,12 +1915,12 @@ if FastMCP is not None:
 
     @mcp.tool()
     def screenshot(
-        target: str | None = None,
-        path: str | None = None,
-        x: int | None = None,
-        y: int | None = None,
-        width: int | None = None,
-        height: int | None = None,
+        target: OptionalWidgetTargetArg = None,
+        path: ScreenshotPathArg = None,
+        x: ClipXArg = None,
+        y: ClipYArg = None,
+        width: ClipWidthArg = None,
+        height: ClipHeightArg = None,
     ) -> dict[str, Any]:
         """Capture a screenshot of a window or a matched widget, optionally clipped to a rectangle."""
 
@@ -1775,9 +1967,9 @@ if FastMCP is not None:
 
     @mcp.tool()
     def hover(
-        target: str,
-        include_state: bool = False,
-        include_snapshot: bool = False,
+        target: WidgetTargetArg,
+        include_state: IncludeStateArg = False,
+        include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
         """Hover over the first widget matched by a target."""
 
@@ -1797,11 +1989,11 @@ if FastMCP is not None:
 
     @mcp.tool()
     def scroll(
-        target: str,
-        delta_x: int = 0,
-        delta_y: int = 0,
-        include_state: bool = False,
-        include_snapshot: bool = False,
+        target: WidgetTargetArg,
+        delta_x: DeltaXArg = 0,
+        delta_y: DeltaYArg = 0,
+        include_state: IncludeStateArg = False,
+        include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
         """Send a mouse wheel scroll event to the first matched widget."""
 
