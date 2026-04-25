@@ -1202,6 +1202,26 @@ private:
         return qApp->applicationState() == Qt::ApplicationActive;
     }
 
+    static QWidget *activeModalTopLevelWidget()
+    {
+        QWidget *activeModal = QApplication::activeModalWidget();
+        if (!activeModal)
+            return nullptr;
+        QWidget *modalWindow = activeModal->window();
+        if (!isOverlayTargetWindowVisible(modalWindow))
+            return nullptr;
+        return modalWindow;
+    }
+
+    bool isWindowBlockedByModal(QWidget *widget) const
+    {
+        QWidget *modalWindow = activeModalTopLevelWidget();
+        if (!modalWindow || !widget)
+            return false;
+        QWidget *widgetWindow = widget->window();
+        return widgetWindow && widgetWindow != modalWindow;
+    }
+
     struct PulseRecord
     {
         qint64 startedAtMs;
@@ -1609,16 +1629,21 @@ private:
                 m_activeWindow = nullptr;
 
             if (m_enabled && !m_sharedAgentName.isEmpty() && isQtApplicationActive()) {
-                QWidget *activeWindow = QApplication::activeWindow();
-                if (isOverlayTargetWindowVisible(activeWindow)) {
-                    m_activeWindow = activeWindow;
-                } else if (!isOverlayTargetWindowVisible(m_activeWindow)) {
-                    m_activeWindow = nullptr;
-                    const auto windows = QApplication::topLevelWidgets();
-                    for (QWidget *window : windows) {
-                        if (isOverlayTargetWindowVisible(window)) {
-                            m_activeWindow = window;
-                            break;
+                QWidget *modalWindow = QPlaywrightHandler::activeModalTopLevelWidget();
+                if (modalWindow) {
+                    m_activeWindow = modalWindow;
+                } else {
+                    QWidget *activeWindow = QApplication::activeWindow();
+                    if (isOverlayTargetWindowVisible(activeWindow)) {
+                        m_activeWindow = activeWindow;
+                    } else if (!isOverlayTargetWindowVisible(m_activeWindow)) {
+                        m_activeWindow = nullptr;
+                        const auto windows = QApplication::topLevelWidgets();
+                        for (QWidget *window : windows) {
+                            if (isOverlayTargetWindowVisible(window)) {
+                                m_activeWindow = window;
+                                break;
+                            }
                         }
                     }
                 }
@@ -1651,7 +1676,6 @@ private:
                 } else if (isActive)
                     overlay->syncToWindow();
             }
-
             for (QWidget *staleKey : staleKeys)
                 dropOverlay(staleKey, false);
         }
@@ -1679,6 +1703,13 @@ private:
                 widgets.append(widget);
         }
         return widgets;
+    }
+
+    QList<QWidget *> interactableTopLevelWidgets() const
+    {
+        if (QWidget *modalWindow = activeModalTopLevelWidget())
+            return {modalWindow};
+        return topLevelWidgets();
     }
 
     AutomationOverlayManager *ensureOverlayManager()
@@ -1911,7 +1942,7 @@ private:
                     throw std::runtime_error("Widget not found by wid");
                 roots.append(root);
             } else {
-                roots = topLevelWidgets();
+                roots = interactableTopLevelWidgets();
             }
             for (QWidget *w : roots) {
                 if (w->isVisible())
@@ -2070,7 +2101,7 @@ private:
             if (method == "screenshot_widget") {
                 w = resolveOne(params);
             } else {
-                auto windows = topLevelWidgets();
+                auto windows = interactableTopLevelWidgets();
                 w = nullptr;
                 if (params.contains("wid")) {
                     w = reg.get(params["wid"].toInt());
@@ -2153,6 +2184,7 @@ private:
                 geometry["height"] = w->height();
                 r["geometry"] = geometry;
                 r["is_modal"] = w->isModal();
+                r["blocked_by_modal"] = isWindowBlockedByModal(w);
                 arr.append(r);
             }
             return arr;
@@ -2210,7 +2242,7 @@ private:
             if (!parent) throw std::runtime_error("Parent widget not found");
             roots.append(parent);
         } else {
-                roots = topLevelWidgets();
+            roots = interactableTopLevelWidgets();
         }
 
         QString hasText = params["has_text"].toString();
@@ -2253,7 +2285,7 @@ private:
                 return window;
         }
 
-        for (QWidget *window : topLevelWidgets()) {
+        for (QWidget *window : interactableTopLevelWidgets()) {
             if (window->isVisible())
                 return window;
         }
@@ -2581,7 +2613,7 @@ private:
         while (timer.elapsed() < timeout) {
             QApplication::processEvents();
 
-            QList<QWidget *> roots = QApplication::topLevelWidgets();
+            QList<QWidget *> roots = interactableTopLevelWidgets();
             QList<QWidget *> widgets;
             for (QWidget *root : roots) {
                 QPlaywrightSelector::findWidgets(root, selector, {}, false, widgets);

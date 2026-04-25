@@ -477,11 +477,16 @@ def _create_overlay_manager_class():
             if not _is_qt_application_active(self._app):
                 self._active_window_id = None
                 return
+            modal_window = _active_modal_top_level_widget()
+            if modal_window is not None:
+                self._active_window_id = id(modal_window)
+                self._ensure_overlay(modal_window)
+                return
             active_window = self._app.activeWindow() if hasattr(self._app, "activeWindow") else None
             if not _is_overlay_target_window_visible(active_window):
                 active_window = None
             if active_window is None:
-                visible_windows = [window for window in _get_top_level_widgets() if _is_overlay_target_window_visible(window)]
+                visible_windows = [window for window in _get_interactable_top_level_widgets() if _is_overlay_target_window_visible(window)]
                 if visible_windows:
                     active_window = visible_windows[0]
             if active_window is None:
@@ -711,6 +716,36 @@ def _get_top_level_widgets():
     return [widget for widget in _QApplication.topLevelWidgets() if not _is_automation_overlay_widget(widget)]
 
 
+def _active_modal_top_level_widget():
+    app = _QApplication.instance() if _QApplication is not None and hasattr(_QApplication, "instance") else None
+    active_modal = None
+    if app is not None and hasattr(app, "activeModalWidget"):
+        active_modal = app.activeModalWidget()
+    elif _QApplication is not None and hasattr(_QApplication, "activeModalWidget"):
+        active_modal = _QApplication.activeModalWidget()
+    if active_modal is None:
+        return None
+    modal_window = active_modal.window() if hasattr(active_modal, "window") else active_modal
+    if not _is_overlay_target_window_visible(modal_window):
+        return None
+    return modal_window
+
+
+def _is_window_blocked_by_modal(widget) -> bool:
+    modal_window = _active_modal_top_level_widget()
+    if modal_window is None or widget is None:
+        return False
+    widget_window = widget.window() if hasattr(widget, "window") else widget
+    return widget_window is not None and widget_window is not modal_window
+
+
+def _get_interactable_top_level_widgets() -> list:
+    modal_window = _active_modal_top_level_widget()
+    if modal_window is not None:
+        return [modal_window]
+    return _get_top_level_widgets()
+
+
 def _is_overlay_target_window_visible(widget) -> bool:
     qt_namespace = getattr(_QtCore, "Qt", None) if _QtCore is not None else None
     if widget is None or _is_automation_overlay_widget(widget):
@@ -754,7 +789,7 @@ def _resolve_widgets(params: dict) -> list:
             raise ValueError(f"Parent widget id={parent_wid} not found")
         roots = [parent]
     else:
-        roots = _get_top_level_widgets()
+        roots = _get_interactable_top_level_widgets()
 
     has_text = params.get("has_text")
     visible_only = params.get("visible_only", True)
@@ -907,7 +942,7 @@ def _handle_command(req: Request) -> Any:
                 raise ValueError(f"Widget id={wid} not found or was garbage collected")
             roots = [root]
         else:
-            roots = _get_top_level_widgets()
+            roots = _get_interactable_top_level_widgets()
         return [
             _widget_tree_to_dict(r, max_depth=params.get("max_depth", 10), topmost_only=topmost_only)
             for r in roots
@@ -1057,7 +1092,7 @@ def _handle_command(req: Request) -> Any:
             w = _resolve_one(params)
         else:
             # Full window screenshot
-            windows = _get_top_level_widgets()
+            windows = _get_interactable_top_level_widgets()
             visible = [w for w in windows if w.isVisible()]
             if not visible:
                 raise ValueError("No visible window found")
@@ -1112,6 +1147,7 @@ def _handle_command(req: Request) -> Any:
                         "height": w.height(),
                     },
                     "is_modal": bool(w.isModal()) if hasattr(w, "isModal") else False,
+                    "blocked_by_modal": _is_window_blocked_by_modal(w),
                 })
         return result
 
@@ -1567,7 +1603,7 @@ def _wait_for(params: dict) -> bool:
     while time.monotonic() < deadline:
         _process_events()
 
-        roots = _get_top_level_widgets()
+        roots = _get_interactable_top_level_widgets()
         widgets = find_widgets(roots, selector, visible_only=False)
 
         if state == "visible":
@@ -1607,7 +1643,7 @@ def _resolve_press_target(params: dict):
         if window is not None:
             return window
 
-    visible = [window for window in _get_top_level_widgets() if window.isVisible()]
+    visible = [window for window in _get_interactable_top_level_widgets() if window.isVisible()]
     if visible:
         return visible[0]
 
