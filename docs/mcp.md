@@ -352,7 +352,7 @@ Tool-specific fields:
 - `press_key`: `key`
 - `set_checked`: `checked`
 - `choose`: exactly one of `value`, `index`, or `label`
-- `wait`: optional `state`, `timeout`
+- `wait`: optional `state` or `condition` + `expected`, optional `timeout`
 - `hover`: no extra fields
 - `scroll`: optional `delta_x`, `delta_y`
 

@@ -797,6 +797,67 @@ def test_wait_can_include_snapshot(monkeypatch):
     assert result["refs"] == [{"ref": "e1"}]
 
 
+def test_wait_can_use_text_contains_condition(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    locator = FakeLocator(count=1)
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
+    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(
+        mcp_server,
+        "_list_windows_raw",
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
+    )
+
+    result = mcp_server.wait(target="#status_label", condition="text_contains", expected="ave", timeout=5.0)
+
+    assert locator.wait_calls == []
+    assert result["ok"] is True
+    assert result["condition"] == "text_contains"
+    assert result["expected"] == "ave"
+    assert result["window_changed"] is False
+
+
+def test_wait_rejects_state_and_condition_together(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        mcp_server.wait(target="#status_label", state="visible", condition="text_contains", expected="ok")
+
+
+def test_wait_condition_requires_expected(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
+
+    with pytest.raises(ValueError, match="expected is required"):
+        mcp_server.wait(target="#status_label", condition="text_contains")
+
+
 def test_finalize_action_result_can_include_compact_state(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
@@ -891,6 +952,22 @@ def test_wait_rejects_undocumented_state(monkeypatch):
 
     with pytest.raises(ValueError, match="state must be one of"):
         mcp_server.wait(target="#status_label", state="attached")
+
+
+def test_wait_rejects_undocumented_condition(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
+
+    with pytest.raises(ValueError, match="condition must be one of"):
+        mcp_server.wait(target="#status_label", condition="text_matches", expected="ok")
 
 
 @pytest.mark.parametrize(
@@ -1738,6 +1815,38 @@ def test_run_cli_typed_click_supports_include_state(monkeypatch, capsys):
     assert captured == {
         "target": "text=Start",
         "count": 1,
+        "include_state": True,
+        "include_snapshot": False,
+    }
+
+
+def test_run_cli_typed_wait_supports_condition(monkeypatch, capsys):
+    captured = {}
+
+    def fake_wait(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True, **kwargs}
+
+    monkeypatch.setattr(mcp_server, "wait", fake_wait)
+
+    exit_code = mcp_server._run_cli(["wait", "#status", "--condition", "checked_equals", "--expected", "true", "--include-state"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "target": "#status",
+        "condition": "checked_equals",
+        "expected": True,
+        "timeout": None,
+        "include_state": True,
+        "include_snapshot": False,
+    }
+    assert captured == {
+        "target": "#status",
+        "condition": "checked_equals",
+        "expected": True,
+        "timeout": None,
         "include_state": True,
         "include_snapshot": False,
     }

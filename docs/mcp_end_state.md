@@ -449,7 +449,7 @@ Qt 业务自动化的中心应当是：
 建议参数：
 
 - `target`
-- `state`
+- `state` 或 `condition` + `expected`
 - `timeout`
 - `include_snapshot`
 
@@ -462,6 +462,16 @@ Qt 业务自动化的中心应当是：
 - `checked`
 - `unchecked`
 
+建议支持的条件：
+
+- `text_equals`
+- `text_contains`
+- `current_text_equals`
+- `current_text_contains`
+- `value_equals`
+- `checked_equals`
+- `count_equals`
+
 为什么保留：
 
 - 等待必须由服务端执行
@@ -469,6 +479,8 @@ Qt 业务自动化的中心应当是：
 
 补充说明：
 
+- `state` 与 `condition` 互斥；两者都省略时，默认等价于 `state="visible"`
+- 当使用 `condition` 时，必须提供 `expected`
 - `include_snapshot=true` 时，等待成功后返回 post-wait snapshot 和 refs
 - 这样 `wait` 与其他动作工具保持一致，也减少“wait 之后立即再 snapshot 一次”的机械往返
 

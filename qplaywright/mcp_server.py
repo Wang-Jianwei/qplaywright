@@ -18,6 +18,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -54,6 +55,17 @@ _INFRASTRUCTURE_WIDGET_CLASSES = {
 
 SessionAction = Literal["attach", "launch", "close", "status"]
 WindowAction = Literal["list", "select", "resize", "close"]
+
+_ALLOWED_WAIT_STATES = {"visible", "hidden", "enabled", "disabled", "checked", "unchecked"}
+_ALLOWED_WAIT_CONDITIONS = {
+    "text_equals",
+    "text_contains",
+    "current_text_equals",
+    "current_text_contains",
+    "value_equals",
+    "checked_equals",
+    "count_equals",
+}
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -1038,6 +1050,81 @@ def _observe_action_target_state(
     return _compact_action_state(locator)
 
 
+def _normalize_wait_expected(condition: str, expected: str | int | bool | None) -> str | int | bool:
+    if expected is None:
+        raise ValueError("expected is required when condition is provided")
+
+    if condition == "count_equals":
+        if isinstance(expected, bool):
+            raise ValueError("expected for count_equals must be an integer")
+        if isinstance(expected, int):
+            return expected
+        try:
+            return int(expected)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("expected for count_equals must be an integer") from exc
+
+    if condition == "checked_equals":
+        if isinstance(expected, bool):
+            return expected
+        if isinstance(expected, str):
+            normalized = expected.strip().lower()
+            if normalized in {"true", "1", "yes", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "off"}:
+                return False
+        raise ValueError("expected for checked_equals must be a boolean")
+
+    return str(expected)
+
+
+def _wait_condition_matches(locator: Any, *, condition: str, expected: str | int | bool) -> bool:
+    if condition == "count_equals":
+        return locator.count() == expected
+
+    count = locator.count()
+    if count == 0:
+        return False
+
+    first = locator.first()
+
+    if condition == "checked_equals":
+        return first.is_checked() is expected
+
+    if condition in {"text_equals", "text_contains"}:
+        actual = first.text_content()
+    elif condition in {"current_text_equals", "current_text_contains"}:
+        actual = first.properties().get("currentText")
+    elif condition == "value_equals":
+        actual = first.input_value()
+    else:
+        raise ValueError(f"Unsupported wait condition: {condition!r}")
+
+    if actual in (None, ""):
+        return False
+
+    if condition.endswith("_contains"):
+        return str(expected).lower() in str(actual).lower()
+
+    return str(actual) == str(expected)
+
+
+def _wait_for_locator_condition(
+    locator: Any,
+    *,
+    condition: str,
+    expected: str | int | bool,
+    timeout: float,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _wait_condition_matches(locator, condition=condition, expected=expected):
+            return
+        time.sleep(0.05)
+
+    raise TimeoutError(f"Timed out waiting for {condition}={expected!r}")
+
+
 def _finalize_action_result(
     managed_connection: ManagedConnection,
     *,
@@ -1550,26 +1637,59 @@ if FastMCP is not None:
     @mcp.tool()
     def wait(
         target: str,
-        state: str = "visible",
+        state: str | None = None,
+        condition: str | None = None,
+        expected: str | int | bool | None = None,
         timeout: float | None = None,
         include_state: bool = False,
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         """Wait until a widget reaches a supported state."""
 
-        allowed_states = {"visible", "hidden", "enabled", "disabled", "checked", "unchecked"}
-        if state not in allowed_states:
-            raise ValueError(f"state must be one of {sorted(allowed_states)!r}")
+        if state is None and condition is None:
+            state = "visible"
+
+        if state is not None and condition is not None:
+            raise ValueError("state and condition are mutually exclusive")
+
+        if condition is None and state not in _ALLOWED_WAIT_STATES:
+            raise ValueError(f"state must be one of {sorted(_ALLOWED_WAIT_STATES)!r}")
+
+        if condition is not None and condition not in _ALLOWED_WAIT_CONDITIONS:
+            raise ValueError(f"condition must be one of {sorted(_ALLOWED_WAIT_CONDITIONS)!r}")
+
+        normalized_expected: str | int | bool | None = None
+        if condition is not None:
+            normalized_expected = _normalize_wait_expected(condition, expected)
 
         connection_state = _get_connection(_SERVER_STATE)
         locator = _resolve_locator(connection_state, target=target)
-        locator.wait_for(state=state, timeout=timeout)
-        payload = {
-            "ok": True,
-            "target": target,
-            "state": state,
-            "timeout": timeout,
-        }
+
+        effective_timeout = timeout if timeout is not None else connection_state.timeout
+
+        if condition is None:
+            locator.wait_for(state=state, timeout=timeout)
+            payload = {
+                "ok": True,
+                "target": target,
+                "state": state,
+                "timeout": timeout,
+            }
+        else:
+            _wait_for_locator_condition(
+                locator,
+                condition=condition,
+                expected=normalized_expected,
+                timeout=effective_timeout,
+            )
+            payload = {
+                "ok": True,
+                "target": target,
+                "condition": condition,
+                "expected": normalized_expected,
+                "timeout": timeout,
+            }
+
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
@@ -1761,6 +1881,7 @@ def _cli_usage_text() -> str:
         "  snapshot [--target TARGET] [--depth N] [--topmost-only] [--save-to PATH]\n"
         "  click TARGET [--count 1|2] [--include-snapshot]\n"
         "  input TARGET TEXT [--mode replace|append] [--delay MS] [--submit]\n"
+        "  wait TARGET [--state STATE | --condition CONDITION --expected VALUE] [--timeout SEC]\n"
         "\n"
         "JSON/REPL commands:\n"
         "  resource {JSON}       Read one resource or list resources when JSON is omitted\n"
@@ -2039,7 +2160,10 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
 
     wait_parser = subparsers.add_parser("wait", help="Wait until a widget reaches a supported state.")
     wait_parser.add_argument("target")
-    wait_parser.add_argument("--state", default="visible", choices=("visible", "hidden", "enabled", "disabled", "checked", "unchecked"))
+    wait_group = wait_parser.add_mutually_exclusive_group()
+    wait_group.add_argument("--state", choices=tuple(sorted(_ALLOWED_WAIT_STATES)))
+    wait_group.add_argument("--condition", choices=tuple(sorted(_ALLOWED_WAIT_CONDITIONS)))
+    wait_parser.add_argument("--expected")
     wait_parser.add_argument("--timeout", type=float)
     wait_parser.add_argument("--include-state", action="store_true")
     wait_parser.add_argument("--include-snapshot", action="store_true")
@@ -2122,13 +2246,18 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         return "choose", arguments
 
     if command == "wait":
-        return "wait", {
+        arguments = {
             "target": namespace.target,
-            "state": namespace.state,
             "timeout": namespace.timeout,
             "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
+        if namespace.condition is not None:
+            arguments["condition"] = namespace.condition
+            arguments["expected"] = _normalize_wait_expected(namespace.condition, namespace.expected)
+        else:
+            arguments["state"] = namespace.state or "visible"
+        return "wait", arguments
 
     if command == "screenshot":
         arguments = {

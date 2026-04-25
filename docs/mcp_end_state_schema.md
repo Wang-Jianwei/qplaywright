@@ -955,11 +955,25 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
+或者：
+
+```json
+{
+  "target": "#status_label",
+  "condition": "text_contains",
+  "expected": "Logged in",
+  "timeout": 5.0,
+  "include_snapshot": false
+}
+```
+
 字段约束：
 
 - `target` 必填
-- `state` 必填
+- `state` 与 `condition` 互斥；两者都省略时，服务端默认按 `state="visible"` 处理
 - `state` 允许值：`visible`、`hidden`、`enabled`、`disabled`、`checked`、`unchecked`
+- `condition` 允许值：`text_equals`、`text_contains`、`current_text_equals`、`current_text_contains`、`value_equals`、`checked_equals`、`count_equals`
+- 使用 `condition` 时，`expected` 必填
 - `timeout` 默认由服务端决定
 - `include_snapshot` 默认 `false`
 
@@ -985,6 +999,18 @@ MCP 工具失败时应返回明确、可操作的错误信息。
       "height": 720
     }
   }
+}
+```
+
+条件等待成功时，响应中的状态字段替换为：
+
+```json
+{
+  "ok": true,
+  "target": "#status_label",
+  "condition": "text_contains",
+  "expected": "Logged in",
+  "timeout": 5.0
 }
 ```
 
