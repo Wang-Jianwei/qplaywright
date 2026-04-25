@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+import qplaywright.agent._server as server
 import qplaywright.agent._selector as selector
 from qplaywright.protocol import QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlaywrightMethodArg
 
@@ -50,12 +51,14 @@ class FakeWidget:
         properties: dict[str, object] | None = None,
         qt_properties: list[str] | None = None,
         dynamic_properties: list[str] | None = None,
+        children: list[object] | None = None,
         super_class=None,
     ):
         self._meta = FakeMetaObject(class_name, super_class=super_class, properties=qt_properties)
         self._properties: dict[str, Any] = dict(properties or {})
         self._dynamic_properties = list(dynamic_properties or [])
         self._object_name = object_name
+        self._children = list(children or [])
 
     def metaObject(self):
         return self._meta
@@ -77,8 +80,8 @@ class FakeWidget:
     def isEnabled(self) -> bool:
         return True
 
-    def children(self) -> list[FakeWidget]:
-        return []
+    def children(self) -> list[object]:
+        return list(self._children)
 
     def x(self) -> int:
         return 0
@@ -124,6 +127,14 @@ class FakeComboWidget(FakeWidget):
 
     def currentIndex(self) -> int:
         return int(cast(int, self._properties.get("currentIndex", -1)))
+
+
+class FakeActionLike:
+    def isVisible(self) -> bool:
+        return True
+
+    def children(self):
+        raise AssertionError("non-widget children should not be traversed")
 
 
 def _metadata(*, role: str = "", methods: list[dict] | None = None) -> QPlaywrightClassMetadata:
@@ -257,6 +268,33 @@ def test_widget_to_dict_preserves_current_index_without_rewriting_current_text_a
     assert "text" not in payload
     assert payload["currentText"] == "Admin"
     assert payload["currentIndex"] == 0
+
+
+def test_find_widgets_skips_non_widget_children():
+    widget = FakeWidget(object_name="root", children=[FakeActionLike()])
+
+    results = selector.find_widgets([widget], "name=root", visible_only=False)
+
+    assert results == [widget]
+
+
+def test_widget_to_dict_skips_non_widget_children():
+    child = FakeTextWidget(object_name="child", properties={"text": "Save"})
+    widget = FakeWidget(object_name="root", children=[child, FakeActionLike()])
+
+    payload = selector.widget_to_dict(widget, max_depth=1)
+
+    assert [entry["objectName"] for entry in payload["children"]] == ["child"]
+
+
+def test_widget_tree_snapshot_skips_non_widget_children():
+    server._registry.clear()
+    child = FakeTextWidget(object_name="child", properties={"text": "Save"})
+    widget = FakeWidget(object_name="root", children=[child, FakeActionLike()])
+
+    payload = server._widget_tree_to_dict(widget, max_depth=1)
+
+    assert [entry["objectName"] for entry in payload["children"]] == ["child"]
 
 
 def test_widget_properties_include_qt_and_dynamic_properties():

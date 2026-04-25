@@ -3,16 +3,59 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from qplaywright.protocol import ROLE_MAP
 
 if TYPE_CHECKING:
-    from typing import Sequence
+    from typing import Iterable, Sequence
 
 
 _MISSING = object()
 _QPLAYWRIGHT_CLASS_METADATA_PROP = "qplaywrightClassMetadata"
+_QWIDGET_CLASS = None
+_QWIDGET_CLASS_LOOKUP_DONE = False
+
+
+def _qt_widget_class():
+    global _QWIDGET_CLASS, _QWIDGET_CLASS_LOOKUP_DONE
+    if _QWIDGET_CLASS_LOOKUP_DONE:
+        return _QWIDGET_CLASS
+
+    _QWIDGET_CLASS_LOOKUP_DONE = True
+    for pkg in ("PySide6", "PyQt6", "PySide2", "PyQt5"):
+        try:
+            qt_widgets = __import__(f"{pkg}.QtWidgets", fromlist=["QWidget"])
+        except ImportError:
+            continue
+        _QWIDGET_CLASS = getattr(qt_widgets, "QWidget", None)
+        if _QWIDGET_CLASS is not None:
+            break
+
+    return _QWIDGET_CLASS
+
+
+def _is_widget_like(value) -> bool:
+    widget_class = _qt_widget_class()
+    if widget_class is not None and isinstance(value, widget_class):
+        return True
+
+    required_methods = ("children", "isVisible", "isEnabled", "x", "y", "width", "height")
+    return all(callable(getattr(value, method, None)) for method in required_methods)
+
+
+def _iter_widget_children(widget):
+    children_fn = getattr(widget, "children", None)
+    if not callable(children_fn):
+        return
+
+    children = children_fn()
+    if not children:
+        return
+
+    for child in cast("Iterable[object]", children):
+        if _is_widget_like(child):
+            yield child
 
 
 def _qt_property(widget, name: str):
@@ -531,9 +574,8 @@ def find_widgets(
             return
         if match_widget(widget, selector, has_text=has_text):
             results.append(widget)
-        for child in widget.children():
-            if hasattr(child, "isVisible"):  # skip non-widget QObjects
-                _walk(child)
+        for child in _iter_widget_children(widget):
+            _walk(child)
 
     for root in root_widgets:
         _walk(root)
@@ -579,9 +621,8 @@ def widget_to_dict(widget, *, depth: int = 0, max_depth: int = 50) -> dict:
 
     if depth < max_depth:
         children = []
-        for child in widget.children():
-            if hasattr(child, "isVisible"):
-                children.append(widget_to_dict(child, depth=depth + 1, max_depth=max_depth))
+        for child in _iter_widget_children(widget):
+            children.append(widget_to_dict(child, depth=depth + 1, max_depth=max_depth))
         if children:
             info["children"] = children
 

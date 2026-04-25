@@ -70,6 +70,7 @@ from qplaywright.protocol import (
 from qplaywright.agent._selector import (
     find_widgets,
     widget_to_dict,
+    _iter_widget_children,
     _widget_text,
     _widget_class_name,
     _widget_value,
@@ -759,8 +760,8 @@ _registry = _WidgetRegistry()
 
 
 def _iter_tree_children(widget, *, topmost_only: bool = False):
-    for child in widget.children():
-        if not hasattr(child, "isVisible") or _is_automation_overlay_widget(child):
+    for child in _iter_widget_children(widget):
+        if _is_automation_overlay_widget(child):
             continue
         if topmost_only and not _is_topmost_visible_widget(child):
             continue
