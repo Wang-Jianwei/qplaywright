@@ -206,6 +206,7 @@ Qt 业务自动化的中心应当是：
 
 - 当服务端检测到 active window 变化时，应自动更新当前窗口作用域
 - 对动作工具，返回值可包含 `window_changed` 和新的 `active_window` 摘要
+- window 摘要应统一使用 `geometry {x, y, width, height}`，不要再并行维护顶层 `width` / `height` 返回形状
 
 ### 3. snapshot
 
@@ -215,6 +216,7 @@ Qt 业务自动化的中心应当是：
 
 - `target`
 - `depth`
+- `topmost_only`
 - `save_to`
 
 建议返回：
@@ -234,6 +236,8 @@ Qt 业务自动化的中心应当是：
 
 - `snapshot` 可以返回当前 active window、focus widget、modal dialog 状态等头部信息
 - `save_to` 表示把文本快照写入文件，不是保存图片
+- `refs` 应包含节点 `geometry`，便于模型做空间推理
+- 当 `topmost_only=true` 且 `target` 为空时，结果是近似前景可见视图，应显式返回 warning 说明内容可能不完整
 - 这样 `session.status` 的需求会被进一步压低
 
 ### 4. inspect
@@ -247,6 +251,7 @@ Qt 业务自动化的中心应当是：
 - `include_methods`
 - `include_properties`
 - `depth`
+- `topmost_only`
 
 建议返回：
 
@@ -257,11 +262,15 @@ Qt 业务自动化的中心应当是：
 - `is_visible`
 - `is_enabled`
 - `is_checked`
+- `geometry`
+- `globalBoundingBox`
 - `bounding_box`
 - `methods`
 - `properties`
 
 当 `target` 为空时，`inspect` 可退化为 debug-only 的全量树检查模式。
+此时 tree 节点应使用当前 widget tree 真实字段，例如 `visible`、`enabled`、`geometry`。
+当 `topmost_only=true` 时，该 tree 是近似前景可见视图，允许返回 warning 说明结果可能不完整。
 
 如果 `target` 匹配多个控件，终态可以返回第一个匹配项的标量字段，同时用 `count` 明确暴露总匹配数；这样模型不需要为“是否唯一匹配”先额外试探一次。
 

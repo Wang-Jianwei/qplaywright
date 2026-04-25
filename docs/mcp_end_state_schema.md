@@ -71,8 +71,12 @@
   "index": 1,
   "is_active": true,
   "is_modal": true,
-  "width": 480,
-  "height": 320
+  "geometry": {
+    "x": 120,
+    "y": 80,
+    "width": 480,
+    "height": 320
+  }
 }
 ```
 
@@ -84,8 +88,7 @@
 - `index`: 当前窗口列表中的索引
 - `is_active`: 是否为当前 active window
 - `is_modal`: 是否为模态窗口
-- `width`: 当前宽度
-- `height`: 当前高度
+- `geometry`: 窗口布局数据，统一使用 `{x, y, width, height}`
 
 ### RefEntry
 
@@ -95,6 +98,12 @@
   "wid": 103,
   "target": "#amount_editor",
   "class": "FancyAmountEdit",
+  "geometry": {
+    "x": 12,
+    "y": 48,
+    "width": 220,
+    "height": 80
+  },
   "text": "123.45"
 }
 ```
@@ -109,13 +118,15 @@
   "class": "FancyAmountEdit",
   "objectName": "amount_editor",
   "text": "123.45",
-  "isVisible": true,
-  "isEnabled": true,
-  "isChecked": false,
-  "x": 12,
-  "y": 48,
-  "width": 220,
-  "height": 80,
+  "visible": true,
+  "enabled": true,
+  "checked": false,
+  "geometry": {
+    "x": 12,
+    "y": 48,
+    "width": 220,
+    "height": 80
+  },
   "children": []
 }
 ```
@@ -136,8 +147,12 @@
     "index": 1,
     "is_active": true,
     "is_modal": true,
-    "width": 480,
-    "height": 320
+    "geometry": {
+      "x": 120,
+      "y": 80,
+      "width": 480,
+      "height": 320
+    }
   },
   "snapshot": "...",
   "refs": []
@@ -222,8 +237,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   }
 }
 ```
@@ -257,8 +276,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   }
 }
 ```
@@ -314,8 +337,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 1,
     "is_active": true,
     "is_modal": true,
-    "width": 480,
-    "height": 320
+    "geometry": {
+      "x": 120,
+      "y": 80,
+      "width": 480,
+      "height": 320
+    }
   },
   "refs_cleared": true
 }
@@ -334,8 +361,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 800,
-    "height": 600
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 800,
+      "height": 600
+    }
   }
 }
 ```
@@ -358,6 +389,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 {
   "target": "e12",
   "depth": 8,
+  "topmost_only": false,
   "save_to": "snapshot.txt"
 }
 ```
@@ -366,6 +398,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 - `target` 可选，缺省表示当前 active window
 - `depth` 默认为 `10`
+- `topmost_only` 默认为 `false`，仅对 window-wide snapshot 有意义
 - `save_to` 可选，表示把文本快照写入文件，而不是保存图片
 
 ### Snapshot Response
@@ -386,17 +419,25 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   },
   "target": null,
   "snapshot": "...",
   "refs": [],
+  "warnings": [
+    "topmost_only is an approximate frontmost-visible filter and may omit widgets or content. Rerun with topmost_only=false when you need a complete tree."
+  ],
   "save_to": "snapshot.txt"
 }
 ```
 
 其中 `refs` 的元素类型为 `RefEntry[]`。
+当 `topmost_only=true` 且 `target=null` 时，`warnings` 应明确指出结果可能不完整。
 
 ## Inspect
 
@@ -412,7 +453,8 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "property": "placeholderText",
   "include_methods": true,
   "include_properties": true,
-  "depth": 6
+  "depth": 6,
+  "topmost_only": false
 }
 ```
 
@@ -423,7 +465,8 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 - `include_methods` 默认为 `false`
 - `include_properties` 默认为 `false`，用于返回目标当前全部 Qt properties
 - `depth` 只在 `target=null` 时有意义
-- 当 `target` 匹配多个控件时，`text`、`value`、`is_visible`、`is_enabled`、`is_checked`、`bounding_box`、`property_value`、`methods`、`properties` 都取第一个匹配项；`count` 反映总匹配数
+- `topmost_only` 只在 `target=null` 时有意义
+- 当 `target` 匹配多个控件时，`text`、`value`、`is_visible`、`is_enabled`、`is_checked`、`geometry`、`globalBoundingBox`、`bounding_box`、`property_value`、`methods`、`properties` 都取第一个匹配项；`count` 反映总匹配数
 
 ### Inspect Response: Target Mode
 
@@ -438,9 +481,21 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "is_visible": true,
   "is_enabled": true,
   "is_checked": false,
-  "bounding_box": {
+  "geometry": {
     "x": 12,
     "y": 48,
+    "width": 220,
+    "height": 80
+  },
+  "globalBoundingBox": {
+    "x": 300,
+    "y": 220,
+    "width": 220,
+    "height": 80
+  },
+  "bounding_box": {
+    "x": 300,
+    "y": 220,
     "width": 220,
     "height": 80
   },
@@ -466,15 +521,20 @@ MCP 工具失败时应返回明确、可操作的错误信息。
       "class": "DemoWindow",
       "objectName": "",
       "text": "QPlaywright Demo App",
-      "isVisible": true,
-      "isEnabled": true,
-      "isChecked": false,
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720,
+      "visible": true,
+      "enabled": true,
+      "checked": false,
+      "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 640,
+        "height": 720
+      },
       "children": []
     }
+  ],
+  "warnings": [
+    "topmost_only is an approximate frontmost-visible filter and may omit widgets or content. Rerun with topmost_only=false when you need a complete tree."
   ]
 }
 ```
@@ -516,8 +576,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   }
 }
 ```
@@ -570,8 +634,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   }
 }
 ```
@@ -616,8 +684,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   }
 }
 ```
@@ -653,8 +725,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   }
 }
 ```
@@ -700,8 +776,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   }
 }
 ```
@@ -735,8 +815,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   },
   "snapshot": "...",
   "refs": []
@@ -783,8 +867,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   },
   "snapshot": "...",
   "refs": []
@@ -834,8 +922,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   }
 }
 ```
@@ -886,8 +978,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   }
 }
 ```
@@ -936,8 +1032,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   }
 }
 ```
@@ -958,8 +1058,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "width": 640,
-    "height": 720
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 640,
+      "height": 720
+    }
   }
 }
 ```
