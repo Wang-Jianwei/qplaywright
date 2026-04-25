@@ -14,11 +14,11 @@ class FakeQPlaywright:
         self.connected = None
         self.launched = None
 
-    def connect(self, *, host: str, port: int, timeout: float):
+    def connect(self, *, host: str, port: int, timeout: float, agent_name: str | None = None):
         self.connected = (host, port, timeout)
         return FakeApp([])
 
-    def launch(self, executable, *args, host: str, port: int, timeout: float):
+    def launch(self, executable, *args, host: str, port: int, timeout: float, agent_name: str | None = None):
         self.launched = (executable, list(args), host, port, timeout)
         return FakeApp([])
 
@@ -458,8 +458,10 @@ def test_window_tool_lists_selects_resizes_and_closes(monkeypatch):
     assert [window["wid"] for window in listed["windows"]] == [11, 22]
     assert listed["windows"][0]["is_active"] is True
     assert listed["windows"][1]["is_modal"] is True
+    assert listed["windows"][0]["geometry"] == {"x": None, "y": None, "width": None, "height": None}
     assert selected["active_window"]["wid"] == 22
     assert selected["active_window"]["is_modal"] is True
+    assert selected["active_window"]["geometry"] == {"x": None, "y": None, "width": None, "height": None}
     assert selected["refs_cleared"] is True
     assert resized["active_window"]["wid"] == 22
     assert first.resized_to is None
@@ -669,8 +671,8 @@ def test_wait_can_include_snapshot(monkeypatch):
     monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
     monkeypatch.setattr(
         mcp_server,
-        "_window_summary",
-        lambda managed_connection: [{"wid": 11, "title": "Main", "class": "DemoWindow", "index": 0, "width": 640, "height": 720, "is_active": True, "is_modal": False}],
+        "_list_windows_raw",
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "width": 640, "height": 720, "is_modal": False}],
     )
     monkeypatch.setattr(
         mcp_server,
@@ -737,8 +739,8 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
     monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
     monkeypatch.setattr(
         mcp_server,
-        "_window_summary",
-        lambda managed_connection: [{"wid": 11, "title": "Main", "class": "DemoWindow", "index": 0, "width": 640, "height": 720, "is_active": True, "is_modal": False}],
+        "_list_windows_raw",
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "width": 640, "height": 720, "is_modal": False}],
     )
     monkeypatch.setattr(
         mcp_server,
@@ -772,8 +774,8 @@ def test_finalize_action_result_switches_active_window_and_uses_window_snapshot(
 
     monkeypatch.setattr(
         mcp_server,
-        "_window_summary",
-        lambda managed_connection: [{"wid": 22, "title": "Dialog", "class": "QDialog", "index": 0, "width": 480, "height": 320, "is_active": True, "is_modal": False}],
+        "_list_windows_raw",
+        lambda managed_connection, **kwargs: [{"wid": 22, "title": "Dialog", "class": "QDialog", "width": 480, "height": 320, "is_modal": False}],
     )
 
     def fake_action_result_with_snapshot(managed_connection, *, target=None, **payload):
@@ -814,8 +816,8 @@ def test_press_key_without_target_uses_active_window_transport(monkeypatch):
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
     monkeypatch.setattr(
         mcp_server,
-        "_window_summary",
-        lambda managed_connection: [{"wid": 11, "title": "Main", "class": "DemoWindow", "index": 0, "width": 640, "height": 720, "is_active": True, "is_modal": False}],
+        "_list_windows_raw",
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "width": 640, "height": 720, "is_modal": False}],
     )
 
     result = mcp_server.press_key(key="Enter")
@@ -824,6 +826,35 @@ def test_press_key_without_target_uses_active_window_transport(monkeypatch):
     assert result["ok"] is True
     assert result["target"] is None
     assert result["key"] == "Enter"
+
+
+def test_summarize_windows_normalizes_geometry_from_legacy_size_fields():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    summaries = mcp_server._summarize_windows(
+        connection,
+        [{"wid": 11, "title": "Main", "class": "DemoWindow", "width": 640, "height": 720, "is_modal": False}],
+    )
+
+    assert summaries == [
+        {
+            "index": 0,
+            "wid": 11,
+            "title": "Main",
+            "class": "DemoWindow",
+            "geometry": {"x": None, "y": None, "width": 640, "height": 720},
+            "is_active": True,
+            "is_modal": False,
+        }
+    ]
 
 
 def test_scroll_rejects_zero_delta(monkeypatch):

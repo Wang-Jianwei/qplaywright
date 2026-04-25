@@ -247,6 +247,26 @@ def _list_windows_raw(connection: ManagedConnection, *, timeout: float | None = 
     return windows
 
 
+def _window_geometry(window: dict[str, Any]) -> dict[str, Any] | None:
+    geometry = window.get("geometry")
+    if isinstance(geometry, dict):
+        return {
+            "x": geometry.get("x"),
+            "y": geometry.get("y"),
+            "width": geometry.get("width"),
+            "height": geometry.get("height"),
+        }
+
+    width = window.get("width")
+    height = window.get("height")
+    return {
+        "x": window.get("x"),
+        "y": window.get("y"),
+        "width": width,
+        "height": height,
+    }
+
+
 def _widget_tree_raw(
     connection: ManagedConnection,
     *,
@@ -281,8 +301,7 @@ def _summarize_windows(
                 "wid": window["wid"],
                 "title": window.get("title", ""),
                 "class": window.get("class", ""),
-                "width": window.get("width"),
-                "height": window.get("height"),
+                "geometry": _window_geometry(window),
                 "is_active": is_active,
                 "is_modal": bool(window.get("is_modal", False)),
             }
