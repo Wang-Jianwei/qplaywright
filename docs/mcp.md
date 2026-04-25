@@ -68,7 +68,21 @@ Or inspect help and read a resource from one-shot CLI commands:
 ```bash
 qplaywright-mcp cli help session
 qplaywright-mcp cli resources
-qplaywright-mcp cli resource '{"uri": "qplaywright://help/selectors"}'
+qplaywright-mcp cli resource list
+qplaywright-mcp cli resource read qplaywright://help/selectors
+```
+
+The CLI also supports typed subcommands for common MCP flows:
+
+```bash
+qplaywright-mcp cli session attach --port 19877
+qplaywright-mcp cli session status
+qplaywright-mcp cli session launch D:/path/to/app.exe -- --flag
+qplaywright-mcp cli window list
+qplaywright-mcp cli window select --title Dialog
+qplaywright-mcp cli snapshot --depth 4 --topmost-only
+qplaywright-mcp cli click text=Start --count 2
+qplaywright-mcp cli input #amount_editor 123.45 --submit
 ```
 
 ## Typical Tool Flow

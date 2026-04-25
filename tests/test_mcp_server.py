@@ -1235,6 +1235,140 @@ def test_run_cli_supports_direct_resources_meta_command(monkeypatch, capsys):
     assert "qplaywright://help/selectors" in output
 
 
+def test_run_cli_typed_resource_read(monkeypatch, capsys):
+    def fake_selector_help():
+        """Selector syntax and recommended qplaywright MCP workflow."""
+
+        return "selector docs"
+
+    monkeypatch.setattr(mcp_server, "selector_help", fake_selector_help)
+
+    exit_code = mcp_server._run_cli(["resource", "read", "qplaywright://help/selectors"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "uri": "qplaywright://help/selectors",
+        "content": "selector docs",
+    }
+
+
+def test_run_cli_typed_session_attach(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_server,
+        "session",
+        lambda **kwargs: {"ok": True, **kwargs},
+    )
+
+    exit_code = mcp_server._run_cli(["session", "attach", "--port", "19877", "--timeout", "5"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "action": "attach",
+        "agent_name": "GitHub Copilot",
+        "host": "127.0.0.1",
+        "port": 19877,
+        "timeout": 5.0,
+    }
+
+
+def test_run_cli_typed_window_select(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_server,
+        "window",
+        lambda **kwargs: {"ok": True, **kwargs},
+    )
+
+    exit_code = mcp_server._run_cli(["window", "select", "--title", "Dialog"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "action": "select",
+        "title": "Dialog",
+    }
+
+
+def test_run_cli_typed_snapshot(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_server,
+        "snapshot",
+        lambda **kwargs: {"ok": True, **kwargs},
+    )
+
+    exit_code = mcp_server._run_cli(["snapshot", "--depth", "4", "--topmost-only", "--save-to", "snapshot.txt"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "depth": 4,
+        "save_to": "snapshot.txt",
+        "target": None,
+        "topmost_only": True,
+    }
+
+
+def test_run_cli_typed_click_and_input(monkeypatch, capsys):
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    def fake_click(**kwargs):
+        captured.append(("click", kwargs))
+        return {"ok": True, **kwargs}
+
+    def fake_input(**kwargs):
+        captured.append(("input", kwargs))
+        return {"ok": True, **kwargs}
+
+    monkeypatch.setattr(mcp_server, "click", fake_click)
+    monkeypatch.setattr(mcp_server, "input", fake_input)
+
+    click_exit_code = mcp_server._run_cli(["click", "text=Start", "--count", "2", "--include-snapshot"])
+    click_payload = json.loads(capsys.readouterr().out)
+
+    input_exit_code = mcp_server._run_cli(["input", "#amount", "123.45", "--mode", "append", "--delay", "25", "--submit"])
+    input_payload = json.loads(capsys.readouterr().out)
+
+    assert click_exit_code == 0
+    assert input_exit_code == 0
+    assert click_payload == {
+        "ok": True,
+        "count": 2,
+        "include_snapshot": True,
+        "target": "text=Start",
+    }
+    assert input_payload == {
+        "ok": True,
+        "delay": 25,
+        "include_snapshot": False,
+        "mode": "append",
+        "submit": True,
+        "target": "#amount",
+        "text": "123.45",
+    }
+    assert captured == [
+        (
+            "click",
+            {"target": "text=Start", "count": 2, "include_snapshot": True},
+        ),
+        (
+            "input",
+            {
+                "target": "#amount",
+                "text": "123.45",
+                "mode": "append",
+                "delay": 25,
+                "submit": True,
+                "include_snapshot": False,
+            },
+        ),
+    ]
+
+
 def test_main_cli_dispatches_to_cli_runner(monkeypatch):
     called = {}
 

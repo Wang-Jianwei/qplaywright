@@ -1555,6 +1555,13 @@ def _cli_usage_text() -> str:
         "  qplaywright-mcp cli\n"
         "  qplaywright-mcp cli help session\n"
         "  qplaywright-mcp cli resources\n"
+        "  qplaywright-mcp cli resource list\n"
+        "  qplaywright-mcp cli resource read qplaywright://help/selectors\n"
+        "  qplaywright-mcp cli session attach --port 19877\n"
+        "  qplaywright-mcp cli window select --title Dialog\n"
+        "  qplaywright-mcp cli snapshot --depth 4 --topmost-only\n"
+        "  qplaywright-mcp cli click text=Start --count 2\n"
+        "  qplaywright-mcp cli input #amount_editor 123.45 --submit\n"
         "  qplaywright-mcp cli session '{\"action\": \"attach\", \"port\": 19877}'\n"
         "  qplaywright-mcp cli resource '{\"uri\": \"qplaywright://help/selectors\"}'\n"
         "  qplaywright-mcp cli snapshot '{\"depth\": 4}'\n\n"
@@ -1563,6 +1570,16 @@ def _cli_usage_text() -> str:
         "  .resources            List available resources\n"
         "  .help                 Show CLI help\n"
         "  .help TOOL            Show one tool signature and docstring\n"
+        "\n"
+        "One-shot typed subcommands:\n"
+        "  resource list|read URI\n"
+        "  session attach|launch|status|close\n"
+        "  window list|select\n"
+        "  snapshot [--target TARGET] [--depth N] [--topmost-only] [--save-to PATH]\n"
+        "  click TARGET [--count 1|2] [--include-snapshot]\n"
+        "  input TARGET TEXT [--mode replace|append] [--delay MS] [--submit]\n"
+        "\n"
+        "JSON/REPL commands:\n"
         "  resource {JSON}       Read one resource or list resources when JSON is omitted\n"
         "  TOOL {JSON}           Invoke one tool with a JSON object argument\n"
         "  quit / exit           Leave the REPL"
@@ -1654,6 +1671,12 @@ def _parse_cli_arguments(raw_arguments: str | None) -> dict[str, Any]:
     return parsed
 
 
+def _looks_like_json_object_argument(raw_argument: str | None) -> bool:
+    if raw_argument is None:
+        return False
+    return raw_argument.lstrip().startswith("{")
+
+
 def _print_cli_result(value: Any) -> None:
     if isinstance(value, str):
         print(value)
@@ -1712,6 +1735,158 @@ def _run_cli_command(tool_name: str, raw_arguments: str | None) -> int:
     return 0
 
 
+def _run_cli_invocation(tool_name: str, arguments: dict[str, Any]) -> int:
+    try:
+        result = _invoke_cli_tool(tool_name, arguments)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    _print_cli_result(result)
+    return 0
+
+
+def _build_typed_cli_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run qplaywright MCP tools with typed subcommands.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    resource_parser = subparsers.add_parser("resource", help="List or read CLI-exposed MCP resources.")
+    resource_subparsers = resource_parser.add_subparsers(dest="resource_action")
+    resource_subparsers.add_parser("list", help="List available resource URIs.")
+    read_resource_parser = resource_subparsers.add_parser("read", help="Read one resource by URI.")
+    read_resource_parser.add_argument("uri", help="Resource URI to read.")
+
+    session_parser = subparsers.add_parser("session", help="Manage the active qplaywright session.")
+    session_subparsers = session_parser.add_subparsers(dest="session_action", required=True)
+    session_attach_parser = session_subparsers.add_parser("attach", help="Attach to a running Qt app.")
+    session_attach_parser.add_argument("--host", default=DEFAULT_HOST)
+    session_attach_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    session_attach_parser.add_argument("--timeout", type=float, default=30.0)
+    session_attach_parser.add_argument("--agent-name", default="GitHub Copilot")
+
+    session_launch_parser = session_subparsers.add_parser("launch", help="Launch a Qt app and attach.")
+    session_launch_parser.add_argument("executable")
+    session_launch_parser.add_argument("args", nargs="*")
+    session_launch_parser.add_argument("--host", default=DEFAULT_HOST)
+    session_launch_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    session_launch_parser.add_argument("--timeout", type=float, default=30.0)
+    session_launch_parser.add_argument("--agent-name", default="GitHub Copilot")
+
+    session_status_parser = session_subparsers.add_parser("status", help="Show session status.")
+    session_status_parser.add_argument("--host", default=DEFAULT_HOST)
+    session_status_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    session_status_parser.add_argument("--timeout", type=float, default=30.0)
+    session_status_parser.add_argument("--agent-name", default="GitHub Copilot")
+
+    session_close_parser = session_subparsers.add_parser("close", help="Close the active session.")
+    session_close_parser.add_argument("--host", default=DEFAULT_HOST)
+    session_close_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    session_close_parser.add_argument("--timeout", type=float, default=30.0)
+    session_close_parser.add_argument("--agent-name", default="GitHub Copilot")
+
+    window_parser = subparsers.add_parser("window", help="Manage top-level windows.")
+    window_subparsers = window_parser.add_subparsers(dest="window_action", required=True)
+    window_subparsers.add_parser("list", help="List visible top-level windows.")
+    window_select_parser = window_subparsers.add_parser("select", help="Select the active window.")
+    window_select_group = window_select_parser.add_mutually_exclusive_group(required=True)
+    window_select_group.add_argument("--index", type=int)
+    window_select_group.add_argument("--wid", type=int)
+    window_select_group.add_argument("--title")
+
+    snapshot_parser = subparsers.add_parser("snapshot", help="Capture a text snapshot of the current UI.")
+    snapshot_parser.add_argument("--target")
+    snapshot_parser.add_argument("--depth", type=int, default=10)
+    snapshot_parser.add_argument("--topmost-only", action="store_true")
+    snapshot_parser.add_argument("--save-to")
+
+    click_parser = subparsers.add_parser("click", help="Click the first widget matched by a target.")
+    click_parser.add_argument("target")
+    click_parser.add_argument("--count", type=int, choices=(1, 2), default=1)
+    click_parser.add_argument("--include-snapshot", action="store_true")
+
+    input_parser = subparsers.add_parser("input", help="Input text into the first matched widget.")
+    input_parser.add_argument("target")
+    input_parser.add_argument("text")
+    input_parser.add_argument("--mode", choices=("replace", "append"), default="replace")
+    input_parser.add_argument("--delay", type=int, default=0)
+    input_parser.add_argument("--submit", action="store_true")
+    input_parser.add_argument("--include-snapshot", action="store_true")
+
+    return parser
+
+
+def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, Any]]:
+    command = namespace.command
+    if command == "resource":
+        if namespace.resource_action in (None, "list"):
+            return "resource", {}
+        return "resource", {"uri": namespace.uri}
+
+    if command == "session":
+        arguments = {
+            "action": namespace.session_action,
+            "host": namespace.host,
+            "port": namespace.port,
+            "timeout": namespace.timeout,
+            "agent_name": namespace.agent_name,
+        }
+        if namespace.session_action == "launch":
+            arguments["executable"] = namespace.executable
+            arguments["args"] = list(namespace.args)
+        return "session", arguments
+
+    if command == "window":
+        arguments = {"action": namespace.window_action}
+        for field_name in ("index", "wid", "title"):
+            value = getattr(namespace, field_name, None)
+            if value is not None:
+                arguments[field_name] = value
+        return "window", arguments
+
+    if command == "snapshot":
+        arguments = {
+            "target": namespace.target,
+            "depth": namespace.depth,
+            "topmost_only": namespace.topmost_only,
+            "save_to": namespace.save_to,
+        }
+        return "snapshot", arguments
+
+    if command == "click":
+        return "click", {
+            "target": namespace.target,
+            "count": namespace.count,
+            "include_snapshot": namespace.include_snapshot,
+        }
+
+    if command == "input":
+        return "input", {
+            "target": namespace.target,
+            "text": namespace.text,
+            "mode": namespace.mode,
+            "delay": namespace.delay,
+            "submit": namespace.submit,
+            "include_snapshot": namespace.include_snapshot,
+        }
+
+    raise ValueError(f"Unsupported typed CLI command: {command!r}")
+
+
+def _try_run_typed_cli(argv: Sequence[str]) -> int | None:
+    if not argv:
+        return None
+    if argv[0] not in {"resource", "session", "window", "snapshot", "click", "input"}:
+        return None
+    if len(argv) > 1 and _looks_like_json_object_argument(argv[1]):
+        return None
+
+    parser = _build_typed_cli_parser()
+    namespace = parser.parse_args(list(argv))
+    tool_name, arguments = _typed_cli_arguments(namespace)
+    return _run_cli_invocation(tool_name, arguments)
+
+
 def _run_cli_repl() -> int:
     print("qplaywright MCP CLI. Type .help for usage.")
     while True:
@@ -1739,6 +1914,14 @@ def _run_cli_repl() -> int:
 
 
 def _run_cli(argv: Sequence[str]) -> int:
+    argv_list = list(argv)
+    if not argv_list:
+        return _run_cli_repl()
+
+    typed_result = _try_run_typed_cli(argv_list)
+    if typed_result is not None:
+        return typed_result
+
     parser = argparse.ArgumentParser(
         description="Run qplaywright MCP tools directly from the command line or in an interactive REPL."
     )
@@ -1752,7 +1935,7 @@ def _run_cli(argv: Sequence[str]) -> int:
         nargs="?",
         help="JSON object with tool arguments, for example '{\"action\": \"attach\", \"port\": 19877}'.",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv_list)
 
     if args.tool is None:
         return _run_cli_repl()
