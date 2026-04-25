@@ -58,8 +58,10 @@ print(header_path)
 ```python
 from qplaywright.agent import start_agent
 
-start_agent(port=19876)
+start_agent(port=19876, visual_feedback=True)
 ```
+
+Call `start_agent()` after creating `QApplication` and before entering `app.exec()`.
 
 ### C++ Qt application
 
@@ -86,11 +88,13 @@ cmake --build build
 ```python
 from qplaywright import sync_qplaywright
 
-with sync_qplaywright(port=19876) as qp:
-    app = qp.application()
-    window = app.window()
-    window.locator("role=button", has_text="Submit").click()
+with sync_qplaywright() as qp:
+    app = qp.connect(port=19876, agent_name="GitHub Copilot")
+    window = app.main_window()
+    window.get_by_role("button", name="Submit").click()
 ```
+
+When `visual_feedback` is enabled in the Qt agent and the client provides `agent_name`, the target window shows the current shared-agent overlay marker.
 
 ## MCP Server
 
@@ -110,15 +114,22 @@ Run the direct CLI / REPL when you want to keep issuing tool calls from one term
 
 ```bash
 qplaywright-mcp cli
-qplaywright> connect {"name": "probe", "port": 19877}
-qplaywright> browser_snapshot {"connection": "probe", "depth": 4}
-qplaywright> click {"connection": "probe", "selector": "text=Start"}
+qplaywright> session {"action": "attach", "port": 19877}
+qplaywright> window {"action": "list"}
+qplaywright> snapshot {"depth": 4}
+qplaywright> click {"target": "text=Start"}
 ```
 
 You can also run one tool call without starting the REPL:
 
 ```bash
-qplaywright-mcp cli list_windows '{"connection": "probe"}'
+qplaywright-mcp cli snapshot '{"depth": 4}'
+```
+
+Expose Streamable HTTP instead of stdio when needed:
+
+```bash
+python -m qplaywright.mcp_server --transport streamable-http
 ```
 
 ## Packaging
@@ -135,6 +146,7 @@ python -m build --no-isolation
 - The Python package has zero mandatory runtime dependencies.
 - Qt bindings are imported lazily by the Python agent.
 - The C++ agent is header-only, but because it contains `Q_OBJECT`, it must still be listed in your CMake sources for AUTOMOC.
+- MCP uses a single active session and a single active window scope; use the `session` and `window` tools to switch explicitly.
 
 ## Additional Docs
 
