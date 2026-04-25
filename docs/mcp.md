@@ -273,6 +273,7 @@ Request:
   "target": null,
   "depth": 10,
   "topmost_only": false,
+  "include_infrastructure": false,
   "save_to": "snapshot.txt"
 }
 ```
@@ -299,6 +300,9 @@ Each snapshot ref entry includes:
 When `topmost_only=true` and `target` is omitted, the result is an approximate
 frontmost-visible view. It may omit widgets or content and returns a warning to
 make that limitation explicit.
+By default, `snapshot` filters common Qt infrastructure widgets such as internal
+scroll-area support nodes. Set `include_infrastructure=true` when you need the
+raw tree for debugging.
 
 ### inspect
 
@@ -308,13 +312,16 @@ Request:
 {
   "target": "#amount_editor",
   "include_methods": true,
-  "property": "placeholderText"
+  "property": "placeholderText",
+  "include_infrastructure": false
 }
 ```
 
 When `target` is omitted, `inspect` returns the active window tree in debug mode.
 When `target` is provided, `inspect` returns widget state and optional method metadata.
 If multiple widgets match the target, scalar fields describe the first match and `count` reports the total number of matches.
+When `target` is omitted, `inspect` filters common Qt infrastructure widgets by default.
+Set `include_infrastructure=true` to inspect the unfiltered raw widget tree.
 
 Targeted `inspect` may include:
 

@@ -518,7 +518,7 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
 
     result = mcp_server.snapshot(depth=4, topmost_only=True, save_to="snapshot.txt")
 
-    assert captured["kwargs"] == {"target": None, "depth": 4, "topmost_only": True}
+    assert captured["kwargs"] == {"target": None, "depth": 4, "topmost_only": True, "include_infrastructure": False}
     assert result["ok"] is True
     assert result["window"]["wid"] == 11
     assert result["topmost_only"] is True
@@ -553,9 +553,110 @@ def test_inspect_without_target_returns_active_window_tree(monkeypatch):
         "ok": True,
         "target": None,
         "depth": 6,
-        "tree": [{"wid": 11, "class": "DemoWindow", "children": []}],
+        "include_infrastructure": False,
+        "tree": [{"wid": 11, "class": "DemoWindow"}],
         "warnings": [mcp_server._TOPMOST_ONLY_WARNING],
     }
+
+
+def test_filter_infrastructure_nodes_drops_qt_internal_support_widgets():
+    nodes = [
+        {
+            "wid": 1,
+            "class": "DemoWindow",
+            "objectName": "",
+            "children": [
+                {
+                    "wid": 2,
+                    "class": "QWidget",
+                    "objectName": "qt_scrollarea_viewport",
+                    "children": [],
+                },
+                {
+                    "wid": 3,
+                    "class": "QLineEdit",
+                    "objectName": "username_input",
+                    "children": [],
+                },
+                {
+                    "wid": 4,
+                    "class": "QAbstractScrollAreaScrollBarContainer",
+                    "objectName": "",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+
+    filtered = mcp_server._filter_infrastructure_nodes(nodes)
+
+    assert [child["wid"] for child in filtered[0]["children"]] == [3]
+
+
+def test_inspect_without_target_filters_infrastructure_by_default(monkeypatch):
+    state = mcp_server.ServerState()
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(
+        mcp_server,
+        "_widget_tree_raw",
+        lambda managed_connection, **kwargs: [
+            {
+                "wid": 11,
+                "class": "DemoWindow",
+                "children": [
+                    {"wid": 12, "class": "QWidget", "objectName": "qt_scrollarea_viewport", "children": []},
+                    {"wid": 13, "class": "QLineEdit", "objectName": "username_input", "children": []},
+                ],
+            }
+        ],
+    )
+
+    result = mcp_server.inspect()
+
+    assert [child["wid"] for child in result["tree"][0]["children"]] == [13]
+
+
+def test_inspect_without_target_can_include_infrastructure(monkeypatch):
+    state = mcp_server.ServerState()
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(
+        mcp_server,
+        "_widget_tree_raw",
+        lambda managed_connection, **kwargs: [
+            {
+                "wid": 11,
+                "class": "DemoWindow",
+                "children": [
+                    {"wid": 12, "class": "QWidget", "objectName": "qt_scrollarea_viewport", "children": []},
+                    {"wid": 13, "class": "QLineEdit", "objectName": "username_input", "children": []},
+                ],
+            }
+        ],
+    )
+
+    result = mcp_server.inspect(include_infrastructure=True)
+
+    assert [child["wid"] for child in result["tree"][0]["children"]] == [12, 13]
 
 
 def test_snapshot_omits_topmost_warning_for_targeted_snapshot(monkeypatch):
@@ -1086,6 +1187,83 @@ def test_snapshot_payload_creates_stable_refs():
     assert payload["refs"][1]["target"] == "#login_btn"
 
 
+def test_snapshot_payload_filters_infrastructure_widgets_by_default():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=1,
+    )
+
+    payload = mcp_server._snapshot_payload(
+        connection,
+        [
+            {
+                "wid": 1,
+                "class": "DemoWindow",
+                "objectName": "",
+                "text": "Title",
+                "children": [
+                    {
+                        "wid": 2,
+                        "class": "QWidget",
+                        "objectName": "qt_scrollarea_viewport",
+                        "children": [],
+                    },
+                    {
+                        "wid": 3,
+                        "class": "QPushButton",
+                        "objectName": "login_btn",
+                        "text": "Login",
+                        "children": [],
+                    },
+                ],
+            }
+        ],
+    )
+
+    assert "qt_scrollarea_viewport" not in payload["snapshot"]
+    assert [entry["wid"] for entry in payload["refs"]] == [1, 3]
+
+
+def test_snapshot_payload_can_include_infrastructure_widgets_when_requested():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=1,
+    )
+
+    payload = mcp_server._snapshot_payload(
+        connection,
+        [
+            {
+                "wid": 1,
+                "class": "DemoWindow",
+                "objectName": "",
+                "text": "Title",
+                "children": [
+                    {
+                        "wid": 2,
+                        "class": "QWidget",
+                        "objectName": "qt_scrollarea_viewport",
+                        "children": [],
+                    }
+                ],
+            }
+        ],
+        include_infrastructure=True,
+    )
+
+    assert "qt_scrollarea_viewport" in payload["snapshot"]
+
+
 def test_snapshot_payload_preserves_existing_ref_bindings():
     connection = mcp_server.ManagedConnection(
         name="demo",
@@ -1186,6 +1364,43 @@ def test_snapshot_result_resets_refs_and_passes_depth_for_target_snapshot():
             "text": "Confirm",
         },
     ]
+
+
+def test_snapshot_result_preserves_target_root_when_it_matches_infrastructure():
+    transport = FakeTransportConn(
+        responses={
+            mcp_server.METHOD_FIND: {
+                "wid": 42,
+                "class": "QWidget",
+                "objectName": "qt_scrollarea_viewport",
+                "children": [
+                    {
+                        "wid": 43,
+                        "class": "QPushButton",
+                        "objectName": "confirm_btn",
+                        "text": "Confirm",
+                        "children": [],
+                    }
+                ],
+            }
+        }
+    )
+    app = FakeApp([])
+    app._conn = transport
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        snapshot_refs={"e9": 42},
+        snapshot_wids={42: "e9"},
+    )
+
+    result = mcp_server._snapshot_result(connection, target="e9", depth=2)
+
+    assert [entry["wid"] for entry in result["refs"]] == [42, 43]
 
 
 def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
@@ -1434,6 +1649,7 @@ def test_run_cli_typed_snapshot(monkeypatch, capsys):
     assert payload == {
         "ok": True,
         "depth": 4,
+        "include_infrastructure": False,
         "save_to": "snapshot.txt",
         "target": None,
         "topmost_only": True,

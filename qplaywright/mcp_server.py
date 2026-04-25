@@ -48,6 +48,9 @@ _TOPMOST_ONLY_WARNING = (
     "Rerun with topmost_only=false when you need a complete tree."
 )
 _SCREENSHOT_TEMP_DIR = Path(tempfile.gettempdir()) / "qplaywright_screenshots" / uuid4().hex
+_INFRASTRUCTURE_WIDGET_CLASSES = {
+    "QAbstractScrollAreaScrollBarContainer",
+}
 
 SessionAction = Literal["attach", "launch", "close", "status"]
 WindowAction = Literal["list", "select", "resize", "close"]
@@ -777,6 +780,45 @@ def _snapshot_entry(node: dict[str, Any], ref: str | None) -> dict[str, Any]:
     return entry
 
 
+def _is_infrastructure_widget_node(node: dict[str, Any]) -> bool:
+    object_name = node.get("objectName")
+    if isinstance(object_name, str) and object_name.startswith("qt_"):
+        return True
+
+    widget_class = node.get("class")
+    if isinstance(widget_class, str) and widget_class in _INFRASTRUCTURE_WIDGET_CLASSES:
+        return True
+
+    attributes = node.get("attributes")
+    if isinstance(attributes, dict) and attributes.get("WA_TransparentForMouseEvents") is True:
+        return True
+
+    return False
+
+
+def _filter_infrastructure_nodes(
+    nodes: list[dict[str, Any]],
+    *,
+    preserve_roots: bool = False,
+) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+
+    for node in nodes:
+        filtered_children = _filter_infrastructure_nodes(node.get("children") or [])
+        normalized = dict(node)
+        if filtered_children:
+            normalized["children"] = filtered_children
+        else:
+            normalized.pop("children", None)
+
+        if not preserve_roots and _is_infrastructure_widget_node(normalized):
+            continue
+
+        filtered.append(normalized)
+
+    return filtered
+
+
 def _render_snapshot_tree(
     connection: ManagedConnection,
     nodes: list[dict[str, Any]],
@@ -830,7 +872,12 @@ def _snapshot_payload(
     nodes: list[dict[str, Any]],
     *,
     depth: int = 10,
+    include_infrastructure: bool = False,
+    preserve_roots: bool = False,
 ) -> dict[str, Any]:
+    if not include_infrastructure:
+        nodes = _filter_infrastructure_nodes(nodes, preserve_roots=preserve_roots)
+
     lines, refs = _render_snapshot_tree(connection, nodes, depth=depth)
     return {
         "snapshot": "\n".join(lines),
@@ -891,6 +938,7 @@ def _snapshot_result(
     target: str | None = None,
     depth: int = 10,
     topmost_only: bool = False,
+    include_infrastructure: bool = False,
     timeout: float | None = None,
 ) -> dict[str, Any]:
     target_params = _target_params(managed_connection, target, max_depth=depth) if target is not None else None
@@ -907,6 +955,7 @@ def _snapshot_result(
                 timeout=timeout,
             ),
             depth=depth,
+            include_infrastructure=include_infrastructure,
         )
 
     node = managed_connection.app._conn.send(
@@ -916,7 +965,13 @@ def _snapshot_result(
     )
     if node is None:
         raise ValueError(_target_not_found_message(managed_connection, target))
-    return _snapshot_payload(managed_connection, [node], depth=depth)
+    return _snapshot_payload(
+        managed_connection,
+        [node],
+        depth=depth,
+        include_infrastructure=include_infrastructure,
+        preserve_roots=True,
+    )
 
 
 def _topmost_only_warnings(*, topmost_only: bool, target: str | None = None) -> list[str]:
@@ -1218,6 +1273,7 @@ if FastMCP is not None:
         target: str | None = None,
         depth: int = 10,
         topmost_only: bool = False,
+        include_infrastructure: bool = False,
         save_to: str | None = None,
     ) -> dict[str, Any]:
         """Return a text snapshot of the current active window or one target.
@@ -1228,13 +1284,20 @@ if FastMCP is not None:
 
         connection_state = _get_connection(_SERVER_STATE)
         active_window = _active_window_summary(connection_state)
-        payload = _snapshot_result(connection_state, target=target, depth=depth, topmost_only=topmost_only)
+        payload = _snapshot_result(
+            connection_state,
+            target=target,
+            depth=depth,
+            topmost_only=topmost_only,
+            include_infrastructure=include_infrastructure,
+        )
         result = {
             "ok": True,
             "session": _session_summary(connection_state),
             "window": active_window,
             "target": target,
             "topmost_only": topmost_only,
+            "include_infrastructure": include_infrastructure,
             **payload,
         }
         warnings = _topmost_only_warnings(topmost_only=topmost_only, target=target)
@@ -1253,6 +1316,7 @@ if FastMCP is not None:
         include_properties: bool = False,
         depth: int = 10,
         topmost_only: bool = False,
+        include_infrastructure: bool = False,
     ) -> dict[str, Any]:
         """Inspect one target or return the current active window tree in debug mode.
 
@@ -1262,16 +1326,20 @@ if FastMCP is not None:
 
         connection_state = _get_connection(_SERVER_STATE)
         if target is None:
+            tree = _widget_tree_raw(
+                connection_state,
+                max_depth=depth,
+                window_wid=connection_state.active_window_wid,
+                topmost_only=topmost_only,
+            )
+            if not include_infrastructure:
+                tree = _filter_infrastructure_nodes(tree)
             result = {
                 "ok": True,
                 "target": None,
                 "depth": depth,
-                "tree": _widget_tree_raw(
-                    connection_state,
-                    max_depth=depth,
-                    window_wid=connection_state.active_window_wid,
-                    topmost_only=topmost_only,
-                ),
+                "include_infrastructure": include_infrastructure,
+                "tree": tree,
             }
             warnings = _topmost_only_warnings(topmost_only=topmost_only, target=None)
             if warnings:
@@ -1913,6 +1981,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("--target")
     snapshot_parser.add_argument("--depth", type=int, default=10)
     snapshot_parser.add_argument("--topmost-only", action="store_true")
+    snapshot_parser.add_argument("--include-infrastructure", action="store_true")
     snapshot_parser.add_argument("--save-to")
 
     click_parser = subparsers.add_parser("click", help="Click the first widget matched by a target.")
@@ -1937,6 +2006,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     inspect_parser.add_argument("--include-properties", action="store_true")
     inspect_parser.add_argument("--depth", type=int, default=10)
     inspect_parser.add_argument("--topmost-only", action="store_true")
+    inspect_parser.add_argument("--include-infrastructure", action="store_true")
 
     invoke_parser = subparsers.add_parser("invoke", help="Invoke a custom widget method by exact name.")
     invoke_parser.add_argument("target")
@@ -2008,6 +2078,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "include_properties": namespace.include_properties,
             "depth": namespace.depth,
             "topmost_only": namespace.topmost_only,
+            "include_infrastructure": namespace.include_infrastructure,
         }
 
     if command == "invoke":
@@ -2117,6 +2188,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "target": namespace.target,
             "depth": namespace.depth,
             "topmost_only": namespace.topmost_only,
+            "include_infrastructure": namespace.include_infrastructure,
             "save_to": namespace.save_to,
         }
         return "snapshot", arguments
