@@ -260,7 +260,7 @@ def _create_overlay_manager_class():
                 self.hide()
                 return
 
-            if not self._target_window.isVisible():
+            if not _is_overlay_target_window_visible(self._target_window):
                 self.hide()
                 return
 
@@ -302,7 +302,7 @@ def _create_overlay_manager_class():
         def _tick(self) -> None:
             cutoff = time.monotonic() - (self._pulse_span + self._pulse_gap)
             self._pulse_records = [record for record in self._pulse_records if record[0] >= cutoff]
-            if self._target_window is None or not self._target_window.isVisible():
+            if self._target_window is None or not _is_overlay_target_window_visible(self._target_window):
                 self.hide()
             else:
                 self.sync_to_window()
@@ -436,7 +436,7 @@ def _create_overlay_manager_class():
 
         def move_cursor(self, widget, pos, *, pulse_count: int = 0) -> None:
             target_window = widget.window() if hasattr(widget, "window") else None
-            if target_window is None:
+            if not _is_overlay_target_window_visible(target_window):
                 return
             self._active_window_id = id(target_window)
             overlay = self._ensure_overlay(target_window)
@@ -455,10 +455,10 @@ def _create_overlay_manager_class():
 
         def _ensure_active_overlay(self) -> None:
             active_window = self._app.activeWindow() if hasattr(self._app, "activeWindow") else None
-            if active_window is not None and (_is_automation_overlay_widget(active_window) or not active_window.isVisible()):
+            if not _is_overlay_target_window_visible(active_window):
                 active_window = None
             if active_window is None:
-                visible_windows = _get_top_level_widgets()
+                visible_windows = [window for window in _get_top_level_widgets() if _is_overlay_target_window_visible(window)]
                 if visible_windows:
                     active_window = visible_windows[0]
             if active_window is None:
@@ -489,7 +489,7 @@ def _create_overlay_manager_class():
             if self._active_window_id is not None:
                 active_overlay = self._overlays.get(self._active_window_id)
                 active_window = getattr(active_overlay, "_target_window", None) if active_overlay is not None else None
-                if active_window is None or not active_window.isVisible():
+                if not _is_overlay_target_window_visible(active_window):
                     self._active_window_id = None
 
             if self._session_agent_name:
@@ -497,7 +497,7 @@ def _create_overlay_manager_class():
 
             for window_id, overlay in list(self._overlays.items()):
                 target_window = getattr(overlay, "_target_window", None)
-                if target_window is None or not target_window.isVisible():
+                if not _is_overlay_target_window_visible(target_window):
                     self._drop_overlay(window_id)
                     continue
 
@@ -667,6 +667,22 @@ def _create_dispatcher():
 
 def _get_top_level_widgets():
     return [widget for widget in _QApplication.topLevelWidgets() if not _is_automation_overlay_widget(widget)]
+
+
+def _is_overlay_target_window_visible(widget) -> bool:
+    qt_namespace = getattr(_QtCore, "Qt", None) if _QtCore is not None else None
+    if widget is None or _is_automation_overlay_widget(widget):
+        return False
+    if not hasattr(widget, "isVisible") or not widget.isVisible():
+        return False
+    if hasattr(widget, "isMinimized") and widget.isMinimized():
+        return False
+    if qt_namespace is not None and hasattr(widget, "windowState") and widget.windowState() & qt_namespace.WindowMinimized:
+        return False
+    window_handle = widget.windowHandle() if hasattr(widget, "windowHandle") else None
+    if window_handle is not None and hasattr(window_handle, "isExposed") and not window_handle.isExposed():
+        return False
+    return True
 
 
 def _resolve_widgets(params: dict) -> list:
