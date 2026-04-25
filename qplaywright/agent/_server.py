@@ -1033,8 +1033,12 @@ def _handle_command(req: Request) -> Any:
                     "wid": wid,
                     "title": w.windowTitle() if hasattr(w, "windowTitle") else "",
                     "class": _widget_class_name(w),
-                    "width": w.width(),
-                    "height": w.height(),
+                    "geometry": {
+                        "x": w.x(),
+                        "y": w.y(),
+                        "width": w.width(),
+                        "height": w.height(),
+                    },
                     "is_modal": bool(w.isModal()) if hasattr(w, "isModal") else False,
                 })
         return result

@@ -238,8 +238,12 @@ def _list_windows_raw(connection: ManagedConnection, *, timeout: float | None = 
                 "wid": window.wid,
                 "title": window.title(),
                 "class": "",
-                "width": None,
-                "height": None,
+                "geometry": {
+                    "x": None,
+                    "y": None,
+                    "width": None,
+                    "height": None,
+                },
                 "is_modal": bool(window.isModal()) if hasattr(window, "isModal") else False,
                 "index": index,
             }
@@ -247,23 +251,16 @@ def _list_windows_raw(connection: ManagedConnection, *, timeout: float | None = 
     return windows
 
 
-def _window_geometry(window: dict[str, Any]) -> dict[str, Any] | None:
+def _window_geometry(window: dict[str, Any]) -> dict[str, Any]:
     geometry = window.get("geometry")
-    if isinstance(geometry, dict):
-        return {
-            "x": geometry.get("x"),
-            "y": geometry.get("y"),
-            "width": geometry.get("width"),
-            "height": geometry.get("height"),
-        }
+    if not isinstance(geometry, dict):
+        raise ValueError("Window payload is missing geometry")
 
-    width = window.get("width")
-    height = window.get("height")
     return {
-        "x": window.get("x"),
-        "y": window.get("y"),
-        "width": width,
-        "height": height,
+        "x": geometry.get("x"),
+        "y": geometry.get("y"),
+        "width": geometry.get("width"),
+        "height": geometry.get("height"),
     }
 
 

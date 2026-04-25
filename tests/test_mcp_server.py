@@ -672,7 +672,7 @@ def test_wait_can_include_snapshot(monkeypatch):
     monkeypatch.setattr(
         mcp_server,
         "_list_windows_raw",
-        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "width": 640, "height": 720, "is_modal": False}],
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
     )
     monkeypatch.setattr(
         mcp_server,
@@ -740,7 +740,7 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
     monkeypatch.setattr(
         mcp_server,
         "_list_windows_raw",
-        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "width": 640, "height": 720, "is_modal": False}],
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
     )
     monkeypatch.setattr(
         mcp_server,
@@ -775,7 +775,7 @@ def test_finalize_action_result_switches_active_window_and_uses_window_snapshot(
     monkeypatch.setattr(
         mcp_server,
         "_list_windows_raw",
-        lambda managed_connection, **kwargs: [{"wid": 22, "title": "Dialog", "class": "QDialog", "width": 480, "height": 320, "is_modal": False}],
+        lambda managed_connection, **kwargs: [{"wid": 22, "title": "Dialog", "class": "QDialog", "geometry": {"x": 50, "y": 60, "width": 480, "height": 320}, "is_modal": False}],
     )
 
     def fake_action_result_with_snapshot(managed_connection, *, target=None, **payload):
@@ -817,7 +817,7 @@ def test_press_key_without_target_uses_active_window_transport(monkeypatch):
     monkeypatch.setattr(
         mcp_server,
         "_list_windows_raw",
-        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "width": 640, "height": 720, "is_modal": False}],
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
     )
 
     result = mcp_server.press_key(key="Enter")
@@ -828,7 +828,7 @@ def test_press_key_without_target_uses_active_window_transport(monkeypatch):
     assert result["key"] == "Enter"
 
 
-def test_summarize_windows_normalizes_geometry_from_legacy_size_fields():
+def test_summarize_windows_uses_geometry_payload():
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -841,7 +841,7 @@ def test_summarize_windows_normalizes_geometry_from_legacy_size_fields():
 
     summaries = mcp_server._summarize_windows(
         connection,
-        [{"wid": 11, "title": "Main", "class": "DemoWindow", "width": 640, "height": 720, "is_modal": False}],
+        [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
     )
 
     assert summaries == [
@@ -850,7 +850,7 @@ def test_summarize_windows_normalizes_geometry_from_legacy_size_fields():
             "wid": 11,
             "title": "Main",
             "class": "DemoWindow",
-            "geometry": {"x": None, "y": None, "width": 640, "height": 720},
+            "geometry": {"x": 5, "y": 7, "width": 640, "height": 720},
             "is_active": True,
             "is_modal": False,
         }

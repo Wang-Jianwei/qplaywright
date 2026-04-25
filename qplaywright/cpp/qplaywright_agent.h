@@ -2077,11 +2077,15 @@ private:
                 if (!w->isVisible()) continue;
                 int wid = reg.registerWidget(w);
                 QJsonObject r;
+                QJsonObject geometry;
                 r["wid"] = wid;
                 r["title"] = w->windowTitle();
                 r["class"] = QString::fromLatin1(w->metaObject()->className());
-                r["width"] = w->width();
-                r["height"] = w->height();
+                geometry["x"] = w->x();
+                geometry["y"] = w->y();
+                geometry["width"] = w->width();
+                geometry["height"] = w->height();
+                r["geometry"] = geometry;
                 r["is_modal"] = w->isModal();
                 arr.append(r);
             }
