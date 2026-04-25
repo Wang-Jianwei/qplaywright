@@ -1195,6 +1195,13 @@ private:
         return true;
     }
 
+    static bool isQtApplicationActive()
+    {
+        if (!qApp)
+            return true;
+        return qApp->applicationState() == Qt::ApplicationActive;
+    }
+
     struct PulseRecord
     {
         qint64 startedAtMs;
@@ -1598,7 +1605,10 @@ private:
 
         void syncVisibility()
         {
-            if (m_enabled && !m_sharedAgentName.isEmpty()) {
+            if (!isQtApplicationActive())
+                m_activeWindow = nullptr;
+
+            if (m_enabled && !m_sharedAgentName.isEmpty() && isQtApplicationActive()) {
                 QWidget *activeWindow = QApplication::activeWindow();
                 if (isOverlayTargetWindowVisible(activeWindow)) {
                     m_activeWindow = activeWindow;
