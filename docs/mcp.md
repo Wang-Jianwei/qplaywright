@@ -119,6 +119,13 @@ Most tools operate inside the current active window scope.
 Use `window` with `action="select"` to change that scope explicitly.
 After actions, the server updates the active window tracking automatically.
 
+Window summaries exposed through `session`, `window`, and post-action observation
+use one layout field:
+
+- `geometry: {x, y, width, height}`
+
+There is no parallel top-level `width` / `height` return shape anymore.
+
 ### Unified Target
 
 Widget-oriented tools accept a single `target` value.
@@ -173,6 +180,16 @@ Supported actions:
 }
 ```
 
+`attach`, `launch`, and `status` return `active_window` when one is available.
+That window summary uses:
+
+- `wid`
+- `title`
+- `class`
+- `geometry`
+- `is_active`
+- `is_modal`
+
 ### window
 
 Request:
@@ -204,6 +221,15 @@ Resize also requires:
 - `width`
 - `height`
 
+`list`, `select`, `resize`, and `close` return window summaries using:
+
+- `wid`
+- `title`
+- `class`
+- `geometry`
+- `is_active`
+- `is_modal`
+
 ### snapshot
 
 Request:
@@ -212,6 +238,7 @@ Request:
 {
   "target": null,
   "depth": 10,
+  "topmost_only": false,
   "save_to": "snapshot.txt"
 }
 ```
@@ -223,7 +250,21 @@ Response includes:
 - `target`
 - `snapshot`
 - `refs`
+- optional `warnings`
 - optional `save_to`
+
+Each snapshot ref entry includes:
+
+- `ref`
+- `wid`
+- `target`
+- `class`
+- `geometry`
+- any meaningful semantic label fields such as `text`, `accessibleName`, `currentText`, `windowTitle`, or `value`
+
+When `topmost_only=true` and `target` is omitted, the result is an approximate
+frontmost-visible view. It may omit widgets or content and returns a warning to
+make that limitation explicit.
 
 ### inspect
 
@@ -240,6 +281,15 @@ Request:
 When `target` is omitted, `inspect` returns the active window tree in debug mode.
 When `target` is provided, `inspect` returns widget state and optional method metadata.
 If multiple widgets match the target, scalar fields describe the first match and `count` reports the total number of matches.
+
+Targeted `inspect` may include:
+
+- `geometry` for widget-local layout data
+- `globalBoundingBox` for screen-space bounds
+- `bounding_box` as the existing locator-compatible bounding box field
+
+When `target` is omitted and `topmost_only=true`, the returned tree is an
+approximate frontmost-visible view and may be incomplete.
 
 ### Action Tools
 
@@ -320,6 +370,8 @@ Supported selectors match the existing qplaywright syntax:
 - `role=button`
 - `text=Submit`
 - `has-text=partial`
+- `a11y-name=Submit`
+- `a11y-desc=Help text`
 - `#objectName`
 - `name=objectName`
 - `.QLabel`
