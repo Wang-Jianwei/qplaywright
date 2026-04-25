@@ -426,10 +426,13 @@ def _create_overlay_manager_class():
             self._timer.start(16)
 
         def close_all(self) -> None:
-            for overlay in list(self._overlays.values()):
-                overlay.close_overlay()
-            self._overlays.clear()
+            self._clear_overlays()
             self._timer.stop()
+
+        def _clear_overlays(self) -> None:
+            for window_id in list(self._overlays):
+                self._drop_overlay(window_id)
+            self._active_window_id = None
 
         def move_cursor(self, widget, pos, *, pulse_count: int = 0) -> None:
             target_window = widget.window() if hasattr(widget, "window") else None
@@ -442,10 +445,12 @@ def _create_overlay_manager_class():
         def set_session_agent_name(self, agent_name: str) -> None:
             normalized = str(agent_name or "").strip()
             self._session_agent_name = normalized
+            if not normalized:
+                self._clear_overlays()
+                return
             for overlay in list(self._overlays.values()):
                 overlay.set_session_agent_name(normalized)
-            if normalized:
-                self._ensure_active_overlay()
+            self._ensure_active_overlay()
             self._sync()
 
         def _ensure_active_overlay(self) -> None:
@@ -481,16 +486,18 @@ def _create_overlay_manager_class():
                 overlay.close_overlay()
 
         def _sync(self) -> None:
+            if self._active_window_id is not None:
+                active_overlay = self._overlays.get(self._active_window_id)
+                active_window = getattr(active_overlay, "_target_window", None) if active_overlay is not None else None
+                if active_window is None or not active_window.isVisible():
+                    self._active_window_id = None
+
             if self._session_agent_name:
                 self._ensure_active_overlay()
-            elif self._active_window_id is None:
-                visible_windows = _get_top_level_widgets()
-                if visible_windows:
-                    self._active_window_id = id(visible_windows[0])
 
             for window_id, overlay in list(self._overlays.items()):
                 target_window = getattr(overlay, "_target_window", None)
-                if target_window is None:
+                if target_window is None or not target_window.isVisible():
                     self._drop_overlay(window_id)
                     continue
 
@@ -501,7 +508,7 @@ def _create_overlay_manager_class():
 
                 overlay.sync_to_window()
 
-            if self._active_window_id is not None and self._active_window_id not in self._overlays:
+            if self._session_agent_name and self._active_window_id is not None and self._active_window_id not in self._overlays:
                 for window in _get_top_level_widgets():
                     if id(window) == self._active_window_id:
                         self._ensure_overlay(window)

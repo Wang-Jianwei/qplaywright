@@ -1432,8 +1432,11 @@ private:
                 if (!it.value().isNull())
                     it.value()->setSharedAgentName(m_sharedAgentName);
             }
-            if (!m_sharedAgentName.isEmpty())
-                syncVisibility();
+            if (m_sharedAgentName.isEmpty()) {
+                closeAll();
+                return;
+            }
+            syncVisibility();
         }
 
         void moveCursor(QWidget *widget, const QPoint &localPos, int pulseCount)
@@ -1550,7 +1553,8 @@ private:
                 QWidget *activeWindow = QApplication::activeWindow();
                 if (activeWindow && !activeWindow->property(kAutomationOverlayProperty).toBool() && activeWindow->isVisible()) {
                     m_activeWindow = activeWindow;
-                } else if (!m_activeWindow) {
+                } else if (!m_activeWindow || !m_activeWindow->isVisible()) {
+                    m_activeWindow = nullptr;
                     const auto windows = QApplication::topLevelWidgets();
                     for (QWidget *window : windows) {
                         if (!window->property(kAutomationOverlayProperty).toBool() && window->isVisible()) {
@@ -1580,7 +1584,11 @@ private:
 
                 overlay->setSharedAgentName(m_sharedAgentName);
 
-                if (m_enabled && targetWindow == m_activeWindow && targetWindow->isVisible())
+                if (!targetWindow->isVisible()) {
+                    if (targetWindow == m_activeWindow)
+                        m_activeWindow = nullptr;
+                    overlay->hide();
+                } else if (m_enabled && targetWindow == m_activeWindow)
                     overlay->syncToWindow();
                 else
                     overlay->hide();
