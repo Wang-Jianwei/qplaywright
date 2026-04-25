@@ -1813,11 +1813,145 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     input_parser.add_argument("--submit", action="store_true")
     input_parser.add_argument("--include-snapshot", action="store_true")
 
+    inspect_parser = subparsers.add_parser("inspect", help="Inspect one target or return the current window tree.")
+    inspect_parser.add_argument("--target")
+    inspect_parser.add_argument("--property")
+    inspect_parser.add_argument("--include-methods", action="store_true")
+    inspect_parser.add_argument("--include-properties", action="store_true")
+    inspect_parser.add_argument("--depth", type=int, default=10)
+    inspect_parser.add_argument("--topmost-only", action="store_true")
+
+    invoke_parser = subparsers.add_parser("invoke", help="Invoke a custom widget method by exact name.")
+    invoke_parser.add_argument("target")
+    invoke_parser.add_argument("method")
+    invoke_parser.add_argument("--args", default="{}")
+    invoke_parser.add_argument("--include-snapshot", action="store_true")
+
+    press_key_parser = subparsers.add_parser("press_key", help="Send a key press to the matched widget.")
+    press_key_parser.add_argument("key")
+    press_key_parser.add_argument("--target")
+    press_key_parser.add_argument("--include-snapshot", action="store_true")
+
+    set_checked_parser = subparsers.add_parser("set_checked", help="Check or uncheck the matched widget.")
+    set_checked_parser.add_argument("target")
+    set_checked_parser.add_argument("--checked", action="store_true")
+    set_checked_parser.add_argument("--unchecked", action="store_true")
+    set_checked_parser.add_argument("--include-snapshot", action="store_true")
+
+    choose_parser = subparsers.add_parser("choose", help="Select a combobox option by value, index, or label.")
+    choose_parser.add_argument("target")
+    choose_group = choose_parser.add_mutually_exclusive_group()
+    choose_group.add_argument("--value")
+    choose_group.add_argument("--index", type=int)
+    choose_group.add_argument("--label")
+    choose_parser.add_argument("--include-snapshot", action="store_true")
+
+    wait_parser = subparsers.add_parser("wait", help="Wait until a widget reaches a supported state.")
+    wait_parser.add_argument("target")
+    wait_parser.add_argument("--state", default="visible", choices=("visible", "hidden", "enabled", "disabled", "checked", "unchecked"))
+    wait_parser.add_argument("--timeout", type=float)
+    wait_parser.add_argument("--include-snapshot", action="store_true")
+
+    screenshot_parser = subparsers.add_parser("screenshot", help="Capture a screenshot of the window or a widget.")
+    screenshot_parser.add_argument("--target")
+    screenshot_parser.add_argument("--path")
+    screenshot_parser.add_argument("--x", type=int)
+    screenshot_parser.add_argument("--y", type=int)
+    screenshot_parser.add_argument("--width", type=int)
+    screenshot_parser.add_argument("--height", type=int)
+
+    hover_parser = subparsers.add_parser("hover", help="Hover over the first matched widget.")
+    hover_parser.add_argument("target")
+    hover_parser.add_argument("--include-snapshot", action="store_true")
+
+    scroll_parser = subparsers.add_parser("scroll", help="Send a mouse wheel scroll event to the matched widget.")
+    scroll_parser.add_argument("target")
+    scroll_parser.add_argument("--delta-x", type=int, default=0)
+    scroll_parser.add_argument("--delta-y", type=int, default=0)
+    scroll_parser.add_argument("--include-snapshot", action="store_true")
+
     return parser
 
 
 def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, Any]]:
     command = namespace.command
+
+    if command == "inspect":
+        return "inspect", {
+            "target": namespace.target,
+            "property": namespace.property,
+            "include_methods": namespace.include_methods,
+            "include_properties": namespace.include_properties,
+            "depth": namespace.depth,
+            "topmost_only": namespace.topmost_only,
+        }
+
+    if command == "invoke":
+        return "invoke", {
+            "target": namespace.target,
+            "method": namespace.method,
+            "args": json.loads(namespace.args),
+            "include_snapshot": namespace.include_snapshot,
+        }
+
+    if command == "press_key":
+        return "press_key", {
+            "key": namespace.key,
+            "target": namespace.target,
+            "include_snapshot": namespace.include_snapshot,
+        }
+
+    if command == "set_checked":
+        checked = getattr(namespace, "checked", None)
+        if checked is None:
+            checked = not getattr(namespace, "unchecked", False)
+        return "set_checked", {
+            "target": namespace.target,
+            "checked": checked,
+            "include_snapshot": namespace.include_snapshot,
+        }
+
+    if command == "choose":
+        arguments = {"target": namespace.target, "include_snapshot": namespace.include_snapshot}
+        for field_name in ("value", "index", "label"):
+            value = getattr(namespace, field_name, None)
+            if value is not None:
+                arguments[field_name] = value
+        return "choose", arguments
+
+    if command == "wait":
+        return "wait", {
+            "target": namespace.target,
+            "state": namespace.state,
+            "timeout": namespace.timeout,
+            "include_snapshot": namespace.include_snapshot,
+        }
+
+    if command == "screenshot":
+        arguments = {
+            "target": namespace.target,
+            "path": namespace.path,
+        }
+        for field_name in ("x", "y", "width", "height"):
+            value = getattr(namespace, field_name, None)
+            if value is not None:
+                arguments[field_name] = value
+        return "screenshot", arguments
+
+    if command == "hover":
+        return "hover", {
+            "target": namespace.target,
+            "include_snapshot": namespace.include_snapshot,
+        }
+
+    if command == "scroll":
+        return "scroll", {
+            "target": namespace.target,
+            "delta_x": namespace.delta_x,
+            "delta_y": namespace.delta_y,
+            "include_snapshot": namespace.include_snapshot,
+        }
+
     if command == "resource":
         if namespace.resource_action in (None, "list"):
             return "resource", {}
@@ -1876,7 +2010,10 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
 def _try_run_typed_cli(argv: Sequence[str]) -> int | None:
     if not argv:
         return None
-    if argv[0] not in {"resource", "session", "window", "snapshot", "click", "input"}:
+    if argv[0] not in {
+        "resource", "session", "window", "snapshot", "inspect", "click", "input", "invoke",
+        "press_key", "set_checked", "choose", "wait", "screenshot", "hover", "scroll",
+    }:
         return None
     if len(argv) > 1 and _looks_like_json_object_argument(argv[1]):
         return None
@@ -1885,6 +2022,22 @@ def _try_run_typed_cli(argv: Sequence[str]) -> int | None:
     namespace = parser.parse_args(list(argv))
     tool_name, arguments = _typed_cli_arguments(namespace)
     return _run_cli_invocation(tool_name, arguments)
+
+
+def _try_run_typed_cli_from_command_line(command_line: str) -> int | None:
+    """Try to parse and run a command line as a typed CLI command."""
+    parts = command_line.strip().split()
+    if not parts:
+        return None
+    # If the first part is a known tool and the rest looks like flags/args (not JSON)
+    if parts[0] in {
+        "resource", "session", "window", "snapshot", "inspect", "click", "input", "invoke",
+        "press_key", "set_checked", "choose", "wait", "screenshot", "hover", "scroll",
+    }:
+        if len(parts) > 1 and parts[1].lstrip().startswith("{"):
+            return None
+        return _try_run_typed_cli(parts)
+    return None
 
 
 def _run_cli_repl() -> int:
@@ -1906,6 +2059,10 @@ def _run_cli_repl() -> int:
 
         try:
             if _handle_cli_meta_command(command_line):
+                continue
+            # Try typed CLI first (for commands like "session attach --port 19876" or "click text=Start")
+            typed_result = _try_run_typed_cli_from_command_line(command_line)
+            if typed_result is not None:
                 continue
             tool_name, raw_arguments = _split_cli_invocation(command_line)
             _run_cli_command(tool_name, raw_arguments)

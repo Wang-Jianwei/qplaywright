@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python examples/demo_app.py)",
+      "Bash(python -m qplaywright.mcp_server --help)",
+      "Bash(tasklist)",
+      "Bash(python examples/test_mcp_demo.py)",
+      "Bash(python -m qplaywright.mcp_server cli window list)",
+      "Bash(python -m qplaywright.mcp_server --transport streamable-http)",
+      "Bash(curl -s http://127.0.0.1:19876/)",
+      "Bash(curl -s -X POST http://127.0.0.1:19876/mcp/v1/message -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"}}}')",
+      "Bash(python -m qplaywright.mcp_server serve)"
+    ]
+  }
+}
