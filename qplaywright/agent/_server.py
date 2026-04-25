@@ -663,6 +663,7 @@ def _create_dispatcher():
     QObject = _QtCore.QObject
 
     _CMD_EVENT_TYPE = QEvent.Type(QEvent.registerEventType())
+    _CALL_EVENT_TYPE = QEvent.Type(QEvent.registerEventType())
 
     class CommandEvent(QEvent):
         def __init__(self, request: Request, future: Future):
@@ -670,10 +671,17 @@ def _create_dispatcher():
             self.request = request
             self.future = future
 
+    class MainThreadCallEvent(QEvent):
+        def __init__(self, callback, future: Future):
+            super().__init__(_CALL_EVENT_TYPE)
+            self.callback = callback
+            self.future = future
+
     class Dispatcher(QObject):
         def __init__(self):
             super().__init__()
             self._cmd_event_type = _CMD_EVENT_TYPE
+            self._call_event_type = _CALL_EVENT_TYPE
 
         def customEvent(self, event):
             if event.type() == self._cmd_event_type:
@@ -684,8 +692,15 @@ def _create_dispatcher():
                     fut.set_result(result)
                 except Exception as exc:
                     fut.set_exception(exc)
+            elif event.type() == self._call_event_type:
+                callback = event.callback
+                fut = event.future
+                try:
+                    fut.set_result(callback())
+                except Exception as exc:
+                    fut.set_exception(exc)
 
-    return Dispatcher, CommandEvent
+    return Dispatcher, CommandEvent, MainThreadCallEvent
 
 
 # --------------------------------------------------------------------------- #
@@ -1606,12 +1621,13 @@ def _resolve_press_target(params: dict):
 class _ClientHandler(threading.Thread):
     """Handle a single client connection."""
 
-    def __init__(self, conn: socket.socket, addr, dispatcher, command_event_cls):
+    def __init__(self, conn: socket.socket, addr, dispatcher, command_event_cls, main_thread_call_event_cls):
         super().__init__(daemon=True)
         self.conn = conn
         self.addr = addr
         self.dispatcher = dispatcher
         self.command_event_cls = command_event_cls
+        self.main_thread_call_event_cls = main_thread_call_event_cls
         self._running = True
         self._session_id = f"{addr[0]}:{addr[1]}:{id(self)}"
 
@@ -1633,7 +1649,7 @@ class _ClientHandler(threading.Thread):
             pass
         finally:
             logger.info("Client disconnected: %s", self.addr)
-            _remove_session_agent_name(self._session_id)
+            self._run_on_main_thread(lambda: _remove_session_agent_name(self._session_id), timeout=5.0)
             self.conn.close()
 
     def _process_line(self, line: bytes):
@@ -1667,6 +1683,15 @@ class _ClientHandler(threading.Thread):
         except (BrokenPipeError, OSError):
             self._running = False
 
+    def _run_on_main_thread(self, callback, *, timeout: float) -> None:
+        future = Future()
+        event = self.main_thread_call_event_cls(callback, future)
+        _QApplication.postEvent(self.dispatcher, event)
+        try:
+            future.result(timeout=timeout)
+        except Exception:
+            logger.exception("Main-thread cleanup failed for client %s", self.addr)
+
     def stop(self):
         self._running = False
         try:
@@ -1678,12 +1703,13 @@ class _ClientHandler(threading.Thread):
 class _AgentServer(threading.Thread):
     """TCP server that accepts client connections."""
 
-    def __init__(self, host: str, port: int, dispatcher, command_event_cls):
+    def __init__(self, host: str, port: int, dispatcher, command_event_cls, main_thread_call_event_cls):
         super().__init__(daemon=True)
         self.host = host
         self.port = port
         self.dispatcher = dispatcher
         self.command_event_cls = command_event_cls
+        self.main_thread_call_event_cls = main_thread_call_event_cls
         self._running = True
         self._server_socket: socket.socket | None = None
         self._clients: list[_ClientHandler] = []
@@ -1699,7 +1725,7 @@ class _AgentServer(threading.Thread):
         while self._running:
             try:
                 conn, addr = self._server_socket.accept()
-                handler = _ClientHandler(conn, addr, self.dispatcher, self.command_event_cls)
+                handler = _ClientHandler(conn, addr, self.dispatcher, self.command_event_cls, self.main_thread_call_event_cls)
                 handler.start()
                 self._clients.append(handler)
             except socket.timeout:
@@ -1764,12 +1790,12 @@ def start_agent(
         _OVERLAY_MANAGER.close_all()
         _OVERLAY_MANAGER = None
 
-    Dispatcher, CommandEvent = _create_dispatcher()
+    Dispatcher, CommandEvent, MainThreadCallEvent = _create_dispatcher()
     dispatcher = Dispatcher()
     # Keep reference alive
     dispatcher.setObjectName("_qplaywright_dispatcher")
 
-    server = _AgentServer(host, port, dispatcher, CommandEvent)
+    server = _AgentServer(host, port, dispatcher, CommandEvent, MainThreadCallEvent)
     server.start()
 
     _agent_server = server
