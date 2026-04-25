@@ -125,6 +125,7 @@ class FakeLocator:
             "objectName": self._target or "amount_editor",
             "accessibleName": "Amount editor",
             "accessibleDescription": "输入金额",
+            "geometry": {"x": 11, "y": 22, "width": 130, "height": 28},
             "myText": "pressme",
         }
 
@@ -365,6 +366,8 @@ def test_inspect_target_uses_target_payload(monkeypatch):
     result = mcp_server.inspect(target="#amount", include_methods=True, include_properties=True)
 
     assert result["target"] == "#amount"
+    assert result["geometry"] == {"x": 11, "y": 22, "width": 130, "height": 28}
+    assert result["globalBoundingBox"] == {"x": 1, "y": 2, "width": 3, "height": 4}
     assert result["methods"][0]["name"] == "setAmount"
     assert result["properties"]["myText"] == "pressme"
 
@@ -583,6 +586,8 @@ def test_inspect_locator_handles_empty_and_present_results():
     assert present["value"] == "ready"
     assert present["objectName"] == "amount_editor"
     assert present["accessibleName"] == "Amount editor"
+    assert present["geometry"] == {"x": 11, "y": 22, "width": 130, "height": 28}
+    assert present["globalBoundingBox"] == {"x": 1, "y": 2, "width": 3, "height": 4}
     assert present["property_value"] == "attr:placeholderText"
 
     with_methods = mcp_server._inspect_locator(FakeLocator(count=1), include_methods=True, include_properties=True)
@@ -979,10 +984,28 @@ def test_snapshot_payload_preserves_existing_ref_bindings():
 
     payload = mcp_server._snapshot_payload(
         connection,
-        [{"wid": 1, "class": "DemoWindow", "objectName": "", "windowTitle": "Title", "children": []}],
+        [
+            {
+                "wid": 1,
+                "class": "DemoWindow",
+                "objectName": "",
+                "windowTitle": "Title",
+                "geometry": {"x": 10, "y": 20, "width": 640, "height": 480},
+                "children": [],
+            }
+        ],
     )
 
-    assert payload["refs"] == [{"ref": "e2", "wid": 1, "target": ".DemoWindow", "class": "DemoWindow", "windowTitle": "Title"}]
+    assert payload["refs"] == [
+        {
+            "ref": "e2",
+            "wid": 1,
+            "target": ".DemoWindow",
+            "class": "DemoWindow",
+            "geometry": {"x": 10, "y": 20, "width": 640, "height": 480},
+            "windowTitle": "Title",
+        }
+    ]
     assert connection.snapshot_refs == {"e1": 99, "e2": 1}
     assert connection.snapshot_wids == {99: "e1", 1: "e2"}
 
@@ -995,12 +1018,14 @@ def test_snapshot_result_resets_refs_and_passes_depth_for_target_snapshot():
                 "class": "DemoWindow",
                 "objectName": "",
                 "text": "Dialog",
+                "geometry": {"x": 0, "y": 0, "width": 320, "height": 180},
                 "children": [
                     {
                         "wid": 43,
                         "class": "QPushButton",
                         "objectName": "confirm_btn",
                         "text": "Confirm",
+                        "geometry": {"x": 40, "y": 60, "width": 80, "height": 24},
                         "children": [],
                     }
                 ],
@@ -1028,8 +1053,22 @@ def test_snapshot_result_resets_refs_and_passes_depth_for_target_snapshot():
     assert connection.snapshot_refs == {"e1": 42, "e2": 43}
     assert connection.snapshot_wids == {42: "e1", 43: "e2"}
     assert result["refs"] == [
-        {"ref": "e1", "wid": 42, "target": ".DemoWindow", "class": "DemoWindow", "text": "Dialog"},
-        {"ref": "e2", "wid": 43, "target": "#confirm_btn", "class": "QPushButton", "text": "Confirm"},
+        {
+            "ref": "e1",
+            "wid": 42,
+            "target": ".DemoWindow",
+            "class": "DemoWindow",
+            "geometry": {"x": 0, "y": 0, "width": 320, "height": 180},
+            "text": "Dialog",
+        },
+        {
+            "ref": "e2",
+            "wid": 43,
+            "target": "#confirm_btn",
+            "class": "QPushButton",
+            "geometry": {"x": 40, "y": 60, "width": 80, "height": 24},
+            "text": "Confirm",
+        },
     ]
 
 

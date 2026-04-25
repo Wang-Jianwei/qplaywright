@@ -540,6 +540,10 @@ def _inspect_locator(
             continue
         result[key] = value
 
+    geometry = properties.get("geometry")
+    if isinstance(geometry, dict) and geometry:
+        result["geometry"] = geometry
+
     text_content = first.text_content()
     if text_content not in (None, ""):
         result["text"] = text_content
@@ -548,13 +552,17 @@ def _inspect_locator(
     if input_value not in (None, ""):
         result["value"] = input_value
 
+    bounding_box = first.bounding_box()
+    if bounding_box:
+        result["globalBoundingBox"] = bounding_box
+
     result.update(
         {
             "all_text_contents": locator.all_text_contents(),
             "is_visible": first.is_visible(),
             "is_enabled": first.is_enabled(),
             "is_checked": first.is_checked(),
-            "bounding_box": first.bounding_box(),
+            "bounding_box": bounding_box,
         }
     )
 
@@ -706,6 +714,9 @@ def _snapshot_entry(node: dict[str, Any], ref: str | None) -> dict[str, Any]:
         "target": _snapshot_target_hint(node) or None,
         "class": node.get("class", ""),
     }
+    geometry = node.get("geometry")
+    if isinstance(geometry, dict) and geometry:
+        entry["geometry"] = geometry
     for key in ("text", "accessibleName", "accessibleDescription", "currentText", "windowTitle", "value"):
         value = node.get(key)
         if value is None or value == "":
