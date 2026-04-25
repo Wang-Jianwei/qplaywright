@@ -1174,6 +1174,10 @@ public:
 private:
     static constexpr const char *kAutomationOverlayObjectName = "_qplaywright_automation_overlay";
     static constexpr const char *kAutomationOverlayProperty = "qplaywrightAutomationOverlay";
+    static constexpr int kOverlayEdgePadding = 6;
+    static constexpr int kOverlayFrameOutset = 6;
+    static constexpr int kOverlayBadgeGap = 6;
+    static constexpr int kOverlayBadgeLeftInset = 8;
 
     static bool isOverlayTargetWindowVisible(QWidget *widget)
     {
@@ -1266,8 +1270,15 @@ private:
                 return;
             }
 
+            const LayoutMetrics layout = layoutMetrics();
             const QPoint topLeft = m_targetWindow->mapToGlobal(m_targetWindow->rect().topLeft());
-            const QRect targetRect(topLeft, m_targetWindow->size());
+            m_contentOrigin = layout.targetRect.topLeft();
+            const QRect targetRect(
+                topLeft.x() - m_contentOrigin.x(),
+                topLeft.y() - m_contentOrigin.y(),
+                layout.overlayWidth,
+                layout.overlayHeight
+            );
             if (geometry() != targetRect) {
                 setGeometry(targetRect);
             }
@@ -1345,9 +1356,10 @@ private:
             const QColor coreColor(20, 132, 255, 180);
             const QColor ringColor(20, 132, 255, 220);
             const QColor frameColor(20, 132, 255, 150);
+            const LayoutMetrics layout = layoutMetrics();
 
-            if (!m_sharedAgentName.isEmpty()) {
-                const QRect frameRect = rect().adjusted(1, 1, -1, -1);
+            if (!layout.badgeText.isEmpty()) {
+                const QRect frameRect = layout.frameRect;
                 QLinearGradient glowGradient(frameRect.topLeft(), frameRect.bottomRight());
                 glowGradient.setColorAt(0.0, QColor(0, 245, 255, 60));
                 glowGradient.setColorAt(0.34, QColor(20, 132, 255, 65));
@@ -1366,20 +1378,8 @@ private:
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(frameRect, 8, 8);
 
-                const QString labelText = QStringLiteral("正在与 Agent %1 共享").arg(m_sharedAgentName);
-                QFont badgeFont = painter.font();
-                badgeFont.setFamily(qApp->font().family());
-                if (badgeFont.pointSizeF() > 0.0)
-                    badgeFont.setPointSizeF(qMax(7.5, badgeFont.pointSizeF() - 2.0));
-                else if (badgeFont.pixelSize() > 0)
-                    badgeFont.setPixelSize(qMax(10, badgeFont.pixelSize() - 3));
-                else
-                    badgeFont.setPointSizeF(7.5);
-                painter.setFont(badgeFont);
-                const QFontMetrics metrics = painter.fontMetrics();
-                const int badgeWidth = metrics.horizontalAdvance(labelText) + 18;
-                const int badgeHeight = metrics.height() + 8;
-                const QRect badgeRect(8, 8, badgeWidth, badgeHeight);
+                painter.setFont(layout.badgeFont);
+                const QRect badgeRect = layout.badgeRect;
 
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(QColor(9, 29, 61, 150));
@@ -1388,7 +1388,7 @@ private:
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(badgeRect, 8, 8);
                 painter.setPen(QColor(255, 255, 255, 210));
-                painter.drawText(badgeRect.adjusted(9, 0, -9, 0), Qt::AlignVCenter | Qt::AlignLeft, labelText);
+                painter.drawText(badgeRect.adjusted(9, 0, -9, 0), Qt::AlignVCenter | Qt::AlignLeft, layout.badgeText);
             }
 
             const qint64 now = m_clock.elapsed();
@@ -1402,33 +1402,36 @@ private:
                     const int radius = int(6 + progress * 20.0);
                     QColor pulseColor = ringColor;
                     pulseColor.setAlpha(qMax(0, int(ringColor.alpha() * (1.0 - progress))));
+                    const QPoint pulseCenter = overlayPointFromTarget(pulse.center);
 
                     painter.setPen(QPen(pulseColor, 2));
                     painter.setBrush(Qt::NoBrush);
-                    painter.drawEllipse(pulse.center, radius, radius);
+                    painter.drawEllipse(pulseCenter, radius, radius);
                 }
             }
 
             if (!m_cursorPosValid)
                 return;
 
+            const QPoint cursorPos = overlayPointFromTarget(m_cursorPos);
+
             const QPolygon shadow({
-                m_cursorPos + QPoint(2, 2),
-                m_cursorPos + QPoint(2, 20),
-                m_cursorPos + QPoint(7, 15),
-                m_cursorPos + QPoint(10, 23),
-                m_cursorPos + QPoint(13, 22),
-                m_cursorPos + QPoint(10, 14),
-                m_cursorPos + QPoint(17, 14),
+                cursorPos + QPoint(2, 2),
+                cursorPos + QPoint(2, 20),
+                cursorPos + QPoint(7, 15),
+                cursorPos + QPoint(10, 23),
+                cursorPos + QPoint(13, 22),
+                cursorPos + QPoint(10, 14),
+                cursorPos + QPoint(17, 14),
             });
             const QPolygon cursor({
-                m_cursorPos,
-                m_cursorPos + QPoint(0, 18),
-                m_cursorPos + QPoint(5, 13),
-                m_cursorPos + QPoint(8, 21),
-                m_cursorPos + QPoint(11, 20),
-                m_cursorPos + QPoint(8, 12),
-                m_cursorPos + QPoint(15, 12),
+                cursorPos,
+                cursorPos + QPoint(0, 18),
+                cursorPos + QPoint(5, 13),
+                cursorPos + QPoint(8, 21),
+                cursorPos + QPoint(11, 20),
+                cursorPos + QPoint(8, 12),
+                cursorPos + QPoint(15, 12),
             });
 
             painter.setPen(Qt::NoPen);
@@ -1439,10 +1442,89 @@ private:
             painter.drawPolygon(cursor);
             painter.setPen(Qt::NoPen);
             painter.setBrush(coreColor);
-            painter.drawEllipse(m_cursorPos, 4, 4);
+            painter.drawEllipse(cursorPos, 4, 4);
         }
 
     private:
+        struct LayoutMetrics
+        {
+            QRect targetRect;
+            QRect frameRect;
+            QRect badgeRect;
+            QFont badgeFont;
+            QString badgeText;
+            int overlayWidth = 0;
+            int overlayHeight = 0;
+        };
+
+        QString badgeText() const
+        {
+            if (m_sharedAgentName.isEmpty())
+                return QString();
+            return QStringLiteral("正在与 Agent %1 共享").arg(m_sharedAgentName);
+        }
+
+        QFont badgeFont() const
+        {
+            QFont font = this->font();
+            font.setFamily(qApp->font().family());
+            if (font.pointSizeF() > 0.0)
+                font.setPointSizeF(qMax(7.5, font.pointSizeF() - 2.0));
+            else if (font.pixelSize() > 0)
+                font.setPixelSize(qMax(10, font.pixelSize() - 3));
+            else
+                font.setPointSizeF(7.5);
+            return font;
+        }
+
+        LayoutMetrics layoutMetrics() const
+        {
+            LayoutMetrics layout;
+            layout.badgeText = badgeText();
+            layout.badgeFont = badgeFont();
+
+            int badgeWidth = 0;
+            int badgeHeight = 0;
+            if (!layout.badgeText.isEmpty()) {
+                const QFontMetrics metrics(layout.badgeFont);
+                badgeWidth = metrics.horizontalAdvance(layout.badgeText) + 18;
+                badgeHeight = metrics.height() + 8;
+            }
+
+            const int badgeReserve = layout.badgeText.isEmpty() ? 0 : badgeHeight + kOverlayBadgeGap;
+            layout.targetRect = QRect(
+                kOverlayEdgePadding + kOverlayFrameOutset,
+                kOverlayEdgePadding + kOverlayFrameOutset + badgeReserve,
+                m_targetWindow ? m_targetWindow->width() : 0,
+                m_targetWindow ? m_targetWindow->height() : 0
+            );
+            layout.frameRect = layout.targetRect.adjusted(
+                -kOverlayFrameOutset,
+                -kOverlayFrameOutset,
+                kOverlayFrameOutset,
+                kOverlayFrameOutset
+            );
+            layout.overlayWidth = layout.frameRect.right() + kOverlayEdgePadding + 1;
+            layout.overlayHeight = layout.frameRect.bottom() + kOverlayEdgePadding + 1;
+
+            if (!layout.badgeText.isEmpty()) {
+                layout.badgeRect = QRect(
+                    layout.frameRect.left() + kOverlayBadgeLeftInset,
+                    layout.frameRect.top() - kOverlayBadgeGap - badgeHeight,
+                    badgeWidth,
+                    badgeHeight
+                );
+                layout.overlayWidth = qMax(layout.overlayWidth, layout.badgeRect.right() + kOverlayEdgePadding + 1);
+            }
+
+            return layout;
+        }
+
+        QPoint overlayPointFromTarget(const QPoint &targetPoint) const
+        {
+            return QPoint(targetPoint.x() + m_contentOrigin.x(), targetPoint.y() + m_contentOrigin.y());
+        }
+
         void tick()
         {
             const qint64 cutoff = m_clock.elapsed() - 300;
@@ -1473,6 +1555,7 @@ private:
         QPointer<QWidget> m_targetWindow;
         QString m_sharedAgentName;
         QPoint m_cursorPos;
+        QPoint m_contentOrigin;
         bool m_managerActive = false;
         bool m_cursorPosValid = false;
         QVector<PulseRecord> m_pulses;

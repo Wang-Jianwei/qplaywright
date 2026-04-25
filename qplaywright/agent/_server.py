@@ -98,6 +98,10 @@ _QApplication = None
 _VISUAL_FEEDBACK_ENABLED = False
 _AUTOMATION_OVERLAY_OBJECT_NAME = "_qplaywright_automation_overlay"
 _AUTOMATION_OVERLAY_PROPERTY = "qplaywrightAutomationOverlay"
+_OVERLAY_EDGE_PADDING = 6
+_OVERLAY_FRAME_OUTSET = 6
+_OVERLAY_BADGE_GAP = 6
+_OVERLAY_BADGE_LEFT_INSET = 8
 _OVERLAY_MANAGER = None
 _OverlayManagerClass = None
 _SESSION_AGENT_NAMES: dict[str, str] = {}
@@ -222,10 +226,12 @@ def _create_overlay_manager_class():
     Qt = _QtCore.Qt
     QTimer = _QtCore.QTimer
     QPoint = _QtCore.QPoint
+    QRect = _QtCore.QRect
     QPainter = _QtGui.QPainter
     QColor = _QtGui.QColor
     QPen = _QtGui.QPen
     QLinearGradient = _QtGui.QLinearGradient
+    QFontMetrics = _QtGui.QFontMetrics
     QPolygon = _QtGui.QPolygon
     QBrush = _QtGui.QBrush
 
@@ -234,6 +240,7 @@ def _create_overlay_manager_class():
             super().__init__(None)
             self._target_window = target_window
             self._manager_active = False
+            self._content_origin = QPoint(0, 0)
             self._cursor_pos = None
             self._session_agent_name = ""
             self._pulse_span = 0.22
@@ -256,6 +263,74 @@ def _create_overlay_manager_class():
             self.setObjectName(_AUTOMATION_OVERLAY_OBJECT_NAME)
             self.setProperty(_AUTOMATION_OVERLAY_PROPERTY, True)
 
+        def _badge_text(self) -> str:
+            if not self._session_agent_name:
+                return ""
+            return f"正在与 Agent {self._session_agent_name} 共享"
+
+        def _badge_font(self):
+            font = self.font()
+            if font.pointSizeF() > 0:
+                font.setPointSizeF(max(7.5, font.pointSizeF() - 2.0))
+            elif font.pixelSize() > 0:
+                font.setPixelSize(max(10, font.pixelSize() - 3))
+            else:
+                font.setPointSizeF(7.5)
+            return font
+
+        def _layout_metrics(self) -> dict[str, Any]:
+            badge_text = self._badge_text()
+            badge_font = self._badge_font()
+            badge_width = 0
+            badge_height = 0
+            if badge_text:
+                metrics = QFontMetrics(badge_font)
+                badge_width = metrics.horizontalAdvance(badge_text) + 18
+                badge_height = metrics.height() + 8
+
+            badge_reserve = badge_height + _OVERLAY_BADGE_GAP if badge_text else 0
+            target_rect = QRect(
+                _OVERLAY_EDGE_PADDING + _OVERLAY_FRAME_OUTSET,
+                _OVERLAY_EDGE_PADDING + _OVERLAY_FRAME_OUTSET + badge_reserve,
+                self._target_window.width() if self._target_window is not None else 0,
+                self._target_window.height() if self._target_window is not None else 0,
+            )
+            frame_rect = target_rect.adjusted(
+                -_OVERLAY_FRAME_OUTSET,
+                -_OVERLAY_FRAME_OUTSET,
+                _OVERLAY_FRAME_OUTSET,
+                _OVERLAY_FRAME_OUTSET,
+            )
+            badge_rect = QRect()
+            overlay_width = frame_rect.right() + _OVERLAY_EDGE_PADDING + 1
+            overlay_height = frame_rect.bottom() + _OVERLAY_EDGE_PADDING + 1
+            if badge_text:
+                badge_rect = QRect(
+                    frame_rect.left() + _OVERLAY_BADGE_LEFT_INSET,
+                    frame_rect.top() - _OVERLAY_BADGE_GAP - badge_height,
+                    badge_width,
+                    badge_height,
+                )
+                overlay_width = max(overlay_width, badge_rect.right() + _OVERLAY_EDGE_PADDING + 1)
+
+            return {
+                "target_rect": target_rect,
+                "frame_rect": frame_rect,
+                "badge_rect": badge_rect,
+                "badge_font": badge_font,
+                "badge_text": badge_text,
+                "overlay_width": overlay_width,
+                "overlay_height": overlay_height,
+            }
+
+        def _overlay_point_from_target(self, target_point):
+            if target_point is None:
+                return None
+            return QPoint(
+                target_point.x() + self._content_origin.x(),
+                target_point.y() + self._content_origin.y(),
+            )
+
         def sync_to_window(self, *, force_raise: bool = False) -> None:
             if not self._manager_active:
                 self._timer.stop()
@@ -270,10 +345,14 @@ def _create_overlay_manager_class():
                 self.hide()
                 return
 
+            layout = self._layout_metrics()
             top_left = self._target_window.mapToGlobal(self._target_window.rect().topLeft())
+            self._content_origin = layout["target_rect"].topLeft()
             rect = self.geometry()
-            if rect.x() != top_left.x() or rect.y() != top_left.y() or rect.width() != self._target_window.width() or rect.height() != self._target_window.height():
-                self.setGeometry(top_left.x(), top_left.y(), self._target_window.width(), self._target_window.height())
+            geometry_x = top_left.x() - self._content_origin.x()
+            geometry_y = top_left.y() - self._content_origin.y()
+            if rect.x() != geometry_x or rect.y() != geometry_y or rect.width() != layout["overlay_width"] or rect.height() != layout["overlay_height"]:
+                self.setGeometry(geometry_x, geometry_y, layout["overlay_width"], layout["overlay_height"])
 
             if self._cursor_pos is None:
                 self._cursor_pos = self._target_window.rect().center()
@@ -337,9 +416,10 @@ def _create_overlay_manager_class():
             core_color = QColor(20, 132, 255, 180)
             ring_base = QColor(20, 132, 255, 220)
             frame_color = QColor(20, 132, 255, 150)
+            layout = self._layout_metrics()
 
-            if self._session_agent_name:
-                frame_rect = self.rect().adjusted(1, 1, -1, -1)
+            if layout["badge_text"]:
+                frame_rect = layout["frame_rect"]
                 glow_gradient = QLinearGradient(frame_rect.left(), frame_rect.top(), frame_rect.right(), frame_rect.bottom())
                 glow_gradient.setColorAt(0.0, QColor(0, 245, 255, 60))
                 glow_gradient.setColorAt(0.34, QColor(20, 132, 255, 65))
@@ -358,19 +438,8 @@ def _create_overlay_manager_class():
                 painter.setBrush(Qt.NoBrush)
                 painter.drawRoundedRect(frame_rect, 10, 10)
 
-                label_text = f"正在与 Agent {self._session_agent_name} 共享"
-                font = painter.font()
-                if font.pointSizeF() > 0:
-                    font.setPointSizeF(max(7.5, font.pointSizeF() - 2.0))
-                elif font.pixelSize() > 0:
-                    font.setPixelSize(max(10, font.pixelSize() - 3))
-                else:
-                    font.setPointSizeF(7.5)
-                painter.setFont(font)
-                metrics = painter.fontMetrics()
-                badge_width = metrics.horizontalAdvance(label_text) + 18
-                badge_height = metrics.height() + 8
-                badge_rect = self.rect().adjusted(8, 8, -(self.width() - 8 - badge_width), -(self.height() - 8 - badge_height))
+                painter.setFont(layout["badge_font"])
+                badge_rect = layout["badge_rect"]
 
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QColor(9, 29, 61, 150))
@@ -379,7 +448,7 @@ def _create_overlay_manager_class():
                 painter.setBrush(Qt.NoBrush)
                 painter.drawRoundedRect(badge_rect, 8, 8)
                 painter.setPen(QColor(255, 255, 255, 230))
-                painter.drawText(badge_rect.adjusted(9, 0, -9, 0), Qt.AlignVCenter | Qt.AlignLeft, label_text)
+                painter.drawText(badge_rect.adjusted(9, 0, -9, 0), Qt.AlignVCenter | Qt.AlignLeft, layout["badge_text"])
 
             for started_at, center, pulse_count in self._pulse_records:
                 elapsed = time.monotonic() - started_at
@@ -393,33 +462,36 @@ def _create_overlay_manager_class():
                     alpha = max(0, int(ring_base.alpha() * (1.0 - progress)))
                     ring_color = QColor(ring_base)
                     ring_color.setAlpha(alpha)
+                    overlay_center = self._overlay_point_from_target(center)
                     painter.setPen(QPen(ring_color, 2))
                     painter.setBrush(Qt.NoBrush)
-                    painter.drawEllipse(center, int(radius), int(radius))
+                    painter.drawEllipse(overlay_center, int(radius), int(radius))
 
             if self._cursor_pos is None:
                 return
 
+            cursor_pos = self._overlay_point_from_target(self._cursor_pos)
+
             shadow = QPolygon(
                 [
-                    self._cursor_pos + QPoint(2, 2),
-                    self._cursor_pos + QPoint(2, 20),
-                    self._cursor_pos + QPoint(7, 15),
-                    self._cursor_pos + QPoint(10, 23),
-                    self._cursor_pos + QPoint(13, 22),
-                    self._cursor_pos + QPoint(10, 14),
-                    self._cursor_pos + QPoint(17, 14),
+                    cursor_pos + QPoint(2, 2),
+                    cursor_pos + QPoint(2, 20),
+                    cursor_pos + QPoint(7, 15),
+                    cursor_pos + QPoint(10, 23),
+                    cursor_pos + QPoint(13, 22),
+                    cursor_pos + QPoint(10, 14),
+                    cursor_pos + QPoint(17, 14),
                 ]
             )
             cursor = QPolygon(
                 [
-                    self._cursor_pos,
-                    self._cursor_pos + QPoint(0, 18),
-                    self._cursor_pos + QPoint(5, 13),
-                    self._cursor_pos + QPoint(8, 21),
-                    self._cursor_pos + QPoint(11, 20),
-                    self._cursor_pos + QPoint(8, 12),
-                    self._cursor_pos + QPoint(15, 12),
+                    cursor_pos,
+                    cursor_pos + QPoint(0, 18),
+                    cursor_pos + QPoint(5, 13),
+                    cursor_pos + QPoint(8, 21),
+                    cursor_pos + QPoint(11, 20),
+                    cursor_pos + QPoint(8, 12),
+                    cursor_pos + QPoint(15, 12),
                 ]
             )
 
@@ -431,7 +503,7 @@ def _create_overlay_manager_class():
             painter.drawPolygon(cursor)
             painter.setPen(Qt.NoPen)
             painter.setBrush(core_color)
-            painter.drawEllipse(self._cursor_pos, 4, 4)
+            painter.drawEllipse(cursor_pos, 4, 4)
 
     class _OverlayManager(QObject):
         def __init__(self, app):
@@ -513,6 +585,11 @@ def _create_overlay_manager_class():
             overlay = self._overlays.pop(window_id, None)
             if overlay is not None:
                 overlay.close_overlay()
+
+        def overlay_for_window(self, target_window):
+            if target_window is None:
+                return None
+            return self._overlays.get(id(target_window))
 
         def _sync(self) -> None:
             if not _is_qt_application_active(self._app):
@@ -1098,20 +1175,35 @@ def _handle_command(req: Request) -> Any:
                 raise ValueError("No visible window found")
             w = visible[0]
 
+        overlay = _OVERLAY_MANAGER.overlay_for_window(w.window() if hasattr(w, "window") else w) if _OVERLAY_MANAGER is not None else None
+        hide_overlay_for_capture = bool(
+            overlay is not None
+            and getattr(overlay, "_manager_active", False)
+            and overlay.isVisible()
+        )
+        if hide_overlay_for_capture:
+            overlay.hide()
+            _QApplication.processEvents()
+
         clip_keys = ("x", "y", "width", "height")
         has_clip = any(params.get(key) is not None for key in clip_keys)
-        if has_clip:
-            if any(params.get(key) is None for key in clip_keys):
-                raise ValueError("Screenshot clipping requires x, y, width, and height together")
-            clip_x = int(params["x"])
-            clip_y = int(params["y"])
-            clip_width = int(params["width"])
-            clip_height = int(params["height"])
-            if clip_x < 0 or clip_y < 0 or clip_width <= 0 or clip_height <= 0:
-                raise ValueError("Screenshot clipping requires non-negative x/y and positive width/height")
-            pixmap = w.grab(_QtCore.QRect(clip_x, clip_y, clip_width, clip_height))
-        else:
-            pixmap = w.grab()
+        try:
+            if has_clip:
+                if any(params.get(key) is None for key in clip_keys):
+                    raise ValueError("Screenshot clipping requires x, y, width, and height together")
+                clip_x = int(params["x"])
+                clip_y = int(params["y"])
+                clip_width = int(params["width"])
+                clip_height = int(params["height"])
+                if clip_x < 0 or clip_y < 0 or clip_width <= 0 or clip_height <= 0:
+                    raise ValueError("Screenshot clipping requires non-negative x/y and positive width/height")
+                pixmap = w.grab(_QtCore.QRect(clip_x, clip_y, clip_width, clip_height))
+            else:
+                pixmap = w.grab()
+        finally:
+            if hide_overlay_for_capture:
+                overlay.sync_to_window()
+                _QApplication.processEvents()
         buf = _QtCore.QBuffer()
         buf.open(_QtCore.QIODevice.WriteOnly if hasattr(_QtCore.QIODevice, 'WriteOnly') else _QtCore.QIODevice.OpenModeFlag.WriteOnly)
         pixmap.save(buf, "PNG")
