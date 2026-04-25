@@ -1486,6 +1486,9 @@ private:
         explicit AutomationOverlayManager(QObject *parent = nullptr)
             : QObject(parent)
         {
+            m_timer.setInterval(16);
+            QObject::connect(&m_timer, &QTimer::timeout, this, &AutomationOverlayManager::syncVisibility);
+            m_timer.start();
         }
 
         void setEnabled(bool enabled)
@@ -1684,6 +1687,7 @@ private:
         QString m_sharedAgentName;
         QHash<QWidget *, QPointer<AutomationOverlay>> m_overlays;
         QPointer<QWidget> m_activeWindow;
+        QTimer m_timer;
     };
 
     bool isAutomationOverlayWidget(QWidget *widget) const
