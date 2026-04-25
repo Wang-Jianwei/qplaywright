@@ -53,6 +53,7 @@ qplaywright> exit
 Useful REPL meta commands:
 
 - `.tools` lists all available tools
+- `.resources` lists CLI-exposed MCP resources
 - `.help` shows CLI usage
 - `.help TOOL` shows one tool signature and docstring
 
@@ -60,6 +61,14 @@ You can also execute one tool directly without entering the REPL:
 
 ```bash
 qplaywright-mcp cli snapshot '{"depth": 4}'
+```
+
+Or inspect help and read a resource from one-shot CLI commands:
+
+```bash
+qplaywright-mcp cli help session
+qplaywright-mcp cli resources
+qplaywright-mcp cli resource '{"uri": "qplaywright://help/selectors"}'
 ```
 
 ## Typical Tool Flow

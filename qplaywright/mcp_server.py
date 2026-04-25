@@ -1521,6 +1521,10 @@ _CLI_TOOL_NAMES = (
     "scroll",
 )
 
+_CLI_RESOURCE_NAMES = {
+    "qplaywright://help/selectors": "selector_help",
+}
+
 
 def _cli_tool_registry() -> dict[str, Any]:
     registry: dict[str, Any] = {}
@@ -1531,26 +1535,100 @@ def _cli_tool_registry() -> dict[str, Any]:
     return registry
 
 
+def _cli_resource_registry() -> dict[str, Any]:
+    registry: dict[str, Any] = {}
+    for uri, func_name in _CLI_RESOURCE_NAMES.items():
+        func = globals().get(func_name)
+        if callable(func):
+            registry[uri] = func
+    return registry
+
+
+def _cli_command_registry() -> dict[str, Any]:
+    return _cli_tool_registry() | {"resource": resource}
+
+
 def _cli_usage_text() -> str:
     return (
         "Interactive qplaywright MCP CLI\n\n"
         "Examples:\n"
         "  qplaywright-mcp cli\n"
+        "  qplaywright-mcp cli help session\n"
+        "  qplaywright-mcp cli resources\n"
         "  qplaywright-mcp cli session '{\"action\": \"attach\", \"port\": 19877}'\n"
+        "  qplaywright-mcp cli resource '{\"uri\": \"qplaywright://help/selectors\"}'\n"
         "  qplaywright-mcp cli snapshot '{\"depth\": 4}'\n\n"
         "REPL commands:\n"
         "  .tools                List available tools\n"
+        "  .resources            List available resources\n"
         "  .help                 Show CLI help\n"
         "  .help TOOL            Show one tool signature and docstring\n"
+        "  resource {JSON}       Read one resource or list resources when JSON is omitted\n"
         "  TOOL {JSON}           Invoke one tool with a JSON object argument\n"
         "  quit / exit           Leave the REPL"
     )
 
 
+def _prefix_action_lines(tool_name: str, doc: str) -> str:
+    lines: list[str] = []
+    in_action_block = False
+    for raw_line in doc.splitlines():
+        stripped = raw_line.strip()
+        if stripped == "action must be one of:":
+            in_action_block = True
+            lines.append(raw_line)
+            continue
+
+        if in_action_block and stripped.startswith("- "):
+            action_name, separator, description = stripped[2:].partition(":")
+            if separator:
+                lines.append(f"- {tool_name}.{action_name.strip()}: {description.strip()}")
+                continue
+
+        if in_action_block and stripped and not stripped.startswith("- "):
+            in_action_block = False
+
+        lines.append(raw_line)
+
+    return "\n".join(lines)
+
+
 def _cli_tool_help(tool_name: str, func: Any) -> str:
     signature = pyinspect.signature(func)
-    doc = (pyinspect.getdoc(func) or "No description available.").strip()
+    doc = _prefix_action_lines(tool_name, (pyinspect.getdoc(func) or "No description available.").strip())
     return f"{tool_name}{signature}\n\n{doc}"
+
+
+def resource(uri: str | None = None) -> dict[str, Any]:
+    """Read one CLI-exposed MCP resource.
+
+    When uri is omitted, returns the list of available resource URIs.
+    """
+
+    registry = _cli_resource_registry()
+    if uri is None:
+        return {
+            "ok": True,
+            "resources": [
+                {
+                    "uri": resource_uri,
+                    "description": (pyinspect.getdoc(func) or "").strip(),
+                }
+                for resource_uri, func in sorted(registry.items())
+            ],
+        }
+
+    try:
+        func = registry[uri]
+    except KeyError as exc:
+        available = ", ".join(sorted(registry)) or "<none>"
+        raise ValueError(f"Unknown CLI resource {uri!r}. Available resources: {available}") from exc
+
+    return {
+        "ok": True,
+        "uri": uri,
+        "content": func(),
+    }
 
 
 def _split_cli_invocation(command_line: str) -> tuple[str, str | None]:
@@ -1584,12 +1662,12 @@ def _print_cli_result(value: Any) -> None:
 
 
 def _invoke_cli_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
-    registry = _cli_tool_registry()
+    registry = _cli_command_registry()
     try:
         func = registry[tool_name]
     except KeyError as exc:
         available = ", ".join(sorted(registry)) or "<none>"
-        raise ValueError(f"Unknown CLI tool {tool_name!r}. Available tools: {available}") from exc
+        raise ValueError(f"Unknown CLI command {tool_name!r}. Available commands: {available}") from exc
     return func(**arguments)
 
 
@@ -1601,17 +1679,23 @@ def _handle_cli_meta_command(command_line: str) -> bool:
             print(f"- {name}")
         return True
 
+    if normalized in {".resources", "resources"}:
+        print("Available resources:")
+        for uri in sorted(_cli_resource_registry()):
+            print(f"- {uri}")
+        return True
+
     if normalized in {".help", "help"}:
         print(_cli_usage_text())
         return True
 
     if normalized.startswith(".help ") or normalized.startswith("help "):
         _, tool_name = normalized.split(None, 1)
-        registry = _cli_tool_registry()
+        registry = _cli_command_registry()
         try:
             func = registry[tool_name]
         except KeyError as exc:
-            raise ValueError(f"Unknown CLI tool {tool_name!r}") from exc
+            raise ValueError(f"Unknown CLI command {tool_name!r}") from exc
         print(_cli_tool_help(tool_name, func))
         return True
 
@@ -1672,6 +1756,17 @@ def _run_cli(argv: Sequence[str]) -> int:
 
     if args.tool is None:
         return _run_cli_repl()
+
+    if args.tool in {"help", "tools", "resources"}:
+        command_line = args.tool if args.arguments is None else f"{args.tool} {args.arguments}"
+        try:
+            if _handle_cli_meta_command(command_line):
+                return 0
+            raise ValueError(f"Unsupported CLI meta command: {command_line}")
+        except Exception as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+
     return _run_cli_command(args.tool, args.arguments)
 
 

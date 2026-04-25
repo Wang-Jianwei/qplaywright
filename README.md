@@ -120,6 +120,14 @@ qplaywright> snapshot {"depth": 4}
 qplaywright> click {"target": "text=Start"}
 ```
 
+You can also inspect CLI help and available MCP resources directly:
+
+```bash
+qplaywright-mcp cli help session
+qplaywright-mcp cli resources
+qplaywright-mcp cli resource '{"uri": "qplaywright://help/selectors"}'
+```
+
 You can also run one tool call without starting the REPL:
 
 ```bash

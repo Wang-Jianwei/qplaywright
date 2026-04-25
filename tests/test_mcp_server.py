@@ -1169,6 +1169,72 @@ def test_run_cli_invokes_tool_and_prints_json(monkeypatch, capsys):
     assert payload == {"ok": True, "action": "attach", "port": 19877}
 
 
+def test_run_cli_supports_direct_help_meta_command(capsys):
+    exit_code = mcp_server._run_cli(["help", "session"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "session.attach: attach to an already running Qt app" in output
+
+
+def test_run_cli_prints_resource_list(monkeypatch, capsys):
+    def fake_selector_help():
+        """Selector syntax and recommended qplaywright MCP workflow."""
+
+        return "selector docs"
+
+    monkeypatch.setattr(mcp_server, "selector_help", fake_selector_help)
+
+    exit_code = mcp_server._run_cli(["resource"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "resources": [
+            {
+                "uri": "qplaywright://help/selectors",
+                "description": "Selector syntax and recommended qplaywright MCP workflow.",
+            }
+        ],
+    }
+
+
+def test_run_cli_reads_named_resource(monkeypatch, capsys):
+    def fake_selector_help():
+        """Selector syntax and recommended qplaywright MCP workflow."""
+
+        return "selector docs"
+
+    monkeypatch.setattr(mcp_server, "selector_help", fake_selector_help)
+
+    exit_code = mcp_server._run_cli(["resource", '{"uri": "qplaywright://help/selectors"}'])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "uri": "qplaywright://help/selectors",
+        "content": "selector docs",
+    }
+
+
+def test_run_cli_supports_direct_resources_meta_command(monkeypatch, capsys):
+    def fake_selector_help():
+        """Selector syntax and recommended qplaywright MCP workflow."""
+
+        return "selector docs"
+
+    monkeypatch.setattr(mcp_server, "selector_help", fake_selector_help)
+
+    exit_code = mcp_server._run_cli(["resources"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Available resources:" in output
+    assert "qplaywright://help/selectors" in output
+
+
 def test_main_cli_dispatches_to_cli_runner(monkeypatch):
     called = {}
 
