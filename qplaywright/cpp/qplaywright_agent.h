@@ -40,6 +40,7 @@
 #include <QPointer>
 #include <QBrush>
 #include <QPolygon>
+#include <QWindow>
 #include <QWaitCondition>
 #include <QMouseEvent>
 #include <QKeyEvent>
@@ -1174,6 +1175,26 @@ private:
     static constexpr const char *kAutomationOverlayObjectName = "_qplaywright_automation_overlay";
     static constexpr const char *kAutomationOverlayProperty = "qplaywrightAutomationOverlay";
 
+    static bool isOverlayTargetWindowVisible(QWidget *widget)
+    {
+        if (!widget)
+            return false;
+        if (widget->objectName() == QString::fromLatin1(kAutomationOverlayObjectName))
+            return false;
+        if (widget->property(kAutomationOverlayProperty).toBool())
+            return false;
+        if (!widget->isVisible())
+            return false;
+        if (widget->isMinimized())
+            return false;
+        if (widget->windowState().testFlag(Qt::WindowMinimized))
+            return false;
+        QWindow *windowHandle = widget->windowHandle();
+        if (windowHandle && !windowHandle->isExposed())
+            return false;
+        return true;
+    }
+
     struct PulseRecord
     {
         qint64 startedAtMs;
@@ -1207,7 +1228,7 @@ private:
 
         void syncToWindow(bool forceRaise = false)
         {
-            if (!m_targetWindow || !m_targetWindow->isVisible()) {
+            if (!isOverlayTargetWindowVisible(m_targetWindow.data())) {
                 hide();
                 return;
             }
@@ -1387,7 +1408,7 @@ private:
             if (writeIndex != m_pulses.size())
                 m_pulses.resize(writeIndex);
 
-            if (!m_targetWindow || !m_targetWindow->isVisible()) {
+            if (!isOverlayTargetWindowVisible(m_targetWindow.data())) {
                 hide();
                 if (m_pulses.isEmpty())
                     m_timer.stop();
@@ -1445,7 +1466,7 @@ private:
                 return;
 
             QWidget *targetWindow = widget->window();
-            if (!targetWindow)
+            if (!isOverlayTargetWindowVisible(targetWindow))
                 return;
 
             m_activeWindow = targetWindow;
@@ -1489,7 +1510,7 @@ private:
             case QEvent::Resize:
             case QEvent::Show:
             case QEvent::WindowStateChange:
-                if (m_enabled && targetWindow == m_activeWindow && targetWindow->isVisible())
+                if (m_enabled && targetWindow == m_activeWindow && isOverlayTargetWindowVisible(targetWindow))
                     overlay->syncToWindow(event->type() == QEvent::Show);
                 else
                     overlay->hide();
@@ -1551,13 +1572,13 @@ private:
         {
             if (m_enabled && !m_sharedAgentName.isEmpty()) {
                 QWidget *activeWindow = QApplication::activeWindow();
-                if (activeWindow && !activeWindow->property(kAutomationOverlayProperty).toBool() && activeWindow->isVisible()) {
+                if (isOverlayTargetWindowVisible(activeWindow)) {
                     m_activeWindow = activeWindow;
-                } else if (!m_activeWindow || !m_activeWindow->isVisible()) {
+                } else if (!isOverlayTargetWindowVisible(m_activeWindow)) {
                     m_activeWindow = nullptr;
                     const auto windows = QApplication::topLevelWidgets();
                     for (QWidget *window : windows) {
-                        if (!window->property(kAutomationOverlayProperty).toBool() && window->isVisible()) {
+                        if (isOverlayTargetWindowVisible(window)) {
                             m_activeWindow = window;
                             break;
                         }
@@ -1584,7 +1605,7 @@ private:
 
                 overlay->setSharedAgentName(m_sharedAgentName);
 
-                if (!targetWindow->isVisible()) {
+                if (!isOverlayTargetWindowVisible(targetWindow)) {
                     if (targetWindow == m_activeWindow)
                         m_activeWindow = nullptr;
                     overlay->hide();
