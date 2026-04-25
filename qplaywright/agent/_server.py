@@ -233,6 +233,7 @@ def _create_overlay_manager_class():
         def __init__(self, target_window):
             super().__init__(None)
             self._target_window = target_window
+            self._manager_active = False
             self._cursor_pos = None
             self._session_agent_name = ""
             self._pulse_span = 0.22
@@ -256,6 +257,11 @@ def _create_overlay_manager_class():
             self.setProperty(_AUTOMATION_OVERLAY_PROPERTY, True)
 
         def sync_to_window(self, *, force_raise: bool = False) -> None:
+            if not self._manager_active:
+                self._timer.stop()
+                self.hide()
+                return
+
             if self._target_window is None:
                 self.hide()
                 return
@@ -286,6 +292,17 @@ def _create_overlay_manager_class():
             self.sync_to_window(force_raise=True)
             self.update()
 
+        def set_manager_active(self, active: bool) -> None:
+            normalized = bool(active)
+            if self._manager_active == normalized:
+                return
+            self._manager_active = normalized
+            if not self._manager_active:
+                self._timer.stop()
+                self.hide()
+                return
+            self.sync_to_window()
+
         def set_session_agent_name(self, agent_name: str) -> None:
             normalized = str(agent_name or "").strip()
             if self._session_agent_name == normalized:
@@ -302,8 +319,10 @@ def _create_overlay_manager_class():
         def _tick(self) -> None:
             cutoff = time.monotonic() - (self._pulse_span + self._pulse_gap)
             self._pulse_records = [record for record in self._pulse_records if record[0] >= cutoff]
-            if self._target_window is None or not _is_overlay_target_window_visible(self._target_window):
+            if not self._manager_active or self._target_window is None or not _is_overlay_target_window_visible(self._target_window):
                 self.hide()
+                if not self._manager_active and self._pulse_records:
+                    self._pulse_records.clear()
             else:
                 self.sync_to_window()
             if not self.isVisible() and not self._pulse_records:
@@ -440,6 +459,7 @@ def _create_overlay_manager_class():
                 return
             self._active_window_id = id(target_window)
             overlay = self._ensure_overlay(target_window)
+            overlay.set_manager_active(True)
             overlay.set_cursor_from_global(widget.mapToGlobal(pos), pulse_count=pulse_count)
 
         def set_session_agent_name(self, agent_name: str) -> None:
@@ -474,13 +494,14 @@ def _create_overlay_manager_class():
             overlay = self._overlays.get(window_id)
             if overlay is not None:
                 overlay.set_session_agent_name(self._session_agent_name)
+                overlay.set_manager_active(window_id == self._active_window_id)
                 return overlay
 
             overlay = _AutomationOverlay(target_window)
             overlay.set_session_agent_name(self._session_agent_name)
+            overlay.set_manager_active(window_id == self._active_window_id)
             self._overlays[window_id] = overlay
             target_window.destroyed.connect(lambda *_args, wid=window_id: self._drop_overlay(wid))
-            overlay.sync_to_window()
             return overlay
 
         def _drop_overlay(self, window_id: int) -> None:
@@ -508,8 +529,8 @@ def _create_overlay_manager_class():
                     continue
 
                 is_active = window_id == self._active_window_id
+                overlay.set_manager_active(is_active)
                 if not is_active:
-                    overlay.hide()
                     continue
 
                 overlay.sync_to_window()
