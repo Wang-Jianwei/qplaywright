@@ -454,6 +454,9 @@ def _create_overlay_manager_class():
             self._sync()
 
         def _ensure_active_overlay(self) -> None:
+            if not _is_qt_application_active(self._app):
+                self._active_window_id = None
+                return
             active_window = self._app.activeWindow() if hasattr(self._app, "activeWindow") else None
             if not _is_overlay_target_window_visible(active_window):
                 active_window = None
@@ -486,6 +489,9 @@ def _create_overlay_manager_class():
                 overlay.close_overlay()
 
         def _sync(self) -> None:
+            if not _is_qt_application_active(self._app):
+                self._active_window_id = None
+
             if self._active_window_id is not None:
                 active_overlay = self._overlays.get(self._active_window_id)
                 active_window = getattr(active_overlay, "_target_window", None) if active_overlay is not None else None
@@ -683,6 +689,13 @@ def _is_overlay_target_window_visible(widget) -> bool:
     if window_handle is not None and hasattr(window_handle, "isExposed") and not window_handle.isExposed():
         return False
     return True
+
+
+def _is_qt_application_active(app) -> bool:
+    qt_namespace = getattr(_QtCore, "Qt", None) if _QtCore is not None else None
+    if app is None or qt_namespace is None or not hasattr(app, "applicationState"):
+        return True
+    return app.applicationState() == qt_namespace.ApplicationActive
 
 
 def _resolve_widgets(params: dict) -> list:
