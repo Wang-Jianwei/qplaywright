@@ -387,11 +387,13 @@ class SettingsDialog(QDialog):
         self.theme_combo = QComboBox()
         self.theme_combo.setObjectName("settings_theme")
         self.theme_combo.addItems(["Light", "Dark", "System"])
+        self.theme_combo.setCurrentText(current_settings.get("theme", "Light"))
         general_layout.addRow("Theme:", self.theme_combo)
 
         self.language_combo = QComboBox()
         self.language_combo.setObjectName("settings_language")
         self.language_combo.addItems(["English", "Chinese", "Japanese", "German"])
+        self.language_combo.setCurrentText(current_settings.get("language", "English"))
         general_layout.addRow("Language:", self.language_combo)
 
         self.auto_save_check = QCheckBox("Auto-save changes")
@@ -409,23 +411,27 @@ class SettingsDialog(QDialog):
         layout.addWidget(general_group)
 
         notification_group = QGroupBox("Notifications")
-        notification_layout = QVBoxLayout(notification_group)
+        notification_layout = QFormLayout(notification_group)
 
         self.notify_email_check = QCheckBox("Email notifications")
         self.notify_email_check.setObjectName("notify_email")
-        notification_layout.addWidget(self.notify_email_check)
+        self.notify_email_check.setChecked(current_settings.get("notify_email", False))
+        notification_layout.addRow("", self.notify_email_check)
 
         self.notify_sms_check = QCheckBox("SMS notifications")
         self.notify_sms_check.setObjectName("notify_sms")
-        notification_layout.addWidget(self.notify_sms_check)
+        self.notify_sms_check.setChecked(current_settings.get("notify_sms", False))
+        notification_layout.addRow("", self.notify_sms_check)
 
         self.notify_push_check = QCheckBox("Push notifications")
         self.notify_push_check.setObjectName("notify_push")
-        notification_layout.addWidget(self.notify_push_check)
+        self.notify_push_check.setChecked(current_settings.get("notify_push", False))
+        notification_layout.addRow("", self.notify_push_check)
 
         self.notification_level_combo = QComboBox()
         self.notification_level_combo.setObjectName("notification_level")
         self.notification_level_combo.addItems(["All", "Important", "None"])
+        self.notification_level_combo.setCurrentText(current_settings.get("notification_level", "All"))
         notification_layout.addRow("Level:", self.notification_level_combo)
 
         layout.addWidget(notification_group)
@@ -605,6 +611,20 @@ class DemoWindow(QMainWindow):
         self._create_data_tab()
         self._create_settings_tab()
         self._create_progress_tab()
+
+        self._settings_state = {
+            "theme": self.settings_theme_combo.currentText(),
+            "language": self.settings_language_combo.currentText(),
+            "auto_save": self.settings_auto_save_check.isChecked(),
+            "refresh_interval": self.settings_refresh_spin.value(),
+            "notify_email": self.notify_email_check.isChecked(),
+            "notify_sms": self.notify_sms_check.isChecked(),
+            "notify_push": self.notify_push_check.isChecked(),
+            "notification_level": "All",
+            "max_connections": 10,
+            "cache_size": 100,
+            "debug_mode": False,
+        }
 
         self._update_timer = QTimer()
         self._update_timer.timeout.connect(self._on_timer_update)
@@ -885,9 +905,10 @@ class DemoWindow(QMainWindow):
         self.data_table.setObjectName("data_table")
         layout.addWidget(self.data_table)
 
-        self.data_status_label = QLabel("Showing 5 of 5 entries")
+        self.data_status_label = QLabel()
         self.data_status_label.setObjectName("data_status")
         layout.addWidget(self.data_status_label)
+        self._refresh_data_status()
 
     def _create_settings_tab(self):
         settings_tab = QWidget()
@@ -1036,6 +1057,10 @@ class DemoWindow(QMainWindow):
         flag_state = ", ".join(flags) if flags else "no-flags"
         self.summary_label.setText(f"Summary: user={username} role={role} env={environment} payment={payment_summary} {flag_state} {note_state}")
 
+    def _refresh_data_status(self):
+        total_rows = self.data_table.rowCount()
+        self.data_status_label.setText(f"Showing {total_rows} entr{'y' if total_rows == 1 else 'ies'}")
+
     def _on_login(self):
         username = self.username_input.text()
         password = self.password_input.text()
@@ -1106,24 +1131,26 @@ class DemoWindow(QMainWindow):
             self.settings_dialog.activateWindow()
             return
 
-        settings = {
-            "theme": self.settings_theme_combo.currentText(),
-            "language": self.settings_language_combo.currentText(),
-            "auto_save": self.settings_auto_save_check.isChecked(),
-            "refresh_interval": self.settings_refresh_spin.value(),
-        }
-        dialog = SettingsDialog(settings, parent=self)
+        dialog = SettingsDialog(dict(self._settings_state), parent=self)
         dialog.settingsChanged.connect(self._on_settings_changed)
+        dialog.finished.connect(self._on_settings_finished)
         self.settings_dialog = dialog
         dialog.open()
         self._log("[INFO] Opened settings dialog")
 
     def _on_settings_changed(self, settings):
+        self._settings_state = dict(settings)
         self.settings_theme_combo.setCurrentText(settings["theme"])
         self.settings_language_combo.setCurrentText(settings["language"])
         self.settings_auto_save_check.setChecked(settings["auto_save"])
         self.settings_refresh_spin.setValue(settings["refresh_interval"])
+        self.notify_email_check.setChecked(settings["notify_email"])
+        self.notify_sms_check.setChecked(settings["notify_sms"])
+        self.notify_push_check.setChecked(settings["notify_push"])
         self._log(f"[INFO] Settings changed: theme={settings['theme']}, language={settings['language']}")
+
+    def _on_settings_finished(self, _result):
+        self.settings_dialog = None
 
     def _open_data_entry(self):
         if self.data_entry_dialog is not None and self.data_entry_dialog.isVisible():
@@ -1133,6 +1160,7 @@ class DemoWindow(QMainWindow):
 
         dialog = DataEntryDialog(parent=self)
         dialog.dataSubmitted.connect(self._on_data_submitted)
+        dialog.finished.connect(self._on_data_entry_finished)
         self.data_entry_dialog = dialog
         dialog.open()
         self._log("[INFO] Opened data entry dialog")
@@ -1146,7 +1174,11 @@ class DemoWindow(QMainWindow):
         self.data_table.setItem(row, 3, QTableWidgetItem(data["priority"]))
         self.data_table.setItem(row, 4, QTableWidgetItem("Active"))
         self.data_table.setItem(row, 5, QTableWidgetItem(QDateTime.currentDateTime().toString()))
+        self._refresh_data_status()
         self._log(f"[INFO] Added entry: {data['name']} ({data['department']})")
+
+    def _on_data_entry_finished(self, _result):
+        self.data_entry_dialog = None
 
     def _on_delete_entry(self):
         current_row = self.data_table.currentRow()
@@ -1154,6 +1186,7 @@ class DemoWindow(QMainWindow):
             item = self.data_table.item(current_row, 1)
             name = item.text() if item else "Unknown"
             self.data_table.removeRow(current_row)
+            self._refresh_data_status()
             self._log(f"[INFO] Deleted entry: {name}")
         else:
             self._log("[WARN] No entry selected for deletion")
