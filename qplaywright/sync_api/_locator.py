@@ -73,6 +73,14 @@ class Locator:
         self._widget_wid = widget_wid
         self._is_last = is_last
         self._timeout = timeout
+        self._cached_last_nth: int | None = None
+
+    def _resolve_last_nth(self, base_params: dict) -> int:
+        if self._cached_last_nth is not None:
+            return self._cached_last_nth
+        count = self._conn.send(METHOD_COUNT, base_params, timeout=self._timeout)
+        self._cached_last_nth = max(0, count - 1)
+        return self._cached_last_nth
 
     def _params(self, **extra) -> dict:
         if self._widget_wid is not None:
@@ -84,11 +92,7 @@ class Locator:
             if self._parent_wid is not None:
                 p["parent_wid"] = self._parent_wid
             if self._is_last:
-                # Call _conn.send directly (not _send) to avoid recursion:
-                # _send → _params → _send.  We need the bare selector params
-                # without nth to count all matches, then pick the last index.
-                count = self._conn.send(METHOD_COUNT, p, timeout=self._timeout)
-                p["nth"] = max(0, count - 1)
+                p["nth"] = self._resolve_last_nth(p)
             elif self._nth_index is not None:
                 p["nth"] = self._nth_index
         p.update(extra)

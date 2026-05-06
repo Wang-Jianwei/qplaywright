@@ -194,7 +194,7 @@ def _import_qt():
             if _QPointF is None:
                 _QPointF = getattr(_QtGui, "QPointF", None)
             if _QPointF is None:
-                raise ImportError(f"QPointF not found in {pkg}.QtCore or {pkg}.QtGui")
+                logger.warning("QPointF not found in %s.QtCore or %s.QtGui; mouse event construction may fail", pkg, pkg)
             logger.info("Using Qt binding: %s", pkg)
             return
         except ImportError:
@@ -1613,6 +1613,8 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
         )
     except TypeError:
+        if _QPointF is None:
+            raise TypeError("QPointF is not available; cannot construct mouse event for this Qt binding")
         pos_f = _QPointF(pos)
         global_f = _QPointF(global_pos)
         press = QMouseEvent(
@@ -1634,6 +1636,8 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
                 Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
             )
         except TypeError:
+            if _QPointF is None:
+                raise TypeError("QPointF is not available; cannot construct double-click event for this Qt binding")
             dbl = QMouseEvent(
                 QEvent.Type.MouseButtonDblClick, _QPointF(pos), _QPointF(global_pos),
                 Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
@@ -1706,6 +1710,8 @@ def _hover_widget(widget, pos):
             Qt.NoButton, Qt.NoButton, Qt.NoModifier,
         )
     except TypeError:
+        if _QPointF is None:
+            raise TypeError("QPointF is not available; cannot construct hover event for this Qt binding")
         move = QMouseEvent(
             QEvent.Type.MouseMove, _QPointF(pos), _QPointF(global_pos),
             Qt.NoButton, Qt.NoButton, Qt.NoModifier,
@@ -1776,6 +1782,8 @@ def _scroll_widget(widget, delta_x: int = 0, delta_y: int = 0):
     global_pos = target.mapToGlobal(center)
 
     try:
+        if _QPointF is None:
+            raise TypeError("QPointF is not available; cannot construct scroll event for this Qt binding")
         QPoint = _QtCore.QPoint
         event = QWheelEvent(
             _QPointF(center), _QPointF(global_pos),

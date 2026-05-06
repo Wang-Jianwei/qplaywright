@@ -16,6 +16,7 @@ import base64
 import contextlib
 import subprocess
 import time
+import warnings
 from typing import Any, Generator
 
 from qplaywright.protocol import (
@@ -185,8 +186,23 @@ class Window:
     # -- Waiting -------------------------------------------------------------
 
     def wait_for_timeout(self, timeout: float) -> None:
-        """Wait for the specified time in seconds."""
-        time.sleep(timeout)
+        """Wait for the specified time in seconds.
+
+        Historically this method accepted milliseconds. If a value >= 100 is
+        passed, it is treated as milliseconds and a DeprecationWarning is
+        issued. Pass the timeout in seconds instead.
+        """
+        if timeout >= 100:
+            warnings.warn(
+                "wait_for_timeout() expects seconds, not milliseconds. "
+                f"Got {timeout}, interpreting as {timeout / 1000.0}s. "
+                "This compatibility shim will be removed in a future release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            time.sleep(timeout / 1000.0)
+        else:
+            time.sleep(timeout)
 
     def __repr__(self) -> str:
         return f"Window(wid={self._wid}, title={self._title_cache!r})"
