@@ -111,7 +111,10 @@ _OVERLAY_MANAGER = None
 _OverlayManagerClass = None
 _SESSION_AGENT_NAMES: dict[str, str] = {}
 _ACTIVE_SESSION_ID: str | None = None
-_executing_command: bool = False  # reentrancy guard: True while a CommandEvent is being handled
+# Reentrancy guard: set to True while a CommandEvent is being handled on the Qt
+# main thread.  Only ever read/written from the main thread (customEvent is
+# always called there), so no lock is needed.
+_executing_command: bool = False
 
 
 def _active_session_agent_name() -> str:
@@ -869,6 +872,10 @@ def _create_dispatcher():
                     # Re-post the event so it is processed after the current command
                     # finishes, preventing re-entrant command execution during
                     # processEvents() calls inside _handle_command.
+                    logger.debug(
+                        "Re-entrant CommandEvent detected (method=%r); deferring until current command completes.",
+                        req.method,
+                    )
                     _QApplication.postEvent(self, CommandEvent(req, fut))
                     return
                 _executing_command = True
