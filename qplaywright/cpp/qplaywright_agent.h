@@ -549,11 +549,11 @@ private:
         // still succeed when the method is declared with QVariant parameters.
         QGenericArgument convert(const QString &typeName, const QVariant &value)
         {
-            if (typeName == QStringLiteral("QString"))  { strStore[stringIndex]    = value.toString();  return Q_ARG(QString,  strStore[stringIndex++]);  }
-            if (typeName == QStringLiteral("int"))      { intStore[intIndex]       = value.toInt();     return Q_ARG(int,      intStore[intIndex++]);     }
-            if (typeName == QStringLiteral("bool"))     { boolStore[boolIndex]     = value.toBool();    return Q_ARG(bool,     boolStore[boolIndex++]);   }
-            if (typeName == QStringLiteral("double"))   { dblStore[doubleIndex]    = value.toDouble();  return Q_ARG(double,   dblStore[doubleIndex++]);  }
-            /* QVariant or any other declared type */    varStore[variantIndex]    = value;             return Q_ARG(QVariant, varStore[variantIndex++]);
+            if (typeName == QStringLiteral("QString"))  { Q_ASSERT(stringIndex < MAX_ARGS); strStore[stringIndex]    = value.toString();  return Q_ARG(QString,  strStore[stringIndex++]);  }
+            if (typeName == QStringLiteral("int"))      { Q_ASSERT(intIndex < MAX_ARGS);    intStore[intIndex]       = value.toInt();     return Q_ARG(int,      intStore[intIndex++]);     }
+            if (typeName == QStringLiteral("bool"))     { Q_ASSERT(boolIndex < MAX_ARGS);   boolStore[boolIndex]     = value.toBool();    return Q_ARG(bool,     boolStore[boolIndex++]);   }
+            if (typeName == QStringLiteral("double"))   { Q_ASSERT(doubleIndex < MAX_ARGS); dblStore[doubleIndex]    = value.toDouble();  return Q_ARG(double,   dblStore[doubleIndex++]);  }
+            /* QVariant or any other declared type */    Q_ASSERT(variantIndex < MAX_ARGS); varStore[variantIndex]    = value;             return Q_ARG(QVariant, varStore[variantIndex++]);
         }
     };
 
@@ -564,6 +564,12 @@ private:
         const QByteArray methodName = method.name().toLatin1();
         const QVector<QPlaywrightMethodArg> &decl = method.args();
         const int n = args.size();
+
+        if (n != static_cast<int>(decl.size())) {
+            qWarning("QPlaywright: argument count mismatch for %s — expected %d, got %d",
+                     methodName.constData(), static_cast<int>(decl.size()), n);
+            return false;
+        }
 
         if (n == 0)
             return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection);
@@ -594,6 +600,12 @@ private:
         const QByteArray methodName = method.name().toLatin1();
         const QVector<QPlaywrightMethodArg> &decl = method.args();
         const int n = args.size();
+
+        if (n != static_cast<int>(decl.size())) {
+            qWarning("QPlaywright: argument count mismatch for %s — expected %d, got %d",
+                     methodName.constData(), static_cast<int>(decl.size()), n);
+            return false;
+        }
 
         if (n == 0)
             return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg);
