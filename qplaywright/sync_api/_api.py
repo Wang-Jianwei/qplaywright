@@ -185,8 +185,8 @@ class Window:
     # -- Waiting -------------------------------------------------------------
 
     def wait_for_timeout(self, timeout: float) -> None:
-        """Wait for the specified time in milliseconds."""
-        time.sleep(timeout / 1000.0)
+        """Wait for the specified time in seconds."""
+        time.sleep(timeout)
 
     def __repr__(self) -> str:
         return f"Window(wid={self._wid}, title={self._title_cache!r})"
@@ -286,9 +286,11 @@ class QPlaywright:
         """
         conn = Connection(host=host, port=port, timeout=timeout)
 
-        # Retry connection with backoff
+        # Retry connection with exponential backoff
         deadline = time.monotonic() + timeout
         last_error = None
+        backoff = 0.1
+        max_backoff = 2.0
         while time.monotonic() < deadline:
             try:
                 conn.connect()
@@ -299,7 +301,8 @@ class QPlaywright:
                 return Application(conn, timeout=timeout)
             except (ConnectionRefusedError, ConnectionError, OSError) as e:
                 last_error = e
-                time.sleep(0.2)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
 
         raise ConnectionError(
             f"Could not connect to QPlaywright agent at {host}:{port} "

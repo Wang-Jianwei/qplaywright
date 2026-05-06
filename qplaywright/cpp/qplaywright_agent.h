@@ -2702,6 +2702,8 @@ private:
             Qt::NoModifier
         );
 #endif
+        QApplication::sendEvent(target, &event);
+        QApplication::processEvents();
     }
 
     void selectOption(QWidget *w, const QJsonObject &params)
