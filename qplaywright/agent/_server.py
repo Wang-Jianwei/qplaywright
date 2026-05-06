@@ -111,6 +111,7 @@ _OVERLAY_MANAGER = None
 _OverlayManagerClass = None
 _SESSION_AGENT_NAMES: dict[str, str] = {}
 _ACTIVE_SESSION_ID: str | None = None
+_executing_command: bool = False  # reentrancy guard: True while a CommandEvent is being handled
 
 
 def _active_session_agent_name() -> str:
@@ -860,14 +861,24 @@ def _create_dispatcher():
             self._call_event_type = _CALL_EVENT_TYPE
 
         def customEvent(self, event):
+            global _executing_command
             if event.type() == self._cmd_event_type:
                 req = event.request
                 fut = event.future
+                if _executing_command:
+                    # Re-post the event so it is processed after the current command
+                    # finishes, preventing re-entrant command execution during
+                    # processEvents() calls inside _handle_command.
+                    _QApplication.postEvent(self, CommandEvent(req, fut))
+                    return
+                _executing_command = True
                 try:
                     result = _handle_command(req)
                     fut.set_result(result)
                 except Exception as exc:
                     fut.set_exception(exc)
+                finally:
+                    _executing_command = False
             elif event.type() == self._call_event_type:
                 callback = event.callback
                 fut = event.future
@@ -1368,7 +1379,7 @@ def _handle_command(req: Request) -> Any:
 #  Action helpers                                                              #
 # --------------------------------------------------------------------------- #
 
-def _process_events(ms: int = 10):
+def _process_events():
     """Process pending Qt events."""
     _QApplication.processEvents()
 
