@@ -197,8 +197,8 @@ class Locator:
         results = self._send(METHOD_FIND_ALL)
         return [
             Locator(self._conn, self._selector, has_text=self._has_text,
-                    parent_wid=self._parent_wid, nth_index=i, timeout=self._timeout)
-            for i in range(len(results))
+                    parent_wid=self._parent_wid, widget_wid=r["wid"], timeout=self._timeout)
+            for r in results
         ]
 
     def all_text_contents(self) -> list[str]:

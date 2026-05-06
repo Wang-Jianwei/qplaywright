@@ -21,6 +21,7 @@ import socket
 import struct
 import threading
 import time
+import weakref
 from concurrent.futures import Future
 from typing import Any
 
@@ -726,11 +727,17 @@ def _move_visual_cursor_to_widget(widget, *, pulse_count: int = 0) -> None:
 # --------------------------------------------------------------------------- #
 
 class _WidgetRegistry:
-    """Maps widgets ↔ integer IDs so the client can reference them."""
+    """Maps widgets ↔ integer IDs so the client can reference them.
+
+    Uses weakref to avoid keeping widgets alive and to detect when a widget
+    has been garbage-collected.  If a widget is GC'd and a new object reuses
+    its memory address, the stale entry is evicted before the new widget is
+    registered.
+    """
 
     def __init__(self):
-        self._w2id: dict[int, int] = {}   # id(widget) → wid
-        self._id2w: dict[int, Any] = {}   # wid → widget (weak-ish via id)
+        self._w2id: dict[int, int] = {}
+        self._id2w: dict[int, tuple[weakref.ref, int]] = {}
         self._next = 1
         self._lock = threading.Lock()
 
@@ -738,16 +745,40 @@ class _WidgetRegistry:
         key = id(widget)
         with self._lock:
             if key in self._w2id:
-                return self._w2id[key]
+                wid = self._w2id[key]
+                entry = self._id2w.get(wid)
+                if entry is not None:
+                    ref, _stored_key = entry
+                    if ref() is widget:
+                        return wid
+                    self._remove_entry(wid, _stored_key)
             wid = self._next
             self._next += 1
+            ref = weakref.ref(widget, lambda _ref: self._on_ref_cleared(key, wid))
             self._w2id[key] = wid
-            self._id2w[wid] = widget
+            self._id2w[wid] = (ref, key)
             return wid
 
     def get(self, wid: int):
         with self._lock:
-            return self._id2w.get(wid)
+            entry = self._id2w.get(wid)
+            if entry is None:
+                return None
+            ref, _key = entry
+            widget = ref()
+            if widget is None:
+                self._remove_entry(wid, _key)
+                return None
+            return widget
+
+    def _on_ref_cleared(self, key: int, wid: int):
+        with self._lock:
+            self._w2id.pop(key, None)
+            self._id2w.pop(wid, None)
+
+    def _remove_entry(self, wid: int, key: int):
+        self._w2id.pop(key, None)
+        self._id2w.pop(wid, None)
 
     def clear(self):
         with self._lock:
@@ -1340,9 +1371,6 @@ def _handle_command(req: Request) -> Any:
 def _process_events(ms: int = 10):
     """Process pending Qt events."""
     _QApplication.processEvents()
-    if ms > 0:
-        # Give the event loop a moment
-        _QApplication.processEvents()
 
 
 def _primary_event_target(widget):
@@ -1561,7 +1589,7 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
         )
     except TypeError:
-        from PySide6.QtCore import QPointF
+        QPointF = _QtCore.QPointF
         pos_f = QPointF(pos)
         global_f = QPointF(global_pos)
         press = QMouseEvent(
@@ -1583,6 +1611,7 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
                 Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
             )
         except TypeError:
+            QPointF = _QtCore.QPointF
             dbl = QMouseEvent(
                 QEvent.Type.MouseButtonDblClick, QPointF(pos), QPointF(global_pos),
                 Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
@@ -1655,7 +1684,7 @@ def _hover_widget(widget, pos):
             Qt.NoButton, Qt.NoButton, Qt.NoModifier,
         )
     except TypeError:
-        from PySide6.QtCore import QPointF
+        QPointF = _QtCore.QPointF
         move = QMouseEvent(
             QEvent.Type.MouseMove, QPointF(pos), QPointF(global_pos),
             Qt.NoButton, Qt.NoButton, Qt.NoModifier,
@@ -1726,7 +1755,8 @@ def _scroll_widget(widget, delta_x: int = 0, delta_y: int = 0):
     global_pos = target.mapToGlobal(center)
 
     try:
-        from PySide6.QtCore import QPointF, QPoint
+        QPointF = _QtCore.QPointF
+        QPoint = _QtCore.QPoint
         event = QWheelEvent(
             QPointF(center), QPointF(global_pos),
             QPoint(delta_x, delta_y),   # pixelDelta

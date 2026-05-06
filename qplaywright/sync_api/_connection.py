@@ -50,17 +50,15 @@ class Connection:
             self._id_counter += 1
             req_id = self._id_counter
 
-        req = Request(method=method, params=params or {}, id=req_id)
+            req = Request(method=method, params=params or {}, id=req_id)
 
-        old_timeout = self._sock.gettimeout()
-        if timeout is not None:
-            self._sock.settimeout(timeout)
+            old_timeout = self._sock.gettimeout()
+            if timeout is not None:
+                self._sock.settimeout(timeout)
 
-        try:
-            with self._lock:
+            try:
                 self._sock.sendall(req.to_bytes())
 
-                # Read response
                 while True:
                     while b"\n" in self._buf:
                         line, self._buf = self._buf.split(b"\n", 1)
@@ -77,9 +75,9 @@ class Connection:
                     if not data:
                         raise ConnectionError("Agent closed connection")
                     self._buf += data
-        finally:
-            if timeout is not None:
-                self._sock.settimeout(old_timeout)
+            finally:
+                if timeout is not None:
+                    self._sock.settimeout(old_timeout)
 
     @property
     def connected(self) -> bool:
