@@ -97,6 +97,7 @@ _QtCore = None
 _QtGui = None
 _QtTest = None
 _QApplication = None
+_QPointF = None
 _VISUAL_FEEDBACK_ENABLED = False
 _AUTOMATION_OVERLAY_OBJECT_NAME = "_qplaywright_automation_overlay"
 _AUTOMATION_OVERLAY_PROPERTY = "qplaywrightAutomationOverlay"
@@ -174,7 +175,7 @@ def _remove_session_agent_name(session_id: str) -> None:
 
 
 def _import_qt():
-    global _QtWidgets, _QtCore, _QtGui, _QtTest, _QApplication
+    global _QtWidgets, _QtCore, _QtGui, _QtTest, _QApplication, _QPointF
     if _QtWidgets is not None:
         return
 
@@ -189,6 +190,11 @@ def _import_qt():
             except ImportError:
                 _QtTest = None
             _QApplication = _QtWidgets.QApplication
+            _QPointF = getattr(_QtCore, "QPointF", None)
+            if _QPointF is None:
+                _QPointF = getattr(_QtGui, "QPointF", None)
+            if _QPointF is None:
+                raise ImportError(f"QPointF not found in {pkg}.QtCore or {pkg}.QtGui")
             logger.info("Using Qt binding: %s", pkg)
             return
         except ImportError:
@@ -1607,9 +1613,8 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
         )
     except TypeError:
-        QPointF = _QtCore.QPointF
-        pos_f = QPointF(pos)
-        global_f = QPointF(global_pos)
+        pos_f = _QPointF(pos)
+        global_f = _QPointF(global_pos)
         press = QMouseEvent(
             QEvent.Type.MouseButtonPress, pos_f, global_f,
             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
@@ -1629,9 +1634,8 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
                 Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
             )
         except TypeError:
-            QPointF = _QtCore.QPointF
             dbl = QMouseEvent(
-                QEvent.Type.MouseButtonDblClick, QPointF(pos), QPointF(global_pos),
+                QEvent.Type.MouseButtonDblClick, _QPointF(pos), _QPointF(global_pos),
                 Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
             )
         _QApplication.postEvent(widget, dbl)
@@ -1702,9 +1706,8 @@ def _hover_widget(widget, pos):
             Qt.NoButton, Qt.NoButton, Qt.NoModifier,
         )
     except TypeError:
-        QPointF = _QtCore.QPointF
         move = QMouseEvent(
-            QEvent.Type.MouseMove, QPointF(pos), QPointF(global_pos),
+            QEvent.Type.MouseMove, _QPointF(pos), _QPointF(global_pos),
             Qt.NoButton, Qt.NoButton, Qt.NoModifier,
         )
 
@@ -1773,10 +1776,9 @@ def _scroll_widget(widget, delta_x: int = 0, delta_y: int = 0):
     global_pos = target.mapToGlobal(center)
 
     try:
-        QPointF = _QtCore.QPointF
         QPoint = _QtCore.QPoint
         event = QWheelEvent(
-            QPointF(center), QPointF(global_pos),
+            _QPointF(center), _QPointF(global_pos),
             QPoint(delta_x, delta_y),   # pixelDelta
             QPoint(delta_x, delta_y),   # angleDelta
             Qt.NoButton, Qt.NoModifier,
