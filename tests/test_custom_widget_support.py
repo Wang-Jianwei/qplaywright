@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import qplaywright.agent._server as server
 import qplaywright.agent._selector as selector
-from qplaywright.protocol import QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlaywrightMethodArg
+from qplaywright.protocol import MISSING, QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlaywrightMethodArg
 
 
 class FakeMetaObject:
@@ -146,7 +146,7 @@ def _metadata(*, role: str = "", methods: list[dict] | None = None) -> QPlaywrig
                 type=arg.get("type", "QVariant"),
                 brief=arg.get("brief", ""),
                 required=arg.get("required", True),
-                **({} if "defaultValue" not in arg else {"default_value": arg["defaultValue"]}),
+                default_value=arg.get("defaultValue", MISSING),
             )
             for arg in method.get("args", [])
         ]
