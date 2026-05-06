@@ -75,12 +75,12 @@ When either implementation is changed, this document must be updated first and t
 
 | Parameter | Value | Unit | Notes |
 |-----------|-------|------|-------|
-| `PULSE_SPAN` | `220` | ms | Duration of one expanding ring |
-| `PULSE_GAP` | `80` | ms | Delay between consecutive rings in a multi-pulse burst |
-| `PULSE_CUTOFF` | `300` | ms | Pulse records older than this are discarded (`PULSE_SPAN + PULSE_GAP`) |
+| `PULSE_SPAN` | `220` | ms | Duration of one expanding ring; Python stores this as `0.22` s because pulse timing is based on `time.monotonic()` |
+| `PULSE_GAP` | `80` | ms | Delay between consecutive rings in a multi-pulse burst; Python stores this as `0.08` s |
+| `PULSE_CUTOFF` | `300` | ms | Pulse records older than this are discarded (`PULSE_SPAN + PULSE_GAP`); equivalent to `0.30` s |
 | Pulse start radius | `6` | px | |
 | Pulse end radius | `26` | px | `6 + 20` |
-| Timer interval | `16` | ms | ~60 fps repaint / sync tick |
+| Timer interval | `16` | ms | ~60 fps repaint / sync tick; if represented in Python seconds, this is `0.016` s |
 
 ---
 
