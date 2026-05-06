@@ -285,6 +285,7 @@ Response includes:
 - `target`
 - `snapshot`
 - `refs`
+- `epoch` — monotonically increasing snapshot epoch counter; increments on every snapshot call
 - optional `warnings`
 - optional `save_to`
 
@@ -296,6 +297,11 @@ Each snapshot ref entry includes:
 - `class`
 - `geometry`
 - any meaningful semantic label fields such as `text`, `accessibleName`, `currentText`, `windowTitle`, or `value`
+
+Snapshot refs are valid only for the current snapshot epoch. Every snapshot call clears all previous refs and
+assigns new ones starting from `e1`. If you use a ref from an older snapshot after a newer snapshot has been taken,
+the operation fails with an error like `Snapshot ref 'e3' has expired (current snapshot epoch is 2). Run snapshot
+to refresh refs`. Use the `epoch` field in the snapshot response to detect stale refs.
 
 When `topmost_only=true` and `target` is omitted, the result is an approximate
 frontmost-visible view. It may omit widgets or content and returns a warning to

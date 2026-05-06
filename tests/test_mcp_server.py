@@ -355,8 +355,67 @@ def test_resolve_locator_rejects_missing_snapshot_ref_with_refresh_hint():
         snapshot_refs={"e1": 41},
     )
 
-    with pytest.raises(ValueError, match="Snapshot ref 'e9' is not available"):
+    with pytest.raises(ValueError, match="Snapshot ref 'e9' has expired"):
         mcp_server._resolve_locator(connection, target="e9")
+
+
+def test_clear_snapshot_refs_increments_epoch():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        snapshot_refs={"e1": 1},
+        snapshot_wids={1: "e1"},
+    )
+
+    assert connection.snapshot_epoch == 0
+    connection.clear_snapshot_refs()
+    assert connection.snapshot_epoch == 1
+    assert connection.snapshot_refs == {}
+    assert connection.snapshot_wids == {}
+    connection.clear_snapshot_refs()
+    assert connection.snapshot_epoch == 2
+
+
+def test_snapshot_payload_includes_epoch_in_result():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        snapshot_epoch=3,
+    )
+
+    payload = mcp_server._snapshot_payload(
+        connection,
+        [{"wid": 1, "class": "DemoWindow", "objectName": "", "text": "Title", "children": []}],
+    )
+
+    assert payload["epoch"] == 3
+
+
+def test_target_not_found_message_includes_epoch_for_expired_ref():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        snapshot_refs={"e1": 42},
+        snapshot_epoch=5,
+    )
+
+    message = mcp_server._target_not_found_message(connection, "e9")
+
+    assert "has expired" in message
+    assert "epoch is 5" in message
+    assert "Run snapshot to refresh refs" in message
 
 
 def test_inspect_target_uses_target_payload(monkeypatch):
@@ -2102,7 +2161,7 @@ def test_target_not_found_message_suggests_refresh_for_missing_snapshot_ref():
 
     message = mcp_server._target_not_found_message(connection, "e9")
 
-    assert "Snapshot ref 'e9' is not available" in message
+    assert "Snapshot ref 'e9' has expired" in message
     assert "Run snapshot to refresh refs" in message
 
 
