@@ -62,6 +62,7 @@ class Locator:
         parent_wid: int | None = None,
         nth_index: int | None = None,
         widget_wid: int | None = None,
+        is_last: bool = False,
         timeout: float = 30.0,
     ):
         self._conn = conn
@@ -70,6 +71,7 @@ class Locator:
         self._parent_wid = parent_wid
         self._nth_index = nth_index
         self._widget_wid = widget_wid
+        self._is_last = is_last
         self._timeout = timeout
 
     def _params(self, **extra) -> dict:
@@ -81,7 +83,13 @@ class Locator:
                 p["has_text"] = self._has_text
             if self._parent_wid is not None:
                 p["parent_wid"] = self._parent_wid
-            if self._nth_index is not None:
+            if self._is_last:
+                # Call _conn.send directly (not _send) to avoid recursion:
+                # _send → _params → _send.  We need the bare selector params
+                # without nth to count all matches, then pick the last index.
+                count = self._conn.send(METHOD_COUNT, p, timeout=self._timeout)
+                p["nth"] = max(0, count - 1)
+            elif self._nth_index is not None:
                 p["nth"] = self._nth_index
         p.update(extra)
         return p
@@ -122,12 +130,15 @@ class Locator:
         return self.nth(0)
 
     def last(self) -> Locator:
-        """Select the last matching widget — resolved at action time."""
-        # We need to know the count first
-        count = self.count()
-        if count == 0:
-            return self.nth(0)  # will raise when used
-        return self.nth(count - 1)
+        """Select the last matching widget — resolved lazily at action time."""
+        return Locator(
+            self._conn,
+            self._selector,
+            has_text=self._has_text,
+            parent_wid=self._parent_wid,
+            is_last=True,
+            timeout=self._timeout,
+        )
 
     # -- Queries (read-only) -------------------------------------------------
 
@@ -337,7 +348,9 @@ class Locator:
             parts = [f"Locator({self._selector!r}"]
         if self._has_text:
             parts.append(f", has_text={self._has_text!r}")
-        if self._nth_index is not None:
+        if self._is_last:
+            parts.append(", last")
+        elif self._nth_index is not None:
             parts.append(f", nth={self._nth_index}")
         parts.append(")")
         return "".join(parts)
