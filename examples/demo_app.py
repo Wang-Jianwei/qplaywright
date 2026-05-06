@@ -102,89 +102,56 @@ class FancyAmountEdit(QWidget):
         layout.addWidget(self.hint_label)
         layout.addWidget(self.state_label)
 
-        metadata = QPlaywrightClassMetadata()
-        metadata.role("textbox").addMethod(
-            QPlaywrightClassMethod().name("amount").returnType("QString").brief("Return the current amount string")
-        ).addMethod(
-            QPlaywrightClassMethod()
-            .name("setAmount")
-            .addArg(
-                QPlaywrightMethodArg()
-                .name("value")
-                .type("QString")
-                .brief("New amount text")
-                .required(True)
-            )
-            .returnType("void")
-            .brief("Set the current amount string")
-        ).addMethod(
-            QPlaywrightClassMethod().name("clearAmount").returnType("void").brief("Reset the amount to 0.00")
-        ).addMethod(
-            QPlaywrightClassMethod().name("currency").returnType("QString").brief("Return the active currency code")
-        ).addMethod(
-            QPlaywrightClassMethod()
-            .name("setCurrency")
-            .addArg(
-                QPlaywrightMethodArg()
-                .name("code")
-                .type("QString")
-                .brief("ISO-like currency code")
-                .required(True)
-            )
-            .returnType("void")
-            .brief("Set the active currency code")
-        ).addMethod(
-            QPlaywrightClassMethod()
-            .name("availableCurrencies")
-            .returnType("QStringList")
-            .brief("Return all supported currency codes")
-        ).addMethod(
-            QPlaywrightClassMethod().name("precision").returnType("int").brief("Return the active precision")
-        ).addMethod(
-            QPlaywrightClassMethod()
-            .name("setPrecision")
-            .addArg(
-                QPlaywrightMethodArg()
-                .name("digits")
-                .type("int")
-                .brief("Number of fractional digits")
-                .required(True)
-            )
-            .returnType("void")
-            .brief("Set the amount precision")
-        ).addMethod(
-            QPlaywrightClassMethod()
-            .name("adjustmentsEnabled")
-            .returnType("bool")
-            .brief("Return whether delta adjustments are enabled")
-        ).addMethod(
-            QPlaywrightClassMethod()
-            .name("setAdjustmentsEnabled")
-            .addArg(
-                QPlaywrightMethodArg()
-                .name("enabled")
-                .type("bool")
-                .brief("Whether delta adjustments are enabled")
-                .required(True)
-            )
-            .returnType("void")
-            .brief("Enable or disable delta adjustments")
-        ).addMethod(
-            QPlaywrightClassMethod()
-            .name("applyDelta")
-            .addArg(
-                QPlaywrightMethodArg()
-                .name("delta")
-                .type("double")
-                .brief("Increment or decrement amount by this delta")
-                .required(True)
-            )
-            .returnType("QString")
-            .brief("Apply a delta to the current amount and return the formatted amount")
-        ).addMethod(
-            QPlaywrightClassMethod().name("summary").returnType("QString").brief("Return a human-readable amount summary")
-        ).addMethod(
-            QPlaywrightClassMethod().name("snapshot").returnType("QVariant").brief("Return a structured snapshot")
+        metadata = QPlaywrightClassMetadata(
+            role="textbox",
+            methods=[
+                QPlaywrightClassMethod(name="amount", return_type="QString", brief="Return the current amount string"),
+                QPlaywrightClassMethod(
+                    name="setAmount",
+                    return_type="void",
+                    brief="Set the current amount string",
+                    args=[QPlaywrightMethodArg(name="value", type="QString", brief="New amount text", required=True)],
+                ),
+                QPlaywrightClassMethod(name="clearAmount", return_type="void", brief="Reset the amount to 0.00"),
+                QPlaywrightClassMethod(name="currency", return_type="QString", brief="Return the active currency code"),
+                QPlaywrightClassMethod(
+                    name="setCurrency",
+                    return_type="void",
+                    brief="Set the active currency code",
+                    args=[QPlaywrightMethodArg(name="code", type="QString", brief="ISO-like currency code", required=True)],
+                ),
+                QPlaywrightClassMethod(
+                    name="availableCurrencies",
+                    return_type="QStringList",
+                    brief="Return all supported currency codes",
+                ),
+                QPlaywrightClassMethod(name="precision", return_type="int", brief="Return the active precision"),
+                QPlaywrightClassMethod(
+                    name="setPrecision",
+                    return_type="void",
+                    brief="Set the amount precision",
+                    args=[QPlaywrightMethodArg(name="digits", type="int", brief="Number of fractional digits", required=True)],
+                ),
+                QPlaywrightClassMethod(
+                    name="adjustmentsEnabled",
+                    return_type="bool",
+                    brief="Return whether delta adjustments are enabled",
+                ),
+                QPlaywrightClassMethod(
+                    name="setAdjustmentsEnabled",
+                    return_type="void",
+                    brief="Enable or disable delta adjustments",
+                    args=[QPlaywrightMethodArg(name="enabled", type="bool", brief="Whether delta adjustments are enabled", required=True)],
+                ),
+                QPlaywrightClassMethod(
+                    name="applyDelta",
+                    return_type="QString",
+                    brief="Apply a delta to the current amount and return the formatted amount",
+                    args=[QPlaywrightMethodArg(name="delta", type="double", brief="Increment or decrement amount by this delta", required=True)],
+                ),
+                QPlaywrightClassMethod(name="summary", return_type="QString", brief="Return a human-readable amount summary"),
+                QPlaywrightClassMethod(name="snapshot", return_type="QVariant", brief="Return a structured snapshot"),
+            ],
         )
         self.setProperty("qplaywrightClassMetadata", metadata)
         self._refresh_view()

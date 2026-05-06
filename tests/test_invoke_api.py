@@ -12,49 +12,35 @@ from qplaywright.sync_api._locator import Locator
 class FakeInvokeWidget:
     def __init__(self):
         self.calls: list[tuple[str, tuple]] = []
-        self._metadata = QPlaywrightClassMetadata().role("textbox")
-        self._metadata.addMethod(
-            QPlaywrightClassMethod()
-            .name("setAmount")
-            .brief("Update the current amount")
-            .returnType("QVariant")
-            .addArg(
-                QPlaywrightMethodArg()
-                .name("value")
-                .type("QString")
-                .brief("Formatted amount text")
-                .required(True)
+        self._metadata = QPlaywrightClassMetadata(role="textbox")
+        self._metadata.add_method(
+            QPlaywrightClassMethod(name="setAmount", brief="Update the current amount", return_type="QVariant")
+            .add_arg(
+                QPlaywrightMethodArg(name="value", type="QString", brief="Formatted amount text", required=True)
             )
         )
-        self._metadata.addMethod(
-            QPlaywrightClassMethod()
-            .name("summary")
-            .brief("Render a short summary")
-            .returnType("QString")
-            .addArg(
-                QPlaywrightMethodArg()
-                .name("prefix")
-                .type("QString")
-                .brief("Optional output prefix")
-                .required(False)
-                .defaultValue("")
+        self._metadata.add_method(
+            QPlaywrightClassMethod(name="summary", brief="Render a short summary", return_type="QString")
+            .add_arg(
+                QPlaywrightMethodArg(
+                    name="prefix",
+                    type="QString",
+                    brief="Optional output prefix",
+                    required=False,
+                    default_value="",
+                )
             )
         )
-        self._metadata.addMethod(
-            QPlaywrightClassMethod()
-            .name("toggle")
-            .brief("Toggle bool state")
-            .returnType("bool")
-            .addArg(
-                QPlaywrightMethodArg()
-                .name("enabled")
-                .type("bool")
-                .brief("Whether the state should be enabled")
-                .required(True)
+        self._metadata.add_method(
+            QPlaywrightClassMethod(name="toggle", brief="Toggle bool state", return_type="bool")
+            .add_arg(
+                QPlaywrightMethodArg(
+                    name="enabled", type="bool", brief="Whether the state should be enabled", required=True
+                )
             )
         )
-        self._metadata.addMethod(
-            QPlaywrightClassMethod().name("snapshot").brief("Return a structured snapshot").returnType("QVariant")
+        self._metadata.add_method(
+            QPlaywrightClassMethod(name="snapshot", brief="Return a structured snapshot", return_type="QVariant")
         )
 
     def property(self, name):

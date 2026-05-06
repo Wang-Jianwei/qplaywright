@@ -93,7 +93,7 @@ def _normalize_property_value(value):
     if isinstance(value, (bytes, bytearray)):
         return value.decode(errors="replace")
 
-    to_variant_map = getattr(value, "toVariantMap", None)
+    to_variant_map = getattr(value, "to_variant_map", None)
     if callable(to_variant_map):
         value = to_variant_map()
     to_variant_list = getattr(value, "toVariantList", None)
@@ -171,7 +171,7 @@ def _normalize_string_list(value) -> list[str]:
 def _normalize_metadata_map(value) -> dict:
     if value in (None, ""):
         return {}
-    to_variant_map = getattr(value, "toVariantMap", None)
+    to_variant_map = getattr(value, "to_variant_map", None)
     if callable(to_variant_map):
         value = to_variant_map()
     if isinstance(value, dict):

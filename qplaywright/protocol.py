@@ -6,8 +6,8 @@ Uses JSON Lines over TCP. Each message is a single JSON object followed by a new
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, asdict
-from typing import Any, overload
+from dataclasses import dataclass, field
+from typing import Any
 
 # Default port for the agent server
 DEFAULT_PORT = 19876
@@ -59,208 +59,72 @@ class Response:
         )
 
 
+@dataclass
 class QPlaywrightMethodArg:
-    def __init__(self):
-        self._name = ""
-        self._type = "QVariant"
-        self._brief = ""
-        self._required = True
-        self._default_value = MISSING
+    name: str = ""
+    type: str = "QVariant"
+    brief: str = ""
+    required: bool = True
+    default_value: Any = field(default=MISSING)
 
-    @overload
-    def name(self, value: Any = MISSING):
-        ...
+    def has_default_value(self) -> bool:
+        return self.default_value is not MISSING
 
-    @overload
-    def name(self) -> str:
-        ...
-
-    @overload
-    def name(self, value: Any) -> QPlaywrightMethodArg:
-        ...
-
-    def name(self, value: Any = MISSING):
-        if value is MISSING:
-            return self._name
-        self._name = str(value)
-        return self
-
-    @overload
-    def type(self) -> str:
-        ...
-
-    @overload
-    def type(self, value: Any) -> QPlaywrightMethodArg:
-        ...
-
-    def type(self, value: Any = MISSING):
-        if value is MISSING:
-            return self._type
-        self._type = str(value)
-        return self
-
-    @overload
-    def brief(self) -> str:
-        ...
-
-    @overload
-    def brief(self, value: Any) -> QPlaywrightMethodArg:
-        ...
-
-    def brief(self, value: Any = MISSING):
-        if value is MISSING:
-            return self._brief
-        self._brief = str(value)
-        return self
-
-    @overload
-    def required(self) -> bool:
-        ...
-
-    @overload
-    def required(self, value: Any) -> QPlaywrightMethodArg:
-        ...
-
-    def required(self, value: Any = MISSING):
-        if value is MISSING:
-            return self._required
-        self._required = bool(value)
-        return self
-
-    @overload
-    def defaultValue(self) -> Any:
-        ...
-
-    @overload
-    def defaultValue(self, value: Any) -> QPlaywrightMethodArg:
-        ...
-
-    def defaultValue(self, value: Any = MISSING):
-        if value is MISSING:
-            return None if self._default_value is MISSING else self._default_value
-        self._default_value = value
-        return self
-
-    def hasDefaultValue(self) -> bool:
-        return self._default_value is not MISSING
-
-    def toVariantMap(self) -> dict[str, Any]:
+    def to_variant_map(self) -> dict[str, Any]:
         return {
-            "name": self._name,
-            "type": self._type,
-            "brief": self._brief,
-            "required": self._required,
-            "defaultValue": None if self._default_value is MISSING else self._default_value,
+            "name": self.name,
+            "type": self.type,
+            "brief": self.brief,
+            "required": self.required,
+            "defaultValue": None if self.default_value is MISSING else self.default_value,
         }
 
 
+@dataclass
 class QPlaywrightClassMethod:
-    def __init__(self):
-        self._name = ""
-        self._args: list[QPlaywrightMethodArg] = []
-        self._return_type = "QVariant"
-        self._brief = ""
+    name: str = ""
+    return_type: str = "QVariant"
+    brief: str = ""
+    args: list[QPlaywrightMethodArg] = field(default_factory=list)
 
-    @overload
-    def name(self) -> str:
-        ...
-
-    @overload
-    def name(self, value: Any) -> QPlaywrightClassMethod:
-        ...
-
-    def name(self, value: Any = MISSING):
-        if value is MISSING:
-            return self._name
-        self._name = str(value)
-        return self
-
-    def addArg(self, arg: QPlaywrightMethodArg):
-        self._args.append(arg)
-        return self
-
-    def args(self) -> list[QPlaywrightMethodArg]:
-        return list(self._args)
-
-    @overload
-    def returnType(self) -> str:
-        ...
-
-    @overload
-    def returnType(self, value: Any) -> QPlaywrightClassMethod:
-        ...
-
-    def returnType(self, value: Any = MISSING):
-        if value is MISSING:
-            return self._return_type
-        self._return_type = str(value)
-        return self
-
-    @overload
-    def brief(self) -> str:
-        ...
-
-    @overload
-    def brief(self, value: Any) -> QPlaywrightClassMethod:
-        ...
-
-    def brief(self, value: Any = MISSING):
-        if value is MISSING:
-            return self._brief
-        self._brief = str(value)
+    def add_arg(self, arg: QPlaywrightMethodArg) -> QPlaywrightClassMethod:
+        self.args.append(arg)
         return self
 
     def signature(self) -> str:
-        return f"{self._name}({', '.join(arg.type() for arg in self._args)})"
+        return f"{self.name}({', '.join(arg.type for arg in self.args)})"
 
-    def toVariantMap(self) -> dict[str, Any]:
+    def to_variant_map(self) -> dict[str, Any]:
         return {
-            "name": self._name,
-            "args": [arg.toVariantMap() for arg in self._args],
-            "returnType": self._return_type,
-            "brief": self._brief,
+            "name": self.name,
+            "args": [arg.to_variant_map() for arg in self.args],
+            "returnType": self.return_type,
+            "brief": self.brief,
         }
 
 
+@dataclass
 class QPlaywrightClassMetadata:
-    def __init__(self):
-        self._role = ""
-        self._methods: list[QPlaywrightClassMethod] = []
+    role: str = ""
+    methods: list[QPlaywrightClassMethod] = field(default_factory=list)
 
-    @overload
-    def role(self) -> str:
-        ...
-
-    @overload
-    def role(self, value: Any) -> QPlaywrightClassMetadata:
-        ...
-
-    def role(self, value: Any = MISSING):
-        if value is MISSING:
-            return self._role
-        self._role = str(value)
+    def add_method(self, method: QPlaywrightClassMethod) -> QPlaywrightClassMetadata:
+        self.methods.append(method)
         return self
 
-    def addMethod(self, method: QPlaywrightClassMethod):
-        self._methods.append(method)
-        return self
+    def has_method(self, name: str) -> bool:
+        return any(method.name == name for method in self.methods)
 
-    def methods(self) -> list[QPlaywrightClassMethod]:
-        return list(self._methods)
-
-    def hasMethod(self, name: str) -> bool:
-        return any(method.name() == name for method in self._methods)
-
-    def findMethod(self, name: str) -> QPlaywrightClassMethod | None:
-        for method in self._methods:
-            if method.name() == name:
+    def find_method(self, name: str) -> QPlaywrightClassMethod | None:
+        for method in self.methods:
+            if method.name == name:
                 return method
         return None
 
-    def toVariantMap(self) -> dict[str, Any]:
+    def to_variant_map(self) -> dict[str, Any]:
         return {
-            "role": self._role,
-            "methods": [method.toVariantMap() for method in self._methods],
+            "role": self.role,
+            "methods": [method.to_variant_map() for method in self.methods],
         }
 
 

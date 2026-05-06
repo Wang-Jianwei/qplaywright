@@ -138,24 +138,26 @@ class FakeActionLike:
 
 
 def _metadata(*, role: str = "", methods: list[dict] | None = None) -> QPlaywrightClassMetadata:
-    metadata = QPlaywrightClassMetadata().role(role)
+    metadata = QPlaywrightClassMetadata(role=role)
     for method in methods or []:
-        builder = QPlaywrightClassMethod()
-        builder.name(method.get("name", ""))
-        builder.returnType(method.get("returnType", "QVariant"))
-        builder.brief(method.get("brief", ""))
-        for arg in method.get("args", []):
-            arg_builder = (
-                QPlaywrightMethodArg()
-                .name(arg.get("name", ""))
-                .type(arg.get("type", "QVariant"))
-                .brief(arg.get("brief", ""))
-                .required(arg.get("required", True))
+        args = [
+            QPlaywrightMethodArg(
+                name=arg.get("name", ""),
+                type=arg.get("type", "QVariant"),
+                brief=arg.get("brief", ""),
+                required=arg.get("required", True),
+                **({} if "defaultValue" not in arg else {"default_value": arg["defaultValue"]}),
             )
-            if "defaultValue" in arg:
-                arg_builder.defaultValue(arg["defaultValue"])
-            builder.addArg(arg_builder)
-        metadata.addMethod(builder)
+            for arg in method.get("args", [])
+        ]
+        metadata.add_method(
+            QPlaywrightClassMethod(
+                name=method.get("name", ""),
+                return_type=method.get("returnType", "QVariant"),
+                brief=method.get("brief", ""),
+                args=args,
+            )
+        )
     return metadata
 
 
