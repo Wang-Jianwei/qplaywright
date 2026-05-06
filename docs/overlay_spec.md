@@ -1,6 +1,6 @@
 # Overlay Visual Feedback — Canonical Specification
 
-This document is the **single source of truth** for all constants, colours, and animation parameters used by the `AutomationOverlay` / `AutomationOverlayManager` implementations in both the Python agent (`qplaywright/agent/_server.py`) and the C++ agent (`qplaywright/cpp/qplaywright_agent.h`).
+This document is the **single source of truth** for all constants, colours, and animation parameters used by the overlay implementations in both the Python agent (`qplaywright/agent/_server.py`, implemented as `_AutomationOverlay` / `_OverlayManager`) and the C++ agent (`qplaywright/cpp/qplaywright_agent.h`).
 
 When either implementation is changed, this document must be updated first and the other implementation must be aligned in the same commit.
 
