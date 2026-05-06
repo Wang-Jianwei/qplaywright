@@ -66,7 +66,7 @@ def main():
         print(f"dialog-shot={dialog_shot}")
 
         dialog.locator("#dialog_close_btn").click()
-        main_window.wait_for_timeout(200)
+        main_window.wait_for_timeout(0.2)
 
         titles_closed = _window_titles(app)
         assert len(titles_closed) == 1, titles_closed
