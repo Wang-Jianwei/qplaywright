@@ -1347,7 +1347,7 @@ private:
                 painter.setPen(QPen(QColor(140, 228, 255, 135), 1));
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(badgeRect, kOverlayBadgeRadius, kOverlayBadgeRadius);
-                painter.setPen(QColor(255, 255, 255, 210));
+                painter.setPen(QColor(255, 255, 255, 230));
                 painter.drawText(badgeRect.adjusted(9, 0, -9, 0), Qt::AlignVCenter | Qt::AlignLeft, layout.badgeText);
             }
 
