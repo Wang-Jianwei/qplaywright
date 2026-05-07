@@ -829,13 +829,45 @@ Leave these surfaces alone unless a concrete blocker proves otherwise:
 
 If any of those files end up needing changes, document the reason explicitly in the implementation PR or follow-up design note rather than letting scope drift silently.
 
+### Ready-to-Implement Checklist
+
+Use this as the short version when starting the actual coding work.
+
+1. Add `item_*` method constants in [qplaywright/protocol.py](../qplaywright/protocol.py).
+2. Add `ItemLocator` and `Locator.cell()` in [qplaywright/sync_api/_locator.py](../qplaywright/sync_api/_locator.py).
+3. Add a new Python test module for item-view behavior before implementing agent logic.
+4. Implement Python table-cell dispatch and helpers in [qplaywright/agent/_server.py](../qplaywright/agent/_server.py).
+5. Validate the narrow Python test slice until green.
+6. Mirror the same protocol and failure behavior in [qplaywright/cpp/qplaywright_agent.h](../qplaywright/cpp/qplaywright_agent.h).
+7. Only after code and tests are green, add README examples.
+
+### Risk Hotspots
+
+These are the places most likely to cause subtle regressions or Python/C++ parity drift.
+
+#### 1. View-order vs source-model order
+
+All row resolution in this issue is defined against the current view state after sorting and filtering. Accidentally resolving against the source model will produce correct-looking but semantically wrong behavior.
+
+#### 2. Viewport-local vs widget-local coordinates
+
+Item rectangles belong to the item-view viewport. If pointer actions are sent relative to the outer table/tree widget instead of the viewport, clicks and hovers will miss their target.
+
+#### 3. Hidden or non-materialized visual rectangles
+
+Some model indexes exist but do not currently map to a usable visible rectangle. Hidden columns, collapsed ancestors, and off-screen items must not degrade into fallback clicks on the owner widget.
+
+#### 4. Header-name ambiguity
+
+Header text lookup is a convenience API. Duplicate visible header labels must fail explicitly, or callers will get unstable targeting that depends on incidental column ordering.
+
 ## Acceptance Criteria
 
 This issue is complete only when all of the following are true:
 
 1. A user can resolve a table cell from a table locator by row and column.
 2. A user can resolve a table cell by header name.
-3. Table row resolution is defined against current view order after sorting and filtering.
+3. Table cell row resolution is defined against current view order after sorting and filtering.
 4. A user can resolve a tree node from a tree locator by structured path.
 5. Table cells and tree nodes support `text_content()`, `bounding_box()`, and pointer actions.
 6. Pointer actions scroll items into view when possible and fail explicitly when no usable visual rectangle exists.
