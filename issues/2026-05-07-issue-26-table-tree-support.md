@@ -861,6 +861,52 @@ Some model indexes exist but do not currently map to a usable visible rectangle.
 
 Header text lookup is a convenience API. Duplicate visible header labels must fail explicitly, or callers will get unstable targeting that depends on incidental column ordering.
 
+### GitHub Issue Short Draft
+
+Use this section when the long design document is too heavy and a short issue comment or updated issue body is needed.
+
+#### Short summary
+
+The repository already supports `role=table` and `role=tree` at the widget level, but it does not support first-class automation of table cells or tree nodes.
+
+The missing piece is not selector mapping. The missing piece is a structured item-view automation layer over Qt item views.
+
+#### Proposed scope
+
+- add `ItemLocator` as a non-widget target type
+- Phase 1: support table cells only
+- Phase 2: support tree nodes and expand/collapse
+- keep `widget_tree()` widget-only
+- keep selector grammar unchanged
+- keep MCP unchanged in Phase 1
+
+#### Key contract points
+
+- item targets are resolved fresh on each request from explicit descriptors
+- table row resolution follows current view order after sorting/filtering
+- pointer actions scroll into view first and fail if no usable visible rectangle exists
+- duplicate header text fails explicitly
+- Python and C++ agents must implement the same protocol shape and failure behavior
+
+#### Immediate implementation plan
+
+1. add `item_*` protocol methods
+2. add `ItemLocator` and `Locator.cell()`
+3. add Python item-view tests
+4. implement Python table-cell support
+5. mirror the same behavior in the C++ agent
+
+### Implementation Preflight Checklist
+
+Run through this checklist before writing the first code patch.
+
+1. Confirm Phase 1 scope is still table cells only.
+2. Confirm no selector grammar change is planned.
+3. Confirm no MCP contract change is planned.
+4. Confirm the first new tests will live in a dedicated `tests/test_item_view_api.py` module.
+5. Confirm the first validation command will be a narrow pytest slice, not a full repo test run.
+6. Confirm Python and C++ protocol names and failure behavior will be kept identical.
+
 ## Acceptance Criteria
 
 This issue is complete only when all of the following are true:
