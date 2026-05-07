@@ -510,13 +510,6 @@ public:
         const QPlaywrightClassMethod method = preparedCall.method();
         const QVariantList orderedArgs = preparedCall.orderedArgs();
 
-        if (orderedArgs.size() > 2) {
-            return QPlaywrightInvokeResult::failure(
-                QPlaywrightInvokeErrorCode::MethodInvocationFailed,
-                QStringLiteral("First implementation supports at most 2 arguments: %1").arg(method.signature())
-            );
-        }
-
         if (method.returnType().isEmpty() || method.returnType() == QStringLiteral("void"))
             return invokeVoid(target, method, orderedArgs);
         if (method.returnType() == QStringLiteral("QString"))
@@ -537,16 +530,104 @@ public:
     }
 
 private:
+    // Typed storage for converting QVariant arguments before passing to invokeMethod.
+    // Each supported type gets its own fixed-size array (up to Qt's 9-arg limit) so that
+    // QGenericArgument pointers remain stable across multiple convert() calls.
+    struct ArgStorage {
+        static const int MAX_ARGS = 9;
+        QString  strStore[MAX_ARGS];
+        QVariant varStore[MAX_ARGS];
+        int      intStore[MAX_ARGS];
+        bool     boolStore[MAX_ARGS];
+        double   dblStore[MAX_ARGS];
+        int stringIndex, variantIndex, intIndex, boolIndex, doubleIndex;
+
+        ArgStorage() : stringIndex(0), variantIndex(0), intIndex(0), boolIndex(0), doubleIndex(0) {}
+
+        // Convert one (typeName, value) pair and return a stable QGenericArgument.
+        // Unknown type names fall back to QVariant so the invokeMethod call can
+        // still succeed when the method is declared with QVariant parameters.
+        QGenericArgument convert(const QString &typeName, const QVariant &value)
+        {
+            if (typeName == QStringLiteral("QString"))  { strStore[stringIndex]    = value.toString();  return Q_ARG(QString,  strStore[stringIndex++]);  }
+            if (typeName == QStringLiteral("int"))      { intStore[intIndex]       = value.toInt();     return Q_ARG(int,      intStore[intIndex++]);     }
+            if (typeName == QStringLiteral("bool"))     { boolStore[boolIndex]     = value.toBool();    return Q_ARG(bool,     boolStore[boolIndex++]);   }
+            if (typeName == QStringLiteral("double"))   { dblStore[doubleIndex]    = value.toDouble();  return Q_ARG(double,   dblStore[doubleIndex++]);  }
+            /* QVariant or any other declared type */    varStore[variantIndex]    = value;             return Q_ARG(QVariant, varStore[variantIndex++]);
+        }
+    };
+
+    // Build generic args from declared types + runtime values, then call invokeMethod.
+    // Supports 0–9 arguments (Qt's hard limit). Returns false for >9 args.
     static bool invokeNoReturn(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args)
     {
         const QByteArray methodName = method.name().toLatin1();
-        if (args.isEmpty())
+        const QVector<QPlaywrightMethodArg> &decl = method.args();
+        const int n = args.size();
+
+        if (n == 0)
             return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection);
-        if (args.size() == 1)
-            return invokeNoReturnOneArg(target, methodName, method.args().at(0).type(), args.at(0));
-        if (args.size() == 2)
-            return invokeNoReturnTwoArgs(target, methodName, method.args(), args);
-        return false;
+
+        ArgStorage s;
+        QGenericArgument g[9];
+        const int bounded = qMin(n, qMin(static_cast<int>(decl.size()), 9));
+        for (int i = 0; i < bounded; ++i)
+            g[i] = s.convert(decl.at(i).type(), args.at(i));
+
+        switch (bounded) {
+        case 1: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, g[0]);
+        case 2: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, g[0], g[1]);
+        case 3: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, g[0], g[1], g[2]);
+        case 4: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, g[0], g[1], g[2], g[3]);
+        case 5: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, g[0], g[1], g[2], g[3], g[4]);
+        case 6: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, g[0], g[1], g[2], g[3], g[4], g[5]);
+        case 7: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, g[0], g[1], g[2], g[3], g[4], g[5], g[6]);
+        case 8: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
+        case 9: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], g[8]);
+        default: return false;
+        }
+    }
+
+    template <typename ReturnArg>
+    static bool invokeWithReturn(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args, ReturnArg returnArg)
+    {
+        const QByteArray methodName = method.name().toLatin1();
+        const QVector<QPlaywrightMethodArg> &decl = method.args();
+        const int n = args.size();
+
+        if (n == 0)
+            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg);
+
+        ArgStorage s;
+        QGenericArgument g[9];
+        const int bounded = qMin(n, qMin(static_cast<int>(decl.size()), 9));
+        for (int i = 0; i < bounded; ++i)
+            g[i] = s.convert(decl.at(i).type(), args.at(i));
+
+        switch (bounded) {
+        case 1: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, g[0]);
+        case 2: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, g[0], g[1]);
+        case 3: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, g[0], g[1], g[2]);
+        case 4: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, g[0], g[1], g[2], g[3]);
+        case 5: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, g[0], g[1], g[2], g[3], g[4]);
+        case 6: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, g[0], g[1], g[2], g[3], g[4], g[5]);
+        case 7: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, g[0], g[1], g[2], g[3], g[4], g[5], g[6]);
+        case 8: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
+        case 9: return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], g[8]);
+        default: return false;
+        }
+    }
+
+    template <typename TValue>
+    static QPlaywrightInvokeResult buildReturnResult(bool ok, const QPlaywrightClassMethod &method, const TValue &value)
+    {
+        if (!ok) {
+            return QPlaywrightInvokeResult::failure(
+                QPlaywrightInvokeErrorCode::MethodInvocationFailed,
+                QStringLiteral("invokeMethod failed: %1").arg(method.signature())
+            );
+        }
+        return QPlaywrightInvokeResult::success(QVariant::fromValue(value));
     }
 
     static QPlaywrightInvokeResult invokeVoid(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args)
@@ -588,129 +669,6 @@ private:
     {
         double value = 0.0;
         return buildReturnResult(invokeWithReturn(target, method, args, Q_RETURN_ARG(double, value)), method, value);
-    }
-
-    template <typename ReturnArg>
-    static bool invokeWithReturn(QObject *target, const QPlaywrightClassMethod &method, const QVariantList &args, ReturnArg returnArg)
-    {
-        const QByteArray methodName = method.name().toLatin1();
-        if (args.isEmpty())
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg);
-        if (args.size() == 1)
-            return invokeWithReturnOneArg(target, methodName, returnArg, method.args().at(0).type(), args.at(0));
-        if (args.size() == 2)
-            return invokeWithReturnTwoArgs(target, methodName, returnArg, method.args(), args);
-        return false;
-    }
-
-    template <typename TValue>
-    static QPlaywrightInvokeResult buildReturnResult(bool ok, const QPlaywrightClassMethod &method, const TValue &value)
-    {
-        if (!ok) {
-            return QPlaywrightInvokeResult::failure(
-                QPlaywrightInvokeErrorCode::MethodInvocationFailed,
-                QStringLiteral("invokeMethod failed: %1").arg(method.signature())
-            );
-        }
-        return QPlaywrightInvokeResult::success(QVariant::fromValue(value));
-    }
-
-    static bool invokeNoReturnOneArg(QObject *target, const QByteArray &methodName, const QString &declaredType, const QVariant &value)
-    {
-        if (declaredType == QStringLiteral("QString")) {
-            const QString converted = value.toString();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(QString, converted));
-        }
-        if (declaredType == QStringLiteral("QVariant")) {
-            const QVariant converted = value;
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(QVariant, converted));
-        }
-        if (declaredType == QStringLiteral("int")) {
-            const int converted = value.toInt();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(int, converted));
-        }
-        if (declaredType == QStringLiteral("bool")) {
-            const bool converted = value.toBool();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(bool, converted));
-        }
-        if (declaredType == QStringLiteral("double")) {
-            const double converted = value.toDouble();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(double, converted));
-        }
-        return false;
-    }
-
-    static bool invokeNoReturnTwoArgs(QObject *target, const QByteArray &methodName, const QVector<QPlaywrightMethodArg> &declaredArgs, const QVariantList &values)
-    {
-        const QString firstType = declaredArgs.at(0).type();
-        const QString secondType = declaredArgs.at(1).type();
-
-        if (firstType == QStringLiteral("int") && secondType == QStringLiteral("int")) {
-            const int first = values.at(0).toInt();
-            const int second = values.at(1).toInt();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(int, first), Q_ARG(int, second));
-        }
-        if (firstType == QStringLiteral("QString") && secondType == QStringLiteral("QString")) {
-            const QString first = values.at(0).toString();
-            const QString second = values.at(1).toString();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(QString, first), Q_ARG(QString, second));
-        }
-        if (firstType == QStringLiteral("QVariant") && secondType == QStringLiteral("QVariant")) {
-            const QVariant first = values.at(0);
-            const QVariant second = values.at(1);
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, Q_ARG(QVariant, first), Q_ARG(QVariant, second));
-        }
-        return false;
-    }
-
-    template <typename ReturnArg>
-    static bool invokeWithReturnOneArg(QObject *target, const QByteArray &methodName, ReturnArg returnArg, const QString &declaredType, const QVariant &value)
-    {
-        if (declaredType == QStringLiteral("QString")) {
-            const QString converted = value.toString();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(QString, converted));
-        }
-        if (declaredType == QStringLiteral("QVariant")) {
-            const QVariant converted = value;
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(QVariant, converted));
-        }
-        if (declaredType == QStringLiteral("int")) {
-            const int converted = value.toInt();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(int, converted));
-        }
-        if (declaredType == QStringLiteral("bool")) {
-            const bool converted = value.toBool();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(bool, converted));
-        }
-        if (declaredType == QStringLiteral("double")) {
-            const double converted = value.toDouble();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(double, converted));
-        }
-        return false;
-    }
-
-    template <typename ReturnArg>
-    static bool invokeWithReturnTwoArgs(QObject *target, const QByteArray &methodName, ReturnArg returnArg, const QVector<QPlaywrightMethodArg> &declaredArgs, const QVariantList &values)
-    {
-        const QString firstType = declaredArgs.at(0).type();
-        const QString secondType = declaredArgs.at(1).type();
-
-        if (firstType == QStringLiteral("int") && secondType == QStringLiteral("int")) {
-            const int first = values.at(0).toInt();
-            const int second = values.at(1).toInt();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(int, first), Q_ARG(int, second));
-        }
-        if (firstType == QStringLiteral("QString") && secondType == QStringLiteral("QString")) {
-            const QString first = values.at(0).toString();
-            const QString second = values.at(1).toString();
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(QString, first), Q_ARG(QString, second));
-        }
-        if (firstType == QStringLiteral("QVariant") && secondType == QStringLiteral("QVariant")) {
-            const QVariant first = values.at(0);
-            const QVariant second = values.at(1);
-            return QMetaObject::invokeMethod(target, methodName.constData(), Qt::DirectConnection, returnArg, Q_ARG(QVariant, first), Q_ARG(QVariant, second));
-        }
-        return false;
     }
 };
 
@@ -1389,7 +1347,7 @@ private:
                 painter.setPen(QPen(QColor(140, 228, 255, 135), 1));
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(badgeRect, kOverlayBadgeRadius, kOverlayBadgeRadius);
-                painter.setPen(QColor(255, 255, 255, 210));
+                painter.setPen(QColor(255, 255, 255, 230));
                 painter.drawText(badgeRect.adjusted(9, 0, -9, 0), Qt::AlignVCenter | Qt::AlignLeft, layout.badgeText);
             }
 
@@ -2702,6 +2660,8 @@ private:
             Qt::NoModifier
         );
 #endif
+        QApplication::sendEvent(target, &event);
+        QApplication::processEvents();
     }
 
     void selectOption(QWidget *w, const QJsonObject &params)

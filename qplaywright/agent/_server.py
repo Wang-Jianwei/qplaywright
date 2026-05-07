@@ -21,6 +21,7 @@ import socket
 import struct
 import threading
 import time
+import weakref
 from concurrent.futures import Future
 from typing import Any
 
@@ -96,6 +97,7 @@ _QtCore = None
 _QtGui = None
 _QtTest = None
 _QApplication = None
+_QPointF = None
 _VISUAL_FEEDBACK_ENABLED = False
 _AUTOMATION_OVERLAY_OBJECT_NAME = "_qplaywright_automation_overlay"
 _AUTOMATION_OVERLAY_PROPERTY = "qplaywrightAutomationOverlay"
@@ -110,6 +112,10 @@ _OVERLAY_MANAGER = None
 _OverlayManagerClass = None
 _SESSION_AGENT_NAMES: dict[str, str] = {}
 _ACTIVE_SESSION_ID: str | None = None
+# Reentrancy guard: set to True while a CommandEvent is being handled on the Qt
+# main thread.  Only ever read/written from the main thread (customEvent is
+# always called there), so no lock is needed.
+_executing_command: bool = False
 
 
 def _active_session_agent_name() -> str:
@@ -169,7 +175,7 @@ def _remove_session_agent_name(session_id: str) -> None:
 
 
 def _import_qt():
-    global _QtWidgets, _QtCore, _QtGui, _QtTest, _QApplication
+    global _QtWidgets, _QtCore, _QtGui, _QtTest, _QApplication, _QPointF
     if _QtWidgets is not None:
         return
 
@@ -184,6 +190,11 @@ def _import_qt():
             except ImportError:
                 _QtTest = None
             _QApplication = _QtWidgets.QApplication
+            _QPointF = getattr(_QtCore, "QPointF", None)
+            if _QPointF is None:
+                _QPointF = getattr(_QtGui, "QPointF", None)
+            if _QPointF is None:
+                raise ImportError(f"QPointF not found in {pkg}.QtCore or {pkg}.QtGui")
             logger.info("Using Qt binding: %s", pkg)
             return
         except ImportError:
@@ -726,11 +737,17 @@ def _move_visual_cursor_to_widget(widget, *, pulse_count: int = 0) -> None:
 # --------------------------------------------------------------------------- #
 
 class _WidgetRegistry:
-    """Maps widgets ↔ integer IDs so the client can reference them."""
+    """Maps widgets ↔ integer IDs so the client can reference them.
+
+    Uses weakref to avoid keeping widgets alive and to detect when a widget
+    has been garbage-collected.  If a widget is GC'd and a new object reuses
+    its memory address, the stale entry is evicted before the new widget is
+    registered.
+    """
 
     def __init__(self):
-        self._w2id: dict[int, int] = {}   # id(widget) → wid
-        self._id2w: dict[int, Any] = {}   # wid → widget (weak-ish via id)
+        self._w2id: dict[int, int] = {}
+        self._id2w: dict[int, tuple[weakref.ref, int]] = {}
         self._next = 1
         self._lock = threading.Lock()
 
@@ -738,16 +755,40 @@ class _WidgetRegistry:
         key = id(widget)
         with self._lock:
             if key in self._w2id:
-                return self._w2id[key]
+                wid = self._w2id[key]
+                entry = self._id2w.get(wid)
+                if entry is not None:
+                    ref, _stored_key = entry
+                    if ref() is widget:
+                        return wid
+                    self._remove_entry(wid, _stored_key)
             wid = self._next
             self._next += 1
+            ref = weakref.ref(widget, lambda _ref: self._on_ref_cleared(key, wid))
             self._w2id[key] = wid
-            self._id2w[wid] = widget
+            self._id2w[wid] = (ref, key)
             return wid
 
     def get(self, wid: int):
         with self._lock:
-            return self._id2w.get(wid)
+            entry = self._id2w.get(wid)
+            if entry is None:
+                return None
+            ref, _key = entry
+            widget = ref()
+            if widget is None:
+                self._remove_entry(wid, _key)
+                return None
+            return widget
+
+    def _on_ref_cleared(self, key: int, wid: int):
+        with self._lock:
+            self._w2id.pop(key, None)
+            self._id2w.pop(wid, None)
+
+    def _remove_entry(self, wid: int, key: int):
+        self._w2id.pop(key, None)
+        self._id2w.pop(wid, None)
 
     def clear(self):
         with self._lock:
@@ -829,14 +870,28 @@ def _create_dispatcher():
             self._call_event_type = _CALL_EVENT_TYPE
 
         def customEvent(self, event):
+            global _executing_command
             if event.type() == self._cmd_event_type:
                 req = event.request
                 fut = event.future
+                if _executing_command:
+                    # Re-post the event so it is processed after the current command
+                    # finishes, preventing re-entrant command execution during
+                    # processEvents() calls inside _handle_command.
+                    logger.debug(
+                        "Re-entrant CommandEvent detected (method=%r); deferring until current command completes.",
+                        req.method,
+                    )
+                    _QApplication.postEvent(self, CommandEvent(req, fut))
+                    return
+                _executing_command = True
                 try:
                     result = _handle_command(req)
                     fut.set_result(result)
                 except Exception as exc:
                     fut.set_exception(exc)
+                finally:
+                    _executing_command = False
             elif event.type() == self._call_event_type:
                 callback = event.callback
                 fut = event.future
@@ -1337,12 +1392,9 @@ def _handle_command(req: Request) -> Any:
 #  Action helpers                                                              #
 # --------------------------------------------------------------------------- #
 
-def _process_events(ms: int = 10):
+def _process_events():
     """Process pending Qt events."""
     _QApplication.processEvents()
-    if ms > 0:
-        # Give the event loop a moment
-        _QApplication.processEvents()
 
 
 def _primary_event_target(widget):
@@ -1561,9 +1613,8 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
         )
     except TypeError:
-        from PySide6.QtCore import QPointF
-        pos_f = QPointF(pos)
-        global_f = QPointF(global_pos)
+        pos_f = _QPointF(pos)
+        global_f = _QPointF(global_pos)
         press = QMouseEvent(
             QEvent.Type.MouseButtonPress, pos_f, global_f,
             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
@@ -1584,7 +1635,7 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
             )
         except TypeError:
             dbl = QMouseEvent(
-                QEvent.Type.MouseButtonDblClick, QPointF(pos), QPointF(global_pos),
+                QEvent.Type.MouseButtonDblClick, _QPointF(pos), _QPointF(global_pos),
                 Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
             )
         _QApplication.postEvent(widget, dbl)
@@ -1655,9 +1706,8 @@ def _hover_widget(widget, pos):
             Qt.NoButton, Qt.NoButton, Qt.NoModifier,
         )
     except TypeError:
-        from PySide6.QtCore import QPointF
         move = QMouseEvent(
-            QEvent.Type.MouseMove, QPointF(pos), QPointF(global_pos),
+            QEvent.Type.MouseMove, _QPointF(pos), _QPointF(global_pos),
             Qt.NoButton, Qt.NoButton, Qt.NoModifier,
         )
 
@@ -1726,9 +1776,9 @@ def _scroll_widget(widget, delta_x: int = 0, delta_y: int = 0):
     global_pos = target.mapToGlobal(center)
 
     try:
-        from PySide6.QtCore import QPointF, QPoint
+        QPoint = _QtCore.QPoint
         event = QWheelEvent(
-            QPointF(center), QPointF(global_pos),
+            _QPointF(center), _QPointF(global_pos),
             QPoint(delta_x, delta_y),   # pixelDelta
             QPoint(delta_x, delta_y),   # angleDelta
             Qt.NoButton, Qt.NoModifier,

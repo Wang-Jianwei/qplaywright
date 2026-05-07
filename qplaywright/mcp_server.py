@@ -302,6 +302,7 @@ class ManagedConnection:
     active_window_wid: int | None = None
     snapshot_refs: dict[str, int] = field(default_factory=dict)
     snapshot_wids: dict[int, str] = field(default_factory=dict)
+    snapshot_epoch: int = 0
 
     def close(self) -> None:
         with contextlib.suppress(Exception):
@@ -312,6 +313,7 @@ class ManagedConnection:
     def clear_snapshot_refs(self) -> None:
         self.snapshot_refs.clear()
         self.snapshot_wids.clear()
+        self.snapshot_epoch += 1
 
 
 @dataclass
@@ -864,7 +866,7 @@ def _target_not_found_message(connection: ManagedConnection, target: str | None,
     candidate = (target or element or "").strip()
     if candidate and _SNAPSHOT_REF_PATTERN.match(candidate) and candidate not in connection.snapshot_refs:
         return (
-            f"No widget found for target {candidate!r}. Snapshot ref {candidate!r} is not available in the current session. "
+            f"Snapshot ref {candidate!r} has expired (current snapshot epoch is {connection.snapshot_epoch}). "
             f"Run snapshot to refresh refs, or target a widget with selectors like {examples}."
         )
     if candidate:
@@ -1086,6 +1088,7 @@ def _snapshot_payload(
     return {
         "snapshot": "\n".join(lines),
         "refs": refs,
+        "epoch": connection.snapshot_epoch,
     }
 
 
