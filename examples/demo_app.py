@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QSplitter,
+    QStyledItemDelegate,
 )
 from PySide6.QtGui import QAction, QColor, QFont
 from PySide6.QtTest import QTest
@@ -586,6 +587,29 @@ class DataEntryDialog(QDialog):
         self.accept()
 
 
+class StatusComboDelegate(QStyledItemDelegate):
+    STATUS_OPTIONS = ["Active", "Inactive", "Pending", "Archived"]
+
+    def createEditor(self, parent, option, index):
+        editor = QComboBox(parent)
+        editor.setObjectName(f"status_editor_row_{index.row()}")
+        editor.setAccessibleName(f"Status editor row {index.row() + 1}")
+        editor.addItems(self.STATUS_OPTIONS)
+        return editor
+
+    def setEditorData(self, editor, index):
+        value = index.data(Qt.ItemDataRole.EditRole) or index.data(Qt.ItemDataRole.DisplayRole) or ""
+        text = str(value)
+        combo_index = editor.findText(text)
+        editor.setCurrentIndex(combo_index if combo_index >= 0 else 0)
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.currentText(), Qt.ItemDataRole.EditRole)
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+
+
 class DemoWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -711,6 +735,13 @@ class DemoWindow(QMainWindow):
         self.refresh_btn.setObjectName("toolbar_refresh")
         self.refresh_btn.clicked.connect(self._on_refresh)
         toolbar.addWidget(self.refresh_btn)
+
+        toolbar.addSeparator()
+
+        self.toolbar_show_status_editor_btn = QPushButton("Status Editor Demo")
+        self.toolbar_show_status_editor_btn.setObjectName("toolbar_show_status_editor")
+        self.toolbar_show_status_editor_btn.clicked.connect(self._open_status_editor_demo)
+        toolbar.addWidget(self.toolbar_show_status_editor_btn)
 
     def _create_status_bar(self):
         self.statusbar = QStatusBar()
@@ -883,11 +914,22 @@ class DemoWindow(QMainWindow):
         self.export_btn.clicked.connect(self._on_export)
         toolbar.addWidget(self.export_btn)
 
+        self.show_status_editor_btn = QPushButton("Show Status Editor")
+        self.show_status_editor_btn.setObjectName("show_status_editor_btn")
+        self.show_status_editor_btn.clicked.connect(self._show_selected_status_editor)
+        toolbar.addWidget(self.show_status_editor_btn)
+
+        self.hide_status_editor_btn = QPushButton("Hide Status Editor")
+        self.hide_status_editor_btn.setObjectName("hide_status_editor_btn")
+        self.hide_status_editor_btn.clicked.connect(self._hide_selected_status_editor)
+        toolbar.addWidget(self.hide_status_editor_btn)
+
         toolbar.addStretch()
         layout.addLayout(toolbar)
 
         self.data_table = QTableWidget()
         self.data_table.setObjectName("data_table")
+        self.status_delegate = StatusComboDelegate(self.data_table)
         self.data_table.setColumnCount(6)
         self.data_table.setHorizontalHeaderLabels(["ID", "Name", "Department", "Priority", "Status", "Created"])
         self.data_table.setRowCount(5)
@@ -902,6 +944,8 @@ class DemoWindow(QMainWindow):
             for col, value in enumerate([id_, name, dept, priority, status, created]):
                 item = QTableWidgetItem(value)
                 self.data_table.setItem(row, col, item)
+        self.data_table.setItemDelegateForColumn(4, self.status_delegate)
+        self.data_table.setCurrentCell(0, 4)
         self.data_table.setObjectName("data_table")
         layout.addWidget(self.data_table)
 
@@ -1059,7 +1103,16 @@ class DemoWindow(QMainWindow):
 
     def _refresh_data_status(self):
         total_rows = self.data_table.rowCount()
-        self.data_status_label.setText(f"Showing {total_rows} entr{'y' if total_rows == 1 else 'ies'}")
+        current_row = self.data_table.currentRow()
+        if current_row < 0:
+            editor_state = "editor=none"
+        else:
+            editor_name = f"status_editor_row_{current_row}"
+            live_editor = self.data_table.viewport().findChild(QComboBox, editor_name)
+            editor_state = f"editor={'open' if live_editor is not None else 'closed'} row={current_row + 1}"
+        self.data_status_label.setText(
+            f"Showing {total_rows} entr{'y' if total_rows == 1 else 'ies'} | status-column delegate uses createEditor | {editor_state}"
+        )
 
     def _on_login(self):
         username = self.username_input.text()
@@ -1190,6 +1243,35 @@ class DemoWindow(QMainWindow):
             self._log(f"[INFO] Deleted entry: {name}")
         else:
             self._log("[WARN] No entry selected for deletion")
+
+    def _open_status_editor_demo(self):
+        self.tabs.setCurrentWidget(self.tabs.findChild(QWidget, "tab_data") or self.tabs.currentWidget())
+        self._show_selected_status_editor()
+
+    def _show_selected_status_editor(self):
+        current_row = self.data_table.currentRow()
+        if current_row < 0:
+            current_row = 0
+        self.data_table.setCurrentCell(current_row, 4)
+        item = self.data_table.item(current_row, 4)
+        if item is None:
+            self._log(f"[WARN] No status item available for row {current_row + 1}")
+            return
+        self.data_table.openPersistentEditor(item)
+        self._refresh_data_status()
+        self._log(f"[INFO] Opened createEditor status combobox for row {current_row + 1}")
+
+    def _hide_selected_status_editor(self):
+        current_row = self.data_table.currentRow()
+        if current_row < 0:
+            current_row = 0
+        item = self.data_table.item(current_row, 4)
+        if item is None:
+            self._log(f"[WARN] No status item available for row {current_row + 1}")
+            return
+        self.data_table.closePersistentEditor(item)
+        self._refresh_data_status()
+        self._log(f"[INFO] Closed status combobox for row {current_row + 1}")
 
     def _on_import(self):
         self._log("[ACTION] Import triggered")
