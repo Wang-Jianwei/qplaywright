@@ -1119,6 +1119,11 @@ def _resolve_item_owner(params: dict):
 
 
 def _table_view(owner_widget):
+    _import_qt()
+    table_view_type = getattr(_QtWidgets, "QTableView", None) if _QtWidgets is not None else None
+    if table_view_type is not None and isinstance(owner_widget, table_view_type):
+        return owner_widget
+
     class_name = _widget_class_name(owner_widget)
     if class_name not in {"QTableView", "QTableWidget"}:
         raise ValueError(f"Item owner is not a supported table widget: {class_name}")

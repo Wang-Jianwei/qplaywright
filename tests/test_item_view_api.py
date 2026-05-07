@@ -686,6 +686,15 @@ class FakeApplication:
         FakeApplication.process_events_calls += 1
 
 
+class FakeQtTableViewBase:
+    pass
+
+
+class FakeDerivedTableView(FakeQtTableViewBase, FakeTableView):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, class_name="FancyOrdersTable", **kwargs)
+
+
 def _install_fake_item_view_qt(monkeypatch):
     FakeQTest.calls = []
     FakeApplication.process_events_calls = 0
@@ -708,7 +717,14 @@ def _install_fake_item_view_qt(monkeypatch):
             )
         ),
     )
-    monkeypatch.setattr(server, "_QtWidgets", SimpleNamespace(QAbstractItemView=SimpleNamespace(EnsureVisible="ensure_visible")))
+    monkeypatch.setattr(
+        server,
+        "_QtWidgets",
+        SimpleNamespace(
+            QAbstractItemView=SimpleNamespace(EnsureVisible="ensure_visible"),
+            QTableView=FakeQtTableViewBase,
+        ),
+    )
     monkeypatch.setattr(server, "_update_visual_feedback", lambda *args, **kwargs: None)
 
 
@@ -723,6 +739,23 @@ def test_handle_command_item_text_reads_table_cell(monkeypatch):
     wid = server._registry.register(table)
 
     result = server._handle_command(Request(method="item_text", params={"wid": wid, "item": {"kind": "table_cell", "row": 1, "column": 1}}))
+
+    assert result == "Bob"
+
+
+def test_handle_command_item_text_accepts_qtableview_subclass(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    table = FakeDerivedTableView(
+        rows=[["001", "Alice"], ["002", "Bob"]],
+        headers=["ID", "Name"],
+        rects={(1, 1): FakeRect(10, 20, 40, 18)},
+    )
+    wid = server._registry.register(table)
+
+    result = server._handle_command(
+        Request(method="item_text", params={"wid": wid, "item": {"kind": "table_cell", "row": 1, "column": 1}})
+    )
 
     assert result == "Bob"
 
