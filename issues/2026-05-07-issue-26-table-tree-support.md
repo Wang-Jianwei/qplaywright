@@ -743,6 +743,81 @@ When implementing this design, validate in the narrowest possible order:
 6. run any available C++ demo-level validation second
 7. update README examples only after executable validation is green
 
+### Suggested patch series
+
+To keep reviewable change slices small, implement this issue as a patch series instead of one large mixed change.
+
+Recommended sequence:
+
+1. protocol constants + sync `ItemLocator` request shaping + Python unit tests for request payloads
+2. Python agent table-cell resolution + Python item-view tests
+3. C++ agent parity for table-cell methods
+4. README example updates for table cells
+5. tree support as a separate follow-up slice
+
+This issue can stay open across that series, but each patch should leave the repository in a validated state.
+
+### Suggested validation commands
+
+The repository already declares `pytest` in the `dev` extra in [pyproject.toml](../pyproject.toml), so the Python-side validation path should stay pytest-first.
+
+Recommended narrow commands during implementation:
+
+```bash
+python -m pytest tests/test_item_view_api.py
+python -m pytest tests/test_click_api.py tests/test_custom_widget_support.py
+```
+
+Recommended broader Python confirmation once Phase 1 is green:
+
+```bash
+python -m pytest tests
+```
+
+Recommended manual demo smoke path for Phase 1:
+
+1. run `python examples/demo_app.py`
+2. attach with the sync client
+3. resolve `#data_table`
+4. read one numeric cell
+5. read one header-name cell
+6. click one visible cell and verify the action targets the cell rectangle, not the table center
+
+Recommended C++ parity confirmation after the C++ slice lands:
+
+1. build the C++ demo
+2. run the demo executable
+3. attach with the same sync client flow used for the Python demo
+4. repeat the same table-cell smoke actions
+
+### Deferred questions
+
+The following questions are intentionally deferred and should not block Phase 1 unless a concrete implementation problem forces them open.
+
+#### 1. Row-level API
+
+Deferred because row serialization and pointer targeting are still underspecified.
+
+Do not reopen this during the first cell implementation unless a hard requirement appears.
+
+#### 2. Stable tree node identity beyond text/index paths
+
+Deferred because the current issue is about first-class support, not about long-term localization-stable identity.
+
+If future consumers need stable node identity, design that as an explicit follow-up contract instead of quietly overloading text-path behavior.
+
+#### 3. Rich item editing
+
+Deferred because the first slice is about read operations, visibility, and pointer actions.
+
+Do not add `fill()`-like behavior for table cells or model items in this issue unless a specific widget class demands it and the contract is clearly designed.
+
+#### 4. MCP exposure
+
+Deferred because MCP currently works in terms of generic locators and explicit tool contracts.
+
+If table/tree item support is exposed through MCP later, design the target syntax and result shape explicitly instead of tunneling raw item descriptors through generic locator strings.
+
 ### What should not move in the first implementation
 
 Leave these surfaces alone unless a concrete blocker proves otherwise:
