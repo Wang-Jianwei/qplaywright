@@ -39,6 +39,13 @@ from qplaywright.protocol import (
     METHOD_GET_TEXT,
     METHOD_GET_VALUE,
     METHOD_GET_METHODS,
+    METHOD_ITEM_TEXT,
+    METHOD_ITEM_PROPERTIES,
+    METHOD_ITEM_VISIBLE,
+    METHOD_ITEM_BOUNDING_BOX,
+    METHOD_ITEM_CLICK,
+    METHOD_ITEM_DBLCLICK,
+    METHOD_ITEM_HOVER,
     METHOD_IS_VISIBLE,
     METHOD_IS_ENABLED,
     METHOD_IS_CHECKED,
@@ -1061,6 +1068,339 @@ def _invoke_widget_method(widget, request: dict):
         return _invoke_result_failure(_invoke_error_code(exc), str(exc))
 
 
+def _qt_display_role():
+    if _QtCore is None:
+        return 0
+    qt = getattr(_QtCore, "Qt", None)
+    if qt is None:
+        return 0
+    item_data_role = getattr(qt, "ItemDataRole", None)
+    if item_data_role is not None and hasattr(item_data_role, "DisplayRole"):
+        return item_data_role.DisplayRole
+    return getattr(qt, "DisplayRole", 0)
+
+
+def _qt_horizontal_orientation():
+    if _QtCore is None:
+        return 1
+    qt = getattr(_QtCore, "Qt", None)
+    if qt is None:
+        return 1
+    orientation = getattr(qt, "Orientation", None)
+    if orientation is not None and hasattr(orientation, "Horizontal"):
+        return orientation.Horizontal
+    return getattr(qt, "Horizontal", 1)
+
+
+def _qt_ensure_visible_hint():
+    if _QtWidgets is None:
+        return None
+    abstract_item_view = getattr(_QtWidgets, "QAbstractItemView", None)
+    if abstract_item_view is None:
+        return None
+    scroll_hint = getattr(abstract_item_view, "ScrollHint", None)
+    if scroll_hint is not None and hasattr(scroll_hint, "EnsureVisible"):
+        return scroll_hint.EnsureVisible
+    return getattr(abstract_item_view, "EnsureVisible", None)
+
+
+def _resolve_item_owner(params: dict):
+    wid = params.get("wid")
+    if wid is None:
+        raise ValueError("Item operations require wid")
+
+    owner = _registry.get(int(wid))
+    if owner is None:
+        raise ValueError(f"Widget id={wid} not found or was garbage collected")
+    return owner
+
+
+def _table_view(owner_widget):
+    class_name = _widget_class_name(owner_widget)
+    if class_name not in {"QTableView", "QTableWidget"}:
+        raise ValueError(f"Item owner is not a supported table widget: {class_name}")
+    return owner_widget
+
+
+def _table_model(owner_widget):
+    view = _table_view(owner_widget)
+    model_fn = getattr(view, "model", None)
+    if not callable(model_fn):
+        raise ValueError(f"Table widget does not expose a model: {_widget_class_name(view)}")
+    model = model_fn()
+    if model is None:
+        raise ValueError("Table widget model is not available")
+    return model
+
+
+def _call_with_optional_role(fn, *args, role=None):
+    if role is not None:
+        try:
+            return fn(*args, role)
+        except TypeError:
+            pass
+    return fn(*args)
+
+
+def _index_display_text(model, index) -> str:
+    role = _qt_display_role()
+
+    data_fn = getattr(index, "data", None)
+    if callable(data_fn):
+        value = _call_with_optional_role(data_fn, role=role)
+        return "" if value is None else str(value)
+
+    model_data = getattr(model, "data", None)
+    if callable(model_data):
+        value = _call_with_optional_role(model_data, index, role=role)
+        return "" if value is None else str(value)
+
+    return ""
+
+
+def _header_display_text(model, section: int) -> str:
+    header_data = getattr(model, "headerData", None)
+    if not callable(header_data):
+        return ""
+
+    orientation = _qt_horizontal_orientation()
+    role = _qt_display_role()
+    value = _call_with_optional_role(header_data, section, orientation, role=role)
+    return "" if value is None else str(value)
+
+
+def _selection_model(view):
+    selection_model = getattr(view, "selectionModel", None)
+    if not callable(selection_model):
+        return None
+    return selection_model()
+
+
+def _is_valid_model_index(index) -> bool:
+    if index is None:
+        return False
+    is_valid = getattr(index, "isValid", None)
+    if callable(is_valid):
+        return bool(is_valid())
+    return True
+
+
+def _resolve_table_column(owner_widget, column_or_name):
+    model = _table_model(owner_widget)
+    column_count_fn = getattr(model, "columnCount", None)
+    if not callable(column_count_fn):
+        raise ValueError("Table model does not expose columnCount()")
+    column_count = int(column_count_fn())
+
+    if isinstance(column_or_name, bool):
+        raise ValueError("Table column must be an int or str")
+
+    if isinstance(column_or_name, int):
+        if column_or_name < 0 or column_or_name >= column_count:
+            raise ValueError(f"Table column out of range: {column_or_name}")
+        return column_or_name
+
+    if not isinstance(column_or_name, str) or not column_or_name:
+        raise ValueError("Table column name must be a non-empty string")
+
+    matches = [column for column in range(column_count) if _header_display_text(model, column) == column_or_name]
+    if not matches:
+        raise ValueError(f"Table header not found: {column_or_name}")
+    if len(matches) > 1:
+        raise ValueError(f"Ambiguous table header: {column_or_name}")
+    return matches[0]
+
+
+def _resolve_table_item(owner_widget, descriptor: dict):
+    if not isinstance(descriptor, dict):
+        raise ValueError("Item descriptor must be an object")
+    if descriptor.get("kind") != "table_cell":
+        raise ValueError(f"Unsupported item kind: {descriptor.get('kind')}")
+
+    row = descriptor.get("row")
+    if isinstance(row, bool) or not isinstance(row, int):
+        raise ValueError("Table cell row must be an int")
+
+    has_numeric_column = "column" in descriptor
+    has_named_column = "columnName" in descriptor
+    if has_numeric_column == has_named_column:
+        raise ValueError("Table cell descriptor requires exactly one of column or columnName")
+
+    column_value = descriptor.get("column") if has_numeric_column else descriptor.get("columnName")
+    column = _resolve_table_column(owner_widget, column_value)
+
+    model = _table_model(owner_widget)
+    row_count_fn = getattr(model, "rowCount", None)
+    if not callable(row_count_fn):
+        raise ValueError("Table model does not expose rowCount()")
+    row_count = int(row_count_fn())
+    if row < 0 or row >= row_count:
+        raise ValueError(f"Table row out of range: {row}")
+
+    index_fn = getattr(model, "index", None)
+    if not callable(index_fn):
+        raise ValueError("Table model does not expose index()")
+    index = index_fn(row, column)
+    if not _is_valid_model_index(index):
+        raise ValueError(f"Table cell index is not valid: row={row}, column={column}")
+
+    return {
+        "kind": "table_cell",
+        "row": row,
+        "column": column,
+        "index": index,
+    }
+
+
+def _rect_is_empty(rect) -> bool:
+    if rect is None:
+        return True
+    is_empty = getattr(rect, "isEmpty", None)
+    if callable(is_empty):
+        return bool(is_empty())
+    width = getattr(rect, "width", None)
+    height = getattr(rect, "height", None)
+    width_value = int(width()) if callable(width) else int(width or 0)
+    height_value = int(height()) if callable(height) else int(height or 0)
+    return width_value <= 0 or height_value <= 0
+
+
+def _table_index_visible(owner_widget, resolved_target) -> bool:
+    view = _table_view(owner_widget)
+    column = int(resolved_target["column"])
+
+    is_column_hidden = getattr(view, "isColumnHidden", None)
+    if callable(is_column_hidden) and is_column_hidden(column):
+        return False
+
+    rect_fn = getattr(view, "visualRect", None)
+    if not callable(rect_fn):
+        raise ValueError("Table widget does not expose visualRect()")
+
+    rect = rect_fn(resolved_target["index"])
+    return not _rect_is_empty(rect)
+
+
+def _table_index_rect(owner_widget, resolved_target):
+    view = _table_view(owner_widget)
+    column = int(resolved_target["column"])
+
+    is_column_hidden = getattr(view, "isColumnHidden", None)
+    if callable(is_column_hidden) and is_column_hidden(column):
+        raise ValueError(f"Table cell is not visible because column {column} is hidden")
+
+    scroll_to = getattr(view, "scrollTo", None)
+    if callable(scroll_to):
+        hint = _qt_ensure_visible_hint()
+        if hint is None:
+            scroll_to(resolved_target["index"])
+        else:
+            scroll_to(resolved_target["index"], hint)
+
+    rect_fn = getattr(view, "visualRect", None)
+    if not callable(rect_fn):
+        raise ValueError("Table widget does not expose visualRect()")
+
+    rect = rect_fn(resolved_target["index"])
+    if _rect_is_empty(rect):
+        raise ValueError("Table cell does not have a usable visible rectangle")
+    return rect
+
+
+def _table_index_text(owner_widget, resolved_target) -> str:
+    model = _table_model(owner_widget)
+    return _index_display_text(model, resolved_target["index"])
+
+
+def _table_index_properties(owner_widget, resolved_target) -> dict[str, Any]:
+    view = _table_view(owner_widget)
+    payload = {
+        "kind": "table_cell",
+        "row": int(resolved_target["row"]),
+        "column": int(resolved_target["column"]),
+        "text": _table_index_text(owner_widget, resolved_target),
+        "selected": False,
+    }
+
+    selection_model = _selection_model(view)
+    is_selected = getattr(selection_model, "isSelected", None) if selection_model is not None else None
+    if callable(is_selected):
+        payload["selected"] = bool(is_selected(resolved_target["index"]))
+    return payload
+
+
+def _table_index_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
+    view = _table_view(owner_widget)
+    viewport = _primary_event_target(view)
+    rect = _table_index_rect(view, resolved_target)
+    top_left = rect.topLeft()
+    global_pos = viewport.mapToGlobal(top_left)
+
+    width = rect.width() if callable(getattr(rect, "width", None)) else getattr(rect, "width")
+    height = rect.height() if callable(getattr(rect, "height", None)) else getattr(rect, "height")
+    return {
+        "x": int(global_pos.x() if callable(getattr(global_pos, "x", None)) else global_pos.x),
+        "y": int(global_pos.y() if callable(getattr(global_pos, "y", None)) else global_pos.y),
+        "width": int(width),
+        "height": int(height),
+    }
+
+
+def _click_widget_at(widget, pos, *, double: bool = False):
+    _import_qt()
+    QTest = _QtTest
+    Qt = _QtCore.Qt
+
+    if not widget.isVisible():
+        raise ValueError(f"Cannot click widget of type {_widget_class_name(widget)}: event target is not visible")
+    if not widget.isEnabled():
+        raise ValueError(f"Cannot click widget of type {_widget_class_name(widget)}: event target is disabled")
+
+    if QTest and hasattr(QTest, "QTest"):
+        QTest = QTest.QTest
+
+    try:
+        widget.setFocus(Qt.MouseFocusReason)
+    except Exception:
+        widget.setFocus()
+    _process_events()
+
+    _update_visual_feedback(widget, pos, double=double)
+
+    if QTest and hasattr(QTest, "mouseClick"):
+        try:
+            if double:
+                QTest.mouseDClick(widget, Qt.LeftButton, Qt.NoModifier, pos)
+            else:
+                QTest.mouseClick(widget, Qt.LeftButton, Qt.NoModifier, pos)
+        except TypeError:
+            if double:
+                QTest.mouseDClick(widget, Qt.LeftButton)
+            else:
+                QTest.mouseClick(widget, Qt.LeftButton)
+    else:
+        _post_mouse_event(widget, pos, double=double)
+
+    _process_events()
+
+
+def _click_table_index(owner_widget, resolved_target, *, double: bool = False):
+    view = _table_view(owner_widget)
+    viewport = _primary_event_target(view)
+    rect = _table_index_rect(view, resolved_target)
+    local_pos = rect.center()
+    _click_widget_at(viewport, local_pos, double=double)
+
+
+def _hover_table_index(owner_widget, resolved_target):
+    view = _table_view(owner_widget)
+    viewport = _primary_event_target(view)
+    rect = _table_index_rect(view, resolved_target)
+    local_pos = rect.center()
+    _move_visual_cursor(viewport, local_pos)
+    _hover_widget(viewport, local_pos)
+
+
 def _key_to_qt(key_str: str):
     """Convert a Playwright-style key name to Qt key enum."""
     _import_qt()
@@ -1192,6 +1532,26 @@ def _handle_command(req: Request) -> Any:
             "height": g.height(),
         }
 
+    if method == METHOD_ITEM_TEXT:
+        owner = _resolve_item_owner(params)
+        target = _resolve_table_item(owner, params.get("item") or {})
+        return _table_index_text(owner, target)
+
+    if method == METHOD_ITEM_PROPERTIES:
+        owner = _resolve_item_owner(params)
+        target = _resolve_table_item(owner, params.get("item") or {})
+        return _table_index_properties(owner, target)
+
+    if method == METHOD_ITEM_VISIBLE:
+        owner = _resolve_item_owner(params)
+        target = _resolve_table_item(owner, params.get("item") or {})
+        return _table_index_visible(owner, target)
+
+    if method == METHOD_ITEM_BOUNDING_BOX:
+        owner = _resolve_item_owner(params)
+        target = _resolve_table_item(owner, params.get("item") or {})
+        return _table_index_bounding_box(owner, target)
+
     # -- Actions -------------------------------------------------------------
     if method == METHOD_CLICK:
         w = _resolve_one(params)
@@ -1264,6 +1624,24 @@ def _handle_command(req: Request) -> Any:
         local_pos = target.rect().center()
         _move_visual_cursor(target, local_pos)
         _hover_widget(target, local_pos)
+        return True
+
+    if method == METHOD_ITEM_CLICK:
+        owner = _resolve_item_owner(params)
+        target = _resolve_table_item(owner, params.get("item") or {})
+        _click_table_index(owner, target, double=False)
+        return True
+
+    if method == METHOD_ITEM_DBLCLICK:
+        owner = _resolve_item_owner(params)
+        target = _resolve_table_item(owner, params.get("item") or {})
+        _click_table_index(owner, target, double=True)
+        return True
+
+    if method == METHOD_ITEM_HOVER:
+        owner = _resolve_item_owner(params)
+        target = _resolve_table_item(owner, params.get("item") or {})
+        _hover_table_index(owner, target)
         return True
 
     if method == METHOD_FOCUS:

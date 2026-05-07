@@ -2116,6 +2116,30 @@ private:
             return r;
         }
 
+        if (method == "item_text") {
+            QWidget *owner = resolveItemOwner(params);
+            ResolvedTableItem target = resolveTableItem(owner, params.value("item").toObject());
+            return tableIndexText(owner, target);
+        }
+
+        if (method == "item_properties") {
+            QWidget *owner = resolveItemOwner(params);
+            ResolvedTableItem target = resolveTableItem(owner, params.value("item").toObject());
+            return tableIndexProperties(owner, target);
+        }
+
+        if (method == "item_visible") {
+            QWidget *owner = resolveItemOwner(params);
+            ResolvedTableItem target = resolveTableItem(owner, params.value("item").toObject());
+            return tableIndexVisible(owner, target);
+        }
+
+        if (method == "item_bounding_box") {
+            QWidget *owner = resolveItemOwner(params);
+            ResolvedTableItem target = resolveTableItem(owner, params.value("item").toObject());
+            return tableIndexBoundingBox(owner, target);
+        }
+
         // -- Actions --
         if (method == "click") {
             QWidget *w = resolveOne(params);
@@ -2183,6 +2207,27 @@ private:
         if (method == "hover") {
             QWidget *w = resolveOne(params);
             hoverWidget(w);
+            return true;
+        }
+
+        if (method == "item_click") {
+            QWidget *owner = resolveItemOwner(params);
+            ResolvedTableItem target = resolveTableItem(owner, params.value("item").toObject());
+            clickTableIndex(owner, target, false);
+            return true;
+        }
+
+        if (method == "item_dblclick") {
+            QWidget *owner = resolveItemOwner(params);
+            ResolvedTableItem target = resolveTableItem(owner, params.value("item").toObject());
+            clickTableIndex(owner, target, true);
+            return true;
+        }
+
+        if (method == "item_hover") {
+            QWidget *owner = resolveItemOwner(params);
+            ResolvedTableItem target = resolveTableItem(owner, params.value("item").toObject());
+            hoverTableIndex(owner, target);
             return true;
         }
 
@@ -2400,6 +2445,160 @@ private:
 
         throw std::runtime_error("No visible window found for targetless key press");
     }
+    
+    struct ResolvedTableItem
+    {
+        int row;
+        int column;
+        QModelIndex index;
+    };
+    
+    QWidget *resolveItemOwner(const QJsonObject &params)
+    {
+        if (!params.contains("wid"))
+            throw std::runtime_error("Item operations require wid");
+        
+        auto &reg = QPlaywrightRegistry::instance();
+        QWidget *owner = reg.get(params["wid"].toInt());
+        if (!owner)
+            throw std::runtime_error("Widget not found by wid");
+        return owner;
+    }
+    
+    QTableView *tableView(QWidget *owner)
+    {
+        QTableView *view = qobject_cast<QTableView *>(owner);
+        if (!view) {
+            throw std::runtime_error(
+                ("Item owner is not a supported table widget: " + QString::fromLatin1(owner->metaObject()->className())).toStdString()
+            );
+        }
+        return view;
+    }
+    
+    int resolveTableColumn(QWidget *owner, const QJsonValue &columnValue)
+    {
+        QTableView *view = tableView(owner);
+        auto *model = view->model();
+        if (!model)
+            throw std::runtime_error("Table widget model is not available");
+        
+        const int columnCount = model->columnCount();
+        if (columnValue.isDouble()) {
+            const int column = columnValue.toInt();
+            if (column < 0 || column >= columnCount)
+                throw std::runtime_error(("Table column out of range: " + QString::number(column)).toStdString());
+            return column;
+        }
+        
+        const QString columnName = columnValue.toString();
+        if (columnName.isEmpty())
+            throw std::runtime_error("Table column name must be a non-empty string");
+        
+        QVector<int> matches;
+        for (int column = 0; column < columnCount; ++column) {
+            if (model->headerData(column, Qt::Horizontal, Qt::DisplayRole).toString() == columnName)
+                matches.append(column);
+        }
+        
+        if (matches.isEmpty())
+            throw std::runtime_error(("Table header not found: " + columnName).toStdString());
+        if (matches.size() > 1)
+            throw std::runtime_error(("Ambiguous table header: " + columnName).toStdString());
+        return matches.first();
+    }
+    
+    ResolvedTableItem resolveTableItem(QWidget *owner, const QJsonObject &descriptor)
+    {
+        if (descriptor.value("kind").toString() != "table_cell")
+            throw std::runtime_error(("Unsupported item kind: " + descriptor.value("kind").toString()).toStdString());
+        if (!descriptor.contains("row") || !descriptor.value("row").isDouble())
+            throw std::runtime_error("Table cell row must be an int");
+        
+        const bool hasColumn = descriptor.contains("column");
+        const bool hasColumnName = descriptor.contains("columnName");
+        if (hasColumn == hasColumnName)
+            throw std::runtime_error("Table cell descriptor requires exactly one of column or columnName");
+        
+        QTableView *view = tableView(owner);
+        auto *model = view->model();
+        if (!model)
+            throw std::runtime_error("Table widget model is not available");
+        
+        const int row = descriptor.value("row").toInt();
+        if (row < 0 || row >= model->rowCount())
+            throw std::runtime_error(("Table row out of range: " + QString::number(row)).toStdString());
+        
+        const int column = resolveTableColumn(owner, hasColumn ? descriptor.value("column") : descriptor.value("columnName"));
+        const QModelIndex index = model->index(row, column);
+        if (!index.isValid()) {
+            throw std::runtime_error(
+                ("Table cell index is not valid: row=" + QString::number(row) + ", column=" + QString::number(column)).toStdString()
+            );
+        }
+        
+        return {row, column, index};
+    }
+    
+    QString tableIndexText(QWidget *owner, const ResolvedTableItem &target)
+    {
+        QTableView *view = tableView(owner);
+        auto *model = view->model();
+        if (!model)
+            throw std::runtime_error("Table widget model is not available");
+        return model->data(target.index, Qt::DisplayRole).toString();
+    }
+    
+    bool tableIndexVisible(QWidget *owner, const ResolvedTableItem &target)
+    {
+        QTableView *view = tableView(owner);
+        if (view->isColumnHidden(target.column))
+            return false;
+        const QRect rect = view->visualRect(target.index);
+        return !rect.isEmpty();
+    }
+    
+    QRect tableIndexRect(QWidget *owner, const ResolvedTableItem &target)
+    {
+        QTableView *view = tableView(owner);
+        if (view->isColumnHidden(target.column)) {
+            throw std::runtime_error(
+                ("Table cell is not visible because column " + QString::number(target.column) + " is hidden").toStdString()
+            );
+        }
+        
+        view->scrollTo(target.index, QAbstractItemView::EnsureVisible);
+        const QRect rect = view->visualRect(target.index);
+        if (rect.isEmpty())
+            throw std::runtime_error("Table cell does not have a usable visible rectangle");
+        return rect;
+    }
+    
+    QJsonObject tableIndexProperties(QWidget *owner, const ResolvedTableItem &target)
+    {
+        QTableView *view = tableView(owner);
+        QJsonObject payload;
+        payload["kind"] = "table_cell";
+        payload["row"] = target.row;
+        payload["column"] = target.column;
+        payload["text"] = tableIndexText(owner, target);
+        payload["selected"] = view->selectionModel() && view->selectionModel()->isSelected(target.index);
+        return payload;
+    }
+    
+    QJsonObject tableIndexBoundingBox(QWidget *owner, const ResolvedTableItem &target)
+    {
+        QTableView *view = tableView(owner);
+        QWidget *targetWidget = primaryEventTarget(view);
+        const QRect rect = tableIndexRect(owner, target);
+        const QPoint global = targetWidget->mapToGlobal(rect.topLeft());
+        QJsonObject payload;
+        payload["x"] = global.x();
+        payload["y"] = global.y();
+        payload["width"] = rect.width();
+        payload["height"] = rect.height();
+        return payload;
+    }
 
     QWidget *primaryEventTarget(QWidget *w)
     {
@@ -2566,6 +2765,31 @@ private:
             QTest::mouseClick(target, Qt::LeftButton, Qt::NoModifier, clickTarget.localPos);
         QApplication::processEvents();
     }
+    
+    void clickWidgetAt(QWidget *target, const QPoint &localPos, bool doubleClick)
+    {
+        if (!target->isVisible())
+            throw std::runtime_error("Cannot click item target: event target is not visible");
+        if (!target->isEnabled())
+            throw std::runtime_error("Cannot click item target: event target is disabled");
+        
+        target->setFocus(Qt::MouseFocusReason);
+        QApplication::processEvents();
+        updateVisualFeedback(target, localPos, doubleClick ? 2 : 1);
+        if (doubleClick)
+            QTest::mouseDClick(target, Qt::LeftButton, Qt::NoModifier, localPos);
+        else
+            QTest::mouseClick(target, Qt::LeftButton, Qt::NoModifier, localPos);
+        QApplication::processEvents();
+    }
+    
+    void clickTableIndex(QWidget *owner, const ResolvedTableItem &target, bool doubleClick)
+    {
+        QTableView *view = tableView(owner);
+        QWidget *targetWidget = primaryEventTarget(view);
+        const QRect rect = tableIndexRect(owner, target);
+        clickWidgetAt(targetWidget, rect.center(), doubleClick);
+    }
 
     void moveVisualCursorToWidget(QWidget *w, int pulseCount = 0)
     {
@@ -2664,6 +2888,37 @@ private:
         QApplication::processEvents();
     }
 
+    void hoverTableIndex(QWidget *owner, const ResolvedTableItem &target)
+    {
+        QTableView *view = tableView(owner);
+        QWidget *targetWidget = primaryEventTarget(view);
+        const QRect rect = tableIndexRect(owner, target);
+        const QPoint center = rect.center();
+        updateVisualFeedback(targetWidget, center, 0);
+        const QPoint globalPos = targetWidget->mapToGlobal(center);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QMouseEvent event(
+            QEvent::MouseMove,
+            QPointF(center),
+            QPointF(globalPos),
+            Qt::NoButton,
+            Qt::NoButton,
+            Qt::NoModifier
+        );
+#else
+        QMouseEvent event(
+            QEvent::MouseMove,
+            center,
+            globalPos,
+            Qt::NoButton,
+            Qt::NoButton,
+            Qt::NoModifier
+        );
+#endif
+        QApplication::sendEvent(targetWidget, &event);
+        QApplication::processEvents();
+    }
+
     void selectOption(QWidget *w, const QJsonObject &params)
     {
         auto *combo = qobject_cast<QComboBox *>(w);
@@ -2678,7 +2933,8 @@ private:
             combo->setCurrentIndex(params["index"].toInt());
         else if (params.contains("label")) {
             int idx = combo->findText(params["label"].toString());
-            if (idx >= 0) combo->setCurrentIndex(idx);
+            if (idx >= 0)
+                combo->setCurrentIndex(idx);
         }
         QApplication::processEvents();
     }

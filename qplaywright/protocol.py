@@ -288,6 +288,17 @@ METHOD_IS_CHECKED = "is_checked"
 METHOD_COUNT = "count"
 METHOD_BOUNDING_BOX = "bounding_box"
 
+# Item-view descendants (non-widget targets owned by table/tree widgets)
+METHOD_ITEM_TEXT = "item_text"
+METHOD_ITEM_PROPERTIES = "item_properties"
+METHOD_ITEM_VISIBLE = "item_visible"
+METHOD_ITEM_BOUNDING_BOX = "item_bounding_box"
+METHOD_ITEM_CLICK = "item_click"
+METHOD_ITEM_DBLCLICK = "item_dblclick"
+METHOD_ITEM_HOVER = "item_hover"
+METHOD_ITEM_EXPAND = "item_expand"
+METHOD_ITEM_COLLAPSE = "item_collapse"
+
 # Actions
 METHOD_CLICK = "click"
 METHOD_DBLCLICK = "dblclick"

@@ -33,10 +33,65 @@ from qplaywright.protocol import (
     METHOD_SCROLL,
     METHOD_SCREENSHOT_WIDGET,
     METHOD_WAIT_FOR,
+    METHOD_ITEM_TEXT,
+    METHOD_ITEM_PROPERTIES,
+    METHOD_ITEM_VISIBLE,
+    METHOD_ITEM_BOUNDING_BOX,
+    METHOD_ITEM_CLICK,
+    METHOD_ITEM_DBLCLICK,
+    METHOD_ITEM_HOVER,
 )
 
 if TYPE_CHECKING:
     from qplaywright.sync_api._connection import Connection
+
+
+class ItemLocator:
+    """Locator for non-widget descendants owned by a table/tree widget."""
+
+    def __init__(self, conn: Connection, owner_wid: int, item: dict[str, Any], *, timeout: float = 30.0):
+        self._conn = conn
+        self._owner_wid = owner_wid
+        self._item = dict(item)
+        self._timeout = timeout
+
+    def _params(self, **extra) -> dict[str, Any]:
+        params: dict[str, Any] = {"wid": self._owner_wid, "item": dict(self._item)}
+        params.update(extra)
+        return params
+
+    def _send(self, method: str, **extra) -> Any:
+        return self._conn.send(method, self._params(**extra), timeout=self._timeout)
+
+    def text_content(self) -> str:
+        return self._send(METHOD_ITEM_TEXT)
+
+    def inner_text(self) -> str:
+        return self.text_content()
+
+    def properties(self) -> dict[str, Any]:
+        return self._send(METHOD_ITEM_PROPERTIES)
+
+    def is_visible(self) -> bool:
+        try:
+            return self._send(METHOD_ITEM_VISIBLE)
+        except RuntimeError:
+            return False
+
+    def bounding_box(self) -> dict[str, int]:
+        return self._send(METHOD_ITEM_BOUNDING_BOX)
+
+    def click(self) -> None:
+        self._send(METHOD_ITEM_CLICK)
+
+    def dblclick(self) -> None:
+        self._send(METHOD_ITEM_DBLCLICK)
+
+    def hover(self) -> None:
+        self._send(METHOD_ITEM_HOVER)
+
+    def __repr__(self) -> str:
+        return f"ItemLocator(owner_wid={self._owner_wid}, item={self._item!r})"
 
 
 class Locator:
@@ -97,6 +152,20 @@ class Locator:
     def _send(self, method: str, **extra) -> Any:
         return self._conn.send(method, self._params(**extra), timeout=self._timeout)
 
+    def _resolve_owner_wid(self) -> int:
+        if self._widget_wid is not None:
+            return self._widget_wid
+
+        result = self._send(METHOD_FIND)
+        if result is None:
+            raise ValueError(f"Widget not found: {self._selector}")
+        return int(result["wid"])
+
+    def _item_params(self, item: dict[str, Any], **extra) -> dict[str, Any]:
+        params: dict[str, Any] = {"wid": self._resolve_owner_wid(), "item": dict(item)}
+        params.update(extra)
+        return params
+
     # -- Sub-locators --------------------------------------------------------
 
     def locator(self, selector: str, *, has_text: str | None = None) -> Locator:
@@ -112,6 +181,25 @@ class Locator:
             parent_wid=result["wid"],
             timeout=self._timeout,
         )
+
+    def cell(self, row: int, column: int | str) -> ItemLocator:
+        """Create an item locator for one table cell owned by this widget locator."""
+        if isinstance(row, bool) or not isinstance(row, int):
+            raise TypeError("row must be an int")
+
+        item: dict[str, Any] = {"kind": "table_cell", "row": row}
+        if isinstance(column, bool):
+            raise TypeError("column must be an int or str")
+        if isinstance(column, int):
+            item["column"] = column
+        elif isinstance(column, str):
+            if not column:
+                raise ValueError("column name must not be empty")
+            item["columnName"] = column
+        else:
+            raise TypeError("column must be an int or str")
+
+        return ItemLocator(self._conn, self._resolve_owner_wid(), item, timeout=self._timeout)
 
     def nth(self, index: int) -> Locator:
         """Select the nth matching widget (0-based)."""
