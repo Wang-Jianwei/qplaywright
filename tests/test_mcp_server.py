@@ -51,7 +51,12 @@ class FakeTransportConn:
         self.calls.append({"method": method, "params": params, "timeout": timeout})
         if self.error is not None:
             raise self.error
-        return self.responses.get(method, {"ok": True})
+        response = self.responses.get(method, {"ok": True})
+        if isinstance(response, list):
+            if len(response) > 1:
+                return response.pop(0)
+            return response[0]
+        return response
 
 
 class FakeWindow:
@@ -76,7 +81,7 @@ class FakeWindow:
         return self._is_modal
 
     def locator(self, target: str):
-        return FakeLocator(count=1, target=target)
+        return FakeLocator(count=1, target=target, widget_wid=101)
 
     def screenshot(self, **kwargs):
         self.screenshot_calls.append(kwargs)
@@ -84,10 +89,11 @@ class FakeWindow:
 
 
 class FakeLocator:
-    def __init__(self, *, count: int, invoke_result=None, target: str | None = None):
+    def __init__(self, *, count: int, invoke_result=None, target: str | None = None, widget_wid: int = 101):
         self._count = count
         self._invoke_result = invoke_result
         self._target = target
+        self._widget_wid = widget_wid
         self.action_calls = []
         self.wait_calls = []
         self.screenshot_calls = []
@@ -197,6 +203,16 @@ class FakeLocator:
     def screenshot(self, **kwargs):
         self.screenshot_calls.append(kwargs)
         return {"path": kwargs.get("path"), "width": 120, "height": 40}
+
+    def _resolve_owner_wid(self) -> int:
+        return self._widget_wid
+
+
+def _item_target(owner: str = "#tree") -> dict[str, object]:
+    return {
+        "owner": owner,
+        "item": {"kind": "tree_node", "path": [0, 1]},
+    }
 
 
 def test_connect_connection_replaces_existing(monkeypatch):
@@ -357,6 +373,224 @@ def test_resolve_locator_rejects_missing_snapshot_ref_with_refresh_hint():
 
     with pytest.raises(ValueError, match="Snapshot ref 'e9' has expired"):
         mcp_server._resolve_locator(connection, target="e9")
+
+
+def test_resolve_item_locator_uses_owner_locator_wid():
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(responses={"item_click": True})
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    locator = mcp_server._resolve_item_locator(connection, target=_item_target())
+    locator.click()
+
+    assert app._conn.calls == [
+        {
+            "method": "item_click",
+            "params": {"wid": 101, "item": {"kind": "tree_node", "path": [0, 1]}},
+            "timeout": 30.0,
+        }
+    ]
+
+
+def test_inspect_accepts_item_target(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(
+        responses={
+            "item_properties": {
+                "kind": "tree_node",
+                "text": "Advanced",
+                "path": ["Settings", "Advanced"],
+                "expanded": False,
+                "selected": True,
+            },
+            "item_text": "Advanced",
+            "item_visible": True,
+            "item_bounding_box": {"x": 10, "y": 20, "width": 30, "height": 12},
+        }
+    )
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    result = mcp_server.inspect(target=_item_target(), include_properties=True)
+
+    assert result["ok"] is True
+    assert result["count"] == 1
+    assert result["kind"] == "tree_node"
+    assert result["text"] == "Advanced"
+    assert result["is_visible"] is True
+    assert result["properties"]["selected"] is True
+
+
+def test_inspect_items_wraps_entries_with_reusable_targets(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(
+        responses={
+            "item_view_inspect": {
+                "kind": "tree",
+                "items": [
+                    {
+                        "item": {"kind": "tree_node", "path": [0]},
+                        "text": "Settings",
+                        "visible": True,
+                        "expanded": True,
+                    }
+                ],
+                "truncated": False,
+            }
+        }
+    )
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    result = mcp_server.inspect_items(owner="#tree", max_depth=2)
+
+    assert result == {
+        "ok": True,
+        "owner": "#tree",
+        "kind": "tree",
+        "items": [
+            {
+                "item": {"kind": "tree_node", "path": [0]},
+                "text": "Settings",
+                "visible": True,
+                "expanded": True,
+                "target": {"owner": "#tree", "item": {"kind": "tree_node", "path": [0]}},
+            }
+        ],
+        "truncated": False,
+    }
+    assert app._conn.calls[-1]["method"] == "item_view_inspect"
+
+
+def test_click_accepts_item_target(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(responses={"item_dblclick": True})
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
+
+    target = _item_target()
+    result = mcp_server.click(target=target, count=2, include_snapshot=True)
+
+    assert app._conn.calls[-1]["method"] == "item_dblclick"
+    assert result["state_target"] == target
+    assert result["snapshot_target"] == "#tree"
+
+
+def test_wait_accepts_item_target_visible_state(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(responses={"item_visible": [False, True]})
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
+
+    result = mcp_server.wait(target=_item_target(), state="visible", timeout=0.2)
+
+    assert result["state"] == "visible"
+    assert [call["method"] for call in app._conn.calls][-2:] == ["item_visible", "item_visible"]
+
+
+def test_wait_accepts_item_target_text_condition(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(responses={"item_text": ["Loading", "Ready"]})
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
+
+    result = mcp_server.wait(target=_item_target(), condition="text_contains", expected="ead", timeout=0.2)
+
+    assert result["condition"] == "text_contains"
+    assert [call["method"] for call in app._conn.calls][-2:] == ["item_text", "item_text"]
+
+
+def test_set_expanded_uses_item_expand(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(responses={"item_expand": True})
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
+
+    target = _item_target()
+    result = mcp_server.set_expanded(target=target, expanded=True)
+
+    assert app._conn.calls[-1]["method"] == "item_expand"
+    assert result["expanded"] is True
+    assert result["snapshot_target"] == "#tree"
 
 
 def test_clear_snapshot_refs_increments_epoch():

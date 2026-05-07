@@ -32,13 +32,14 @@ from qplaywright.protocol import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     METHOD_FIND,
+    METHOD_ITEM_VIEW_INSPECT,
     METHOD_LIST_WINDOWS,
     METHOD_PING,
     METHOD_PRESS,
     METHOD_WIDGET_TREE,
 )
 from qplaywright.sync_api import QPlaywright
-from qplaywright.sync_api._locator import Locator
+from qplaywright.sync_api._locator import ItemLocator, Locator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -124,6 +125,18 @@ WindowHeightArg = Annotated[
 WidgetTargetArg = Annotated[
     str,
     Field(description="Widget selector or snapshot ref target, such as #objectName, role=button, text=Submit, or e1."),
+]
+ItemTargetArg = Annotated[
+    dict[str, Any],
+    Field(description="Structured item target object: {owner: <widget selector or snapshot ref>, item: <table_cell/tree_node/list_item descriptor>}"),
+]
+UnifiedTargetArg = Annotated[
+    str | dict[str, Any],
+    Field(description="Widget selector or snapshot ref, or a structured item target object {owner, item}."),
+]
+OptionalUnifiedTargetArg = Annotated[
+    str | dict[str, Any] | None,
+    Field(description="Optional widget target or structured item target. Omit to inspect the active window when the tool supports it."),
 ]
 OptionalWidgetTargetArg = Annotated[
     str | None,
@@ -257,6 +270,26 @@ DeltaXArg = Annotated[
 DeltaYArg = Annotated[
     int,
     Field(description="Vertical mouse wheel delta to send to the matched widget."),
+]
+ExpandedArg = Annotated[
+    bool,
+    Field(description="Whether the targeted tree node item should be expanded (true) or collapsed (false)."),
+]
+InspectItemsMaxRowsArg = Annotated[
+    int,
+    Field(description="Maximum number of table or list rows to enumerate."),
+]
+InspectItemsMaxDepthArg = Annotated[
+    int,
+    Field(description="Maximum tree depth to enumerate when inspecting tree items."),
+]
+InspectItemsMaxItemsArg = Annotated[
+    int,
+    Field(description="Maximum number of item entries to return."),
+]
+IncludeHiddenItemsArg = Annotated[
+    bool,
+    Field(description="When true, include hidden or collapsed item-view descendants when the backend can resolve them."),
 ]
 
 try:
@@ -742,6 +775,45 @@ def _resolve_locator(
     return window.locator(target)
 
 
+def _is_item_target(target: Any) -> bool:
+    return isinstance(target, dict) and "owner" in target and "item" in target
+
+
+def _normalize_item_target(target: Any) -> dict[str, Any]:
+    if not _is_item_target(target):
+        raise ValueError("item target must be an object with owner and item keys")
+
+    owner = target.get("owner")
+    item = target.get("item")
+    if not isinstance(owner, str) or not owner.strip():
+        raise ValueError("item target owner must be a non-empty widget selector or snapshot ref")
+    if not isinstance(item, dict):
+        raise ValueError("item target item must be an object descriptor")
+    return {"owner": owner, "item": dict(item)}
+
+
+def _target_owner_target(target: str | dict[str, Any] | None) -> str | None:
+    if target is None:
+        return None
+    if isinstance(target, str):
+        return target
+    return _normalize_item_target(target)["owner"]
+
+
+def _resolve_item_locator(
+    connection: ManagedConnection,
+    *,
+    target: dict[str, Any],
+) -> ItemLocator:
+    normalized = _normalize_item_target(target)
+    owner_locator = _resolve_locator(connection, target=normalized["owner"])
+    resolve_owner_wid = getattr(owner_locator, "_resolve_owner_wid", None)
+    if not callable(resolve_owner_wid):
+        raise RuntimeError("Resolved owner locator does not expose owner widget resolution")
+    owner_wid = int(resolve_owner_wid())
+    return ItemLocator(connection.app._conn, owner_wid, normalized["item"], timeout=connection.timeout)
+
+
 def _inspect_locator(
     locator: Any,
     *,
@@ -817,6 +889,62 @@ def _inspect_locator(
     return result
 
 
+def _inspect_item_locator(
+    locator: ItemLocator,
+    *,
+    property_name: str | None = None,
+    include_methods: bool = False,
+    include_properties: bool = False,
+) -> dict[str, Any]:
+    try:
+        properties = locator.properties()
+    except Exception:
+        return {"exists": False, "count": 0}
+
+    result: dict[str, Any] = {
+        "exists": True,
+        "count": 1,
+        "kind": properties.get("kind") or locator._item.get("kind"),
+    }
+
+    for key in ("text", "row", "column", "path", "selected", "expanded"):
+        value = properties.get(key)
+        if value is None or value == "":
+            continue
+        result[key] = value
+
+    try:
+        text_content = locator.text_content()
+    except Exception:
+        text_content = properties.get("text")
+    if text_content not in (None, ""):
+        result["text"] = text_content
+        result["all_text_contents"] = [text_content]
+
+    visible = locator.is_visible()
+    result["is_visible"] = visible
+
+    try:
+        bounding_box = locator.bounding_box()
+    except Exception:
+        bounding_box = None
+    if bounding_box:
+        result["bounding_box"] = bounding_box
+        result["globalBoundingBox"] = bounding_box
+
+    if property_name is not None:
+        result["property_name"] = property_name
+        result["property_value"] = properties.get(property_name)
+
+    if include_methods:
+        result["methods"] = []
+
+    if include_properties:
+        result["properties"] = properties
+
+    return result
+
+
 def _compact_action_state(locator: Any) -> dict[str, Any]:
     inspected = _inspect_locator(locator)
     state = {
@@ -838,6 +966,117 @@ def _compact_action_state(locator: Any) -> dict[str, Any]:
         state[target_key] = value
 
     return state
+
+
+def _compact_item_state(locator: ItemLocator) -> dict[str, Any]:
+    inspected = _inspect_item_locator(locator)
+    state = {
+        "exists": inspected["exists"],
+        "count": inspected["count"],
+    }
+
+    for source_key, target_key in (
+        ("is_visible", "visible"),
+        ("text", "text"),
+        ("expanded", "expanded"),
+        ("selected", "selected"),
+    ):
+        value = inspected.get(source_key)
+        if value is None or value == "":
+            continue
+        state[target_key] = value
+
+    return state
+
+
+def _wait_item_condition_matches(locator: ItemLocator, *, condition: str, expected: str) -> bool:
+    if condition not in {"text_equals", "text_contains"}:
+        raise ValueError("item targets only support text_equals and text_contains wait conditions")
+
+    try:
+        actual = locator.text_content()
+    except Exception:
+        return False
+
+    if actual in (None, ""):
+        return False
+
+    if condition == "text_contains":
+        return str(expected).lower() in str(actual).lower()
+    return str(actual) == str(expected)
+
+
+def _wait_for_item_locator_condition(
+    locator: ItemLocator,
+    *,
+    condition: str,
+    expected: str,
+    timeout: float,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _wait_item_condition_matches(locator, condition=condition, expected=expected):
+            return
+        time.sleep(0.05)
+    raise TimeoutError(f"Timed out waiting for {condition}={expected!r}")
+
+
+def _wait_for_item_locator_state(locator: ItemLocator, *, state: str, timeout: float) -> None:
+    if state not in {"visible", "hidden"}:
+        raise ValueError("item targets only support visible and hidden wait states")
+
+    deadline = time.monotonic() + timeout
+    want_visible = state == "visible"
+    while time.monotonic() < deadline:
+        if locator.is_visible() is want_visible:
+            return
+        time.sleep(0.05)
+    raise TimeoutError(f"Timed out waiting for state={state!r}")
+
+
+def _item_view_inspect(
+    connection: ManagedConnection,
+    *,
+    owner: str,
+    max_rows: int,
+    max_depth: int,
+    max_items: int,
+    include_hidden: bool,
+) -> dict[str, Any]:
+    owner_locator = _resolve_locator(connection, target=owner)
+    resolve_owner_wid = getattr(owner_locator, "_resolve_owner_wid", None)
+    if not callable(resolve_owner_wid):
+        raise RuntimeError("Resolved owner locator does not expose owner widget resolution")
+
+    client = getattr(connection.app, "_conn", None)
+    if client is None:
+        raise RuntimeError("Active session does not expose the raw transport required for item discovery")
+
+    payload = client.send(
+        METHOD_ITEM_VIEW_INSPECT,
+        {
+            "wid": int(resolve_owner_wid()),
+            "max_rows": max_rows,
+            "max_depth": max_depth,
+            "max_items": max_items,
+            "include_hidden": include_hidden,
+        },
+        timeout=connection.timeout,
+    )
+    if not isinstance(payload, dict):
+        raise RuntimeError("item_view_inspect returned an invalid payload")
+
+    items = []
+    for entry in payload.get("items") or []:
+        if not isinstance(entry, dict):
+            continue
+        enriched = dict(entry)
+        descriptor = enriched.get("item")
+        if isinstance(descriptor, dict):
+            enriched["target"] = {"owner": owner, "item": dict(descriptor)}
+        items.append(enriched)
+    payload["items"] = items
+    return payload
 
 
 def _invoke_locator_method(
@@ -892,11 +1131,15 @@ def _selector_help_text() -> str:
         "- #objectName\n"
         "- name=objectName\n"
         "- .QLabel\n\n"
+        "Structured item targets use the form {owner, item}, for example:\n"
+        "- {\"owner\": \"#orders_table\", \"item\": {\"kind\": \"table_cell\", \"row\": 3, \"column\": 1}}\n"
+        "- {\"owner\": \"#settings_tree\", \"item\": {\"kind\": \"tree_node\", \"path\": [0, 1]}}\n"
+        "- {\"owner\": \"#task_list\", \"item\": {\"kind\": \"list_item\", \"row\": 2}}\n\n"
         "Typical workflow:\n"
         "1. session attach or session launch\n"
         "2. window list and window select when multiple windows are visible\n"
-        "3. snapshot or inspect\n"
-        "4. click, input, set_checked, press_key, choose, screenshot, or invoke\n"
+        "3. snapshot or inspect for widgets; inspect_items for table/tree/list descendants\n"
+        "4. click, hover, wait, set_expanded, input, set_checked, press_key, choose, screenshot, or invoke\n"
         "5. session close when finished"
     )
 
@@ -1239,10 +1482,14 @@ def _observe_action_window_state(
 def _observe_action_target_state(
     managed_connection: ManagedConnection,
     *,
-    target: str,
+    target: str | dict[str, Any],
 ) -> dict[str, Any]:
-    locator = _resolve_locator(managed_connection, target=target)
-    return _compact_action_state(locator)
+    if isinstance(target, str):
+        locator = _resolve_locator(managed_connection, target=target)
+        return _compact_action_state(locator)
+
+    locator = _resolve_item_locator(managed_connection, target=target)
+    return _compact_item_state(locator)
 
 
 def _normalize_choose_selectors(
@@ -1344,7 +1591,7 @@ def _finalize_action_result(
     *,
     include_state: bool = False,
     include_snapshot: bool = False,
-    state_target: str | None = None,
+    state_target: str | dict[str, Any] | None = None,
     snapshot_target: str | None = None,
     snapshot_depth: int = 3,
     **payload: Any,
@@ -1401,8 +1648,8 @@ if FastMCP is not None:
         "qplaywright",
         instructions=(
             "Automate Qt QWidget applications through qplaywright. "
-            "Use session, window, snapshot, and inspect to discover the UI before "
-            "before performing destructive UI actions."
+            "Use session, window, snapshot, inspect, and inspect_items to discover the UI before "
+            "performing destructive UI actions."
         ),
         json_response=True,
     )
@@ -1611,7 +1858,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def inspect(
-        target: OptionalWidgetTargetArg = None,
+        target: OptionalUnifiedTargetArg = None,
         property: PropertyArg = None,
         include_methods: IncludeMethodsArg = False,
         include_properties: IncludePropertiesArg = False,
@@ -1647,13 +1894,22 @@ if FastMCP is not None:
                 result["warnings"] = warnings
             return result
 
-        locator = _resolve_locator(connection_state, target=target)
-        result = _inspect_locator(
-            locator,
-            property_name=property,
-            include_methods=include_methods,
-            include_properties=include_properties,
-        )
+        if isinstance(target, str):
+            locator = _resolve_locator(connection_state, target=target)
+            result = _inspect_locator(
+                locator,
+                property_name=property,
+                include_methods=include_methods,
+                include_properties=include_properties,
+            )
+        else:
+            locator = _resolve_item_locator(connection_state, target=target)
+            result = _inspect_item_locator(
+                locator,
+                property_name=property,
+                include_methods=include_methods,
+                include_properties=include_properties,
+            )
         return {
             "ok": True,
             "target": target,
@@ -1663,18 +1919,22 @@ if FastMCP is not None:
 
     @mcp.tool()
     def click(
-        target: WidgetTargetArg,
+        target: UnifiedTargetArg,
         count: ClickCountArg = 1,
         include_state: IncludeStateArg = False,
         include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
-        """Click or double-click the first widget matched by a target."""
+        """Click or double-click the first widget, or one structured item target."""
 
         if count not in (1, 2):
             raise ValueError("count must be 1 or 2")
 
         connection_state = _get_connection(_SERVER_STATE)
-        locator = _resolve_locator(connection_state, target=target)
+        snapshot_target = _target_owner_target(target)
+        if isinstance(target, str):
+            locator = _resolve_locator(connection_state, target=target)
+        else:
+            locator = _resolve_item_locator(connection_state, target=target)
         if count == 2:
             locator.dblclick()
         else:
@@ -1684,11 +1944,44 @@ if FastMCP is not None:
             include_state=include_state,
             include_snapshot=include_snapshot,
             state_target=target,
-            snapshot_target=target,
+            snapshot_target=snapshot_target,
             ok=True,
             count=count,
             target=target,
         )
+
+
+    @mcp.tool()
+    def inspect_items(
+        owner: WidgetTargetArg,
+        max_rows: InspectItemsMaxRowsArg = 20,
+        max_depth: InspectItemsMaxDepthArg = 4,
+        max_items: InspectItemsMaxItemsArg = 200,
+        include_hidden: IncludeHiddenItemsArg = False,
+    ) -> dict[str, Any]:
+        """Enumerate structured item-view descendants for one table, tree, or list widget."""
+
+        if max_rows < 0:
+            raise ValueError("max_rows must be >= 0")
+        if max_depth < 0:
+            raise ValueError("max_depth must be >= 0")
+        if max_items < 0:
+            raise ValueError("max_items must be >= 0")
+
+        connection_state = _get_connection(_SERVER_STATE)
+        payload = _item_view_inspect(
+            connection_state,
+            owner=owner,
+            max_rows=max_rows,
+            max_depth=max_depth,
+            max_items=max_items,
+            include_hidden=include_hidden,
+        )
+        return {
+            "ok": True,
+            "owner": owner,
+            **payload,
+        }
 
 
     @mcp.tool()
@@ -1852,7 +2145,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def wait(
-        target: WidgetTargetArg,
+        target: UnifiedTargetArg,
         state: WaitStateArg = None,
         condition: WaitConditionArg = None,
         expected: WaitExpectedArg = None,
@@ -1879,39 +2172,67 @@ if FastMCP is not None:
             normalized_expected = _normalize_wait_expected(condition, expected)
 
         connection_state = _get_connection(_SERVER_STATE)
-        locator = _resolve_locator(connection_state, target=target)
-
         effective_timeout = timeout if timeout is not None else connection_state.timeout
+        snapshot_target = _target_owner_target(target)
 
-        if condition is None:
-            locator.wait_for(state=state, timeout=timeout)
-            payload = {
-                "ok": True,
-                "target": target,
-                "state": state,
-                "timeout": timeout,
-            }
+        if isinstance(target, str):
+            locator = _resolve_locator(connection_state, target=target)
+
+            if condition is None:
+                locator.wait_for(state=state, timeout=timeout)
+                payload = {
+                    "ok": True,
+                    "target": target,
+                    "state": state,
+                    "timeout": timeout,
+                }
+            else:
+                _wait_for_locator_condition(
+                    locator,
+                    condition=condition,
+                    expected=normalized_expected,
+                    timeout=effective_timeout,
+                )
+                payload = {
+                    "ok": True,
+                    "target": target,
+                    "condition": condition,
+                    "expected": normalized_expected,
+                    "timeout": timeout,
+                }
         else:
-            _wait_for_locator_condition(
-                locator,
-                condition=condition,
-                expected=normalized_expected,
-                timeout=effective_timeout,
-            )
-            payload = {
-                "ok": True,
-                "target": target,
-                "condition": condition,
-                "expected": normalized_expected,
-                "timeout": timeout,
-            }
+            locator = _resolve_item_locator(connection_state, target=target)
+            if condition is None:
+                _wait_for_item_locator_state(locator, state=state, timeout=effective_timeout)
+                payload = {
+                    "ok": True,
+                    "target": target,
+                    "state": state,
+                    "timeout": timeout,
+                }
+            else:
+                if not isinstance(normalized_expected, str):
+                    raise ValueError("item target waits require a string expected value")
+                _wait_for_item_locator_condition(
+                    locator,
+                    condition=condition,
+                    expected=normalized_expected,
+                    timeout=effective_timeout,
+                )
+                payload = {
+                    "ok": True,
+                    "target": target,
+                    "condition": condition,
+                    "expected": normalized_expected,
+                    "timeout": timeout,
+                }
 
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
             include_snapshot=include_snapshot,
             state_target=target,
-            snapshot_target=target,
+            snapshot_target=snapshot_target,
             **payload,
         )
 
@@ -1970,23 +2291,57 @@ if FastMCP is not None:
 
     @mcp.tool()
     def hover(
-        target: WidgetTargetArg,
+        target: UnifiedTargetArg,
         include_state: IncludeStateArg = False,
         include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
-        """Hover over the first widget matched by a target."""
+        """Hover over the first widget, or one structured item target."""
 
         connection_state = _get_connection(_SERVER_STATE)
-        locator = _resolve_locator(connection_state, target=target)
+        snapshot_target = _target_owner_target(target)
+        if isinstance(target, str):
+            locator = _resolve_locator(connection_state, target=target)
+        else:
+            locator = _resolve_item_locator(connection_state, target=target)
         locator.hover()
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
             include_snapshot=include_snapshot,
             state_target=target,
-            snapshot_target=target,
+            snapshot_target=snapshot_target,
             ok=True,
             target=target,
+        )
+
+
+    @mcp.tool()
+    def set_expanded(
+        target: ItemTargetArg,
+        expanded: ExpandedArg,
+        include_state: IncludeStateArg = False,
+        include_snapshot: IncludeSnapshotArg = False,
+    ) -> dict[str, Any]:
+        """Expand or collapse one structured tree node item target."""
+
+        connection_state = _get_connection(_SERVER_STATE)
+        locator = _resolve_item_locator(connection_state, target=target)
+        snapshot_target = _target_owner_target(target)
+
+        if expanded:
+            locator.expand()
+        else:
+            locator.collapse()
+
+        return _finalize_action_result(
+            connection_state,
+            include_state=include_state,
+            include_snapshot=include_snapshot,
+            state_target=target,
+            snapshot_target=snapshot_target,
+            ok=True,
+            target=target,
+            expanded=expanded,
         )
 
 
@@ -2028,11 +2383,13 @@ _CLI_TOOL_NAMES = (
     "window",
     "snapshot",
     "inspect",
+    "inspect_items",
     "click",
     "input",
     "invoke",
     "press_key",
     "set_checked",
+    "set_expanded",
     "choose",
     "wait",
     "screenshot",

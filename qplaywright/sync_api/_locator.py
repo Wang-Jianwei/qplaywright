@@ -89,6 +89,17 @@ class ItemLocator:
     def _send(self, method: str, **extra) -> Any:
         return self._conn.send(method, self._params(**extra), timeout=self._timeout)
 
+    def _kind(self) -> str:
+        kind = self._item.get("kind")
+        return str(kind) if isinstance(kind, str) else ""
+
+    def _require_kind(self, *allowed: str, action: str) -> None:
+        kind = self._kind()
+        if kind in allowed:
+            return
+        allowed_text = ", ".join(sorted(allowed))
+        raise ValueError(f"{action}() is only supported for {allowed_text} items; got {kind or 'unknown'}")
+
     def text_content(self) -> str:
         return self._send(METHOD_ITEM_TEXT)
 
@@ -117,9 +128,11 @@ class ItemLocator:
         self._send(METHOD_ITEM_HOVER)
 
     def expand(self) -> None:
+        self._require_kind("tree_node", action="expand")
         self._send(METHOD_ITEM_EXPAND)
 
     def collapse(self) -> None:
+        self._require_kind("tree_node", action="collapse")
         self._send(METHOD_ITEM_COLLAPSE)
 
     def __repr__(self) -> str:

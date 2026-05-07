@@ -2192,6 +2192,15 @@ private:
             throw std::runtime_error(("Unsupported item kind: " + kind).toStdString());
         }
 
+        if (method == "item_view_inspect") {
+            QWidget *owner = resolveItemOwner(params);
+            const int maxRows = qMax(0, params.value("max_rows").toInt(20));
+            const int maxDepth = qMax(0, params.value("max_depth").toInt(4));
+            const int maxItems = qMax(0, params.value("max_items").toInt(200));
+            const bool includeHidden = params.value("include_hidden").toBool(false);
+            return inspectItemView(owner, maxRows, maxDepth, maxItems, includeHidden);
+        }
+
         // -- Actions --
         if (method == "click") {
             QWidget *w = resolveOne(params);
@@ -2833,6 +2842,21 @@ private:
         return path;
     }
 
+    QJsonArray treeIndexRowPath(const QModelIndex &index)
+    {
+        QVector<int> reversed;
+        QModelIndex current = index;
+        while (current.isValid()) {
+            reversed.prepend(current.row());
+            current = current.parent();
+        }
+
+        QJsonArray path;
+        for (int row : reversed)
+            path.append(row);
+        return path;
+    }
+
     QString treeIndexText(QWidget *owner, const ResolvedTreeItem &target)
     {
         QTreeView *view = treeView(owner);
@@ -3415,6 +3439,216 @@ private:
         QTreeView *view = treeView(owner);
         view->collapse(target.index);
         QApplication::processEvents();
+    }
+
+    QJsonObject inspectTableItems(QWidget *owner, int maxRows, int maxItems, bool includeHidden)
+    {
+        QTableView *view = tableView(owner);
+        auto *model = view->model();
+        if (!model)
+            throw std::runtime_error("Table widget model is not available");
+
+        const int rowCount = model->rowCount();
+        const int columnCount = model->columnCount();
+        const int rowsInspected = qMin(rowCount, maxRows);
+        bool truncated = rowCount > rowsInspected;
+
+        QJsonArray columns;
+        for (int column = 0; column < columnCount; ++column) {
+            QJsonObject entry;
+            entry["column"] = column;
+            entry["header"] = model->headerData(column, Qt::Horizontal, Qt::DisplayRole).toString();
+            entry["hidden"] = view->isColumnHidden(column);
+            columns.append(entry);
+        }
+
+        QJsonArray items;
+        for (int row = 0; row < rowsInspected; ++row) {
+            for (int column = 0; column < columnCount; ++column) {
+                const QModelIndex index = model->index(row, column);
+                if (!index.isValid())
+                    continue;
+
+                const ResolvedTableItem target{row, column, index};
+                const bool visible = tableIndexVisible(owner, target);
+                if (!includeHidden && !visible)
+                    continue;
+
+                const QJsonObject properties = tableIndexProperties(owner, target);
+                QJsonObject descriptor;
+                descriptor["kind"] = "table_cell";
+                descriptor["row"] = row;
+                descriptor["column"] = column;
+
+                QJsonObject entry;
+                entry["item"] = descriptor;
+                entry["row"] = row;
+                entry["column"] = column;
+                entry["columnHeader"] = model->headerData(column, Qt::Horizontal, Qt::DisplayRole).toString();
+                entry["text"] = properties.value("text").toString();
+                entry["visible"] = visible;
+                entry["selected"] = properties.value("selected").toBool(false);
+                items.append(entry);
+
+                if (items.size() >= maxItems) {
+                    truncated = true;
+                    QJsonObject payload;
+                    payload["kind"] = "table";
+                    payload["rowCount"] = rowCount;
+                    payload["columnCount"] = columnCount;
+                    payload["rowsInspected"] = rowsInspected;
+                    payload["columns"] = columns;
+                    payload["items"] = items;
+                    payload["truncated"] = truncated;
+                    return payload;
+                }
+            }
+        }
+
+        QJsonObject payload;
+        payload["kind"] = "table";
+        payload["rowCount"] = rowCount;
+        payload["columnCount"] = columnCount;
+        payload["rowsInspected"] = rowsInspected;
+        payload["columns"] = columns;
+        payload["items"] = items;
+        payload["truncated"] = truncated;
+        return payload;
+    }
+
+    QJsonObject inspectListItems(QWidget *owner, int maxRows, int maxItems, bool includeHidden)
+    {
+        QListView *view = listView(owner);
+        auto *model = view->model();
+        if (!model)
+            throw std::runtime_error("List widget model is not available");
+
+        const int rowCount = model->rowCount();
+        const int rowsInspected = qMin(rowCount, maxRows);
+        bool truncated = rowCount > rowsInspected;
+        QJsonArray items;
+
+        for (int row = 0; row < rowsInspected; ++row) {
+            const QModelIndex index = model->index(row, 0);
+            if (!index.isValid())
+                continue;
+
+            const ResolvedListItem target{row, index};
+            const bool visible = listIndexVisible(owner, target);
+            if (!includeHidden && !visible)
+                continue;
+
+            const QJsonObject properties = listIndexProperties(owner, target);
+            QJsonObject descriptor;
+            descriptor["kind"] = "list_item";
+            descriptor["row"] = row;
+
+            QJsonObject entry;
+            entry["item"] = descriptor;
+            entry["row"] = row;
+            entry["text"] = properties.value("text").toString();
+            entry["visible"] = visible;
+            entry["selected"] = properties.value("selected").toBool(false);
+            items.append(entry);
+
+            if (items.size() >= maxItems) {
+                truncated = true;
+                break;
+            }
+        }
+
+        QJsonObject payload;
+        payload["kind"] = "list";
+        payload["rowCount"] = rowCount;
+        payload["rowsInspected"] = rowsInspected;
+        payload["items"] = items;
+        payload["truncated"] = truncated;
+        return payload;
+    }
+
+    QJsonObject inspectTreeItems(QWidget *owner, int maxDepth, int maxItems, bool includeHidden)
+    {
+        QTreeView *view = treeView(owner);
+        auto *model = view->model();
+        if (!model)
+            throw std::runtime_error("Tree widget model is not available");
+
+        bool truncated = false;
+        QJsonArray items;
+
+        std::function<void(const QModelIndex &, int)> visit = [&](const QModelIndex &parent, int depth) {
+            if (truncated)
+                return;
+
+            const int rowCount = model->rowCount(parent);
+            for (int row = 0; row < rowCount; ++row) {
+                const QModelIndex index = model->index(row, 0, parent);
+                if (!index.isValid())
+                    continue;
+
+                const ResolvedTreeItem target{index};
+                const bool visible = treeIndexVisible(owner, target);
+                if (includeHidden || visible) {
+                    const QJsonObject properties = treeIndexProperties(owner, target);
+                    QJsonObject descriptor;
+                    descriptor["kind"] = "tree_node";
+                    descriptor["path"] = treeIndexRowPath(index);
+
+                    QJsonObject entry;
+                    entry["item"] = descriptor;
+                    entry["depth"] = depth;
+                    entry["text"] = properties.value("text").toString();
+                    entry["labelPath"] = properties.value("path").toArray();
+                    entry["visible"] = visible;
+                    entry["selected"] = properties.value("selected").toBool(false);
+                    entry["expanded"] = properties.value("expanded").toBool(false);
+                    entry["hasChildren"] = model->rowCount(index) > 0;
+                    items.append(entry);
+
+                    if (items.size() >= maxItems) {
+                        truncated = true;
+                        return;
+                    }
+                }
+
+                const int childCount = model->rowCount(index);
+                if (childCount <= 0)
+                    continue;
+                if (depth >= maxDepth) {
+                    if (includeHidden || view->isExpanded(index))
+                        truncated = true;
+                    continue;
+                }
+                if (includeHidden || view->isExpanded(index)) {
+                    visit(index, depth + 1);
+                    if (truncated)
+                        return;
+                }
+            }
+        };
+
+        visit(QModelIndex(), 0);
+
+        QJsonObject payload;
+        payload["kind"] = "tree";
+        payload["maxDepth"] = maxDepth;
+        payload["items"] = items;
+        payload["truncated"] = truncated;
+        return payload;
+    }
+
+    QJsonObject inspectItemView(QWidget *owner, int maxRows, int maxDepth, int maxItems, bool includeHidden)
+    {
+        if (qobject_cast<QTableView *>(owner))
+            return inspectTableItems(owner, maxRows, maxItems, includeHidden);
+        if (qobject_cast<QListView *>(owner))
+            return inspectListItems(owner, maxRows, maxItems, includeHidden);
+        if (qobject_cast<QTreeView *>(owner))
+            return inspectTreeItems(owner, maxDepth, maxItems, includeHidden);
+
+        throw std::runtime_error(
+            ("Widget does not expose supported item-view descendants: " + QString::fromLatin1(owner->metaObject()->className())).toStdString()
+        );
     }
 
     void selectOption(QWidget *w, const QJsonObject &params)

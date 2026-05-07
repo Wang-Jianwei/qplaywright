@@ -48,6 +48,7 @@ from qplaywright.protocol import (
     METHOD_ITEM_HOVER,
     METHOD_ITEM_EXPAND,
     METHOD_ITEM_COLLAPSE,
+    METHOD_ITEM_VIEW_INSPECT,
     METHOD_IS_VISIBLE,
     METHOD_IS_ENABLED,
     METHOD_IS_CHECKED,
@@ -1944,6 +1945,192 @@ def _collapse_tree_index(owner_widget, resolved_target):
     raise ValueError("Tree widget does not support collapse()")
 
 
+def _table_item_inspection(owner_widget, *, max_rows: int, max_items: int, include_hidden: bool) -> dict[str, Any]:
+    model = _table_model(owner_widget)
+    row_count = _model_row_count(model, None)
+    column_count_fn = getattr(model, "columnCount", None)
+    if not callable(column_count_fn):
+        raise ValueError("Table model does not expose columnCount()")
+    column_count = int(column_count_fn())
+    rows_inspected = min(row_count, max_rows)
+    view = _table_view(owner_widget)
+
+    columns = []
+    is_column_hidden = getattr(view, "isColumnHidden", None)
+    for column in range(column_count):
+        hidden = bool(is_column_hidden(column)) if callable(is_column_hidden) else False
+        columns.append({
+            "column": column,
+            "header": _header_display_text(model, column),
+            "hidden": hidden,
+        })
+
+    items = []
+    truncated = row_count > rows_inspected
+    for row in range(rows_inspected):
+        for column in range(column_count):
+            index = _model_index(model, row, column, None)
+            if not _is_valid_model_index(index):
+                continue
+            target = {"kind": "table_cell", "row": row, "column": column, "index": index}
+            visible = _table_index_visible(owner_widget, target)
+            if not include_hidden and not visible:
+                continue
+            properties = _table_index_properties(owner_widget, target)
+            items.append({
+                "item": {"kind": "table_cell", "row": row, "column": column},
+                "row": row,
+                "column": column,
+                "columnHeader": _header_display_text(model, column),
+                "text": properties.get("text", ""),
+                "visible": visible,
+                "selected": bool(properties.get("selected", False)),
+            })
+            if len(items) >= max_items:
+                truncated = True
+                return {
+                    "kind": "table",
+                    "rowCount": row_count,
+                    "columnCount": column_count,
+                    "rowsInspected": rows_inspected,
+                    "columns": columns,
+                    "items": items,
+                    "truncated": truncated,
+                }
+
+    return {
+        "kind": "table",
+        "rowCount": row_count,
+        "columnCount": column_count,
+        "rowsInspected": rows_inspected,
+        "columns": columns,
+        "items": items,
+        "truncated": truncated,
+    }
+
+
+def _list_item_inspection(owner_widget, *, max_rows: int, max_items: int, include_hidden: bool) -> dict[str, Any]:
+    model = _list_model(owner_widget)
+    row_count = _model_row_count(model, None)
+    rows_inspected = min(row_count, max_rows)
+    items = []
+    truncated = row_count > rows_inspected
+
+    for row in range(rows_inspected):
+        index = _model_index(model, row, 0, None)
+        if not _is_valid_model_index(index):
+            continue
+        target = {"kind": "list_item", "row": row, "index": index}
+        visible = _list_index_visible(owner_widget, target)
+        if not include_hidden and not visible:
+            continue
+        properties = _list_index_properties(owner_widget, target)
+        items.append({
+            "item": {"kind": "list_item", "row": row},
+            "row": row,
+            "text": properties.get("text", ""),
+            "visible": visible,
+            "selected": bool(properties.get("selected", False)),
+        })
+        if len(items) >= max_items:
+            truncated = True
+            break
+
+    return {
+        "kind": "list",
+        "rowCount": row_count,
+        "rowsInspected": rows_inspected,
+        "items": items,
+        "truncated": truncated,
+    }
+
+
+def _tree_item_inspection(
+    owner_widget,
+    *,
+    max_depth: int,
+    max_items: int,
+    include_hidden: bool,
+) -> dict[str, Any]:
+    view = _tree_view(owner_widget)
+    model = _tree_model(owner_widget)
+    items: list[dict[str, Any]] = []
+    truncated = False
+
+    def visit(parent_index, path: list[int], depth: int) -> None:
+        nonlocal truncated
+        if truncated:
+            return
+
+        row_count = _model_row_count(model, parent_index)
+        for row in range(row_count):
+            index = _model_index(model, row, 0, parent_index)
+            if not _is_valid_model_index(index):
+                continue
+
+            item_path = [*path, row]
+            target = {"kind": "tree_node", "path": item_path, "index": index}
+            visible = _tree_index_visible(owner_widget, target)
+            if include_hidden or visible:
+                properties = _tree_index_properties(owner_widget, target)
+                child_count = _model_row_count(model, index)
+                items.append({
+                    "item": {"kind": "tree_node", "path": item_path},
+                    "depth": depth,
+                    "text": properties.get("text", ""),
+                    "labelPath": list(properties.get("path") or []),
+                    "visible": visible,
+                    "selected": bool(properties.get("selected", False)),
+                    "expanded": bool(properties.get("expanded", False)),
+                    "hasChildren": child_count > 0,
+                })
+                if len(items) >= max_items:
+                    truncated = True
+                    return
+
+            child_count = _model_row_count(model, index)
+            if child_count <= 0:
+                continue
+            if depth >= max_depth:
+                if include_hidden or _tree_index_is_expanded(view, index):
+                    truncated = True
+                continue
+            if include_hidden or _tree_index_is_expanded(view, index):
+                visit(index, item_path, depth + 1)
+                if truncated:
+                    return
+
+    visit(_invalid_model_index(), [], 0)
+    return {
+        "kind": "tree",
+        "maxDepth": max_depth,
+        "items": items,
+        "truncated": truncated,
+    }
+
+
+def _inspect_item_view(
+    owner_widget,
+    *,
+    max_rows: int,
+    max_depth: int,
+    max_items: int,
+    include_hidden: bool,
+) -> dict[str, Any]:
+    class_name = _widget_class_name(owner_widget)
+    max_rows = max(0, int(max_rows))
+    max_depth = max(0, int(max_depth))
+    max_items = max(0, int(max_items))
+
+    if class_name in {"QTableView", "QTableWidget"}:
+        return _table_item_inspection(owner_widget, max_rows=max_rows, max_items=max_items, include_hidden=include_hidden)
+    if class_name in {"QListView", "QListWidget"}:
+        return _list_item_inspection(owner_widget, max_rows=max_rows, max_items=max_items, include_hidden=include_hidden)
+    if class_name in {"QTreeView", "QTreeWidget"}:
+        return _tree_item_inspection(owner_widget, max_depth=max_depth, max_items=max_items, include_hidden=include_hidden)
+    raise ValueError(f"Widget does not expose supported item-view descendants: {class_name}")
+
+
 def _key_to_qt(key_str: str):
     """Convert a Playwright-style key name to Qt key enum."""
     _import_qt()
@@ -2094,6 +2281,16 @@ def _handle_command(req: Request) -> Any:
         owner = _resolve_item_owner(params)
         target = _resolve_item_target(owner, params.get("item") or {})
         return _item_bounding_box(owner, target)
+
+    if method == METHOD_ITEM_VIEW_INSPECT:
+        owner = _resolve_item_owner(params)
+        return _inspect_item_view(
+            owner,
+            max_rows=int(params.get("max_rows", 20)),
+            max_depth=int(params.get("max_depth", 4)),
+            max_items=int(params.get("max_items", 200)),
+            include_hidden=bool(params.get("include_hidden", False)),
+        )
 
     # -- Actions -------------------------------------------------------------
     if method == METHOD_CLICK:

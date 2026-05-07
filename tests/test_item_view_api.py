@@ -205,6 +205,26 @@ def test_locator_root_node_builds_tree_descriptor_for_collapse():
     ]
 
 
+def test_table_cell_expand_is_rejected_locally():
+    conn = FakeConnection()
+    item = ItemLocator(cast(Any, conn), 9, {"kind": "table_cell", "row": 1, "column": 2}, timeout=2.5)
+
+    with pytest.raises(ValueError, match=r"expand\(\) is only supported for tree_node items"):
+        item.expand()
+
+    assert conn.calls == []
+
+
+def test_list_item_collapse_is_rejected_locally():
+    conn = FakeConnection()
+    item = ItemLocator(cast(Any, conn), 9, {"kind": "list_item", "row": 1}, timeout=2.5)
+
+    with pytest.raises(ValueError, match=r"collapse\(\) is only supported for tree_node items"):
+        item.collapse()
+
+    assert conn.calls == []
+
+
 def test_locator_list_item_resolves_owner_widget_before_click():
     conn = SequencedConnection({"find": {"wid": 44}, "item_click": True})
     locator = Locator(cast(Any, conn), "#scroll_list", timeout=7.0)
@@ -892,6 +912,98 @@ def test_handle_command_item_expand_and_collapse_tree_node(monkeypatch):
     assert collapse_result is True
     assert tree.expand_calls == [("Settings",)]
     assert tree.collapse_calls == [("Settings",)]
+
+
+def test_handle_command_item_view_inspect_summarizes_table(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    table = FakeTableView(
+        rows=[["001", "Alice"], ["002", "Bob"]],
+        headers=["ID", "Name"],
+        rects={
+            (0, 0): FakeRect(0, 0, 40, 18),
+            (0, 1): FakeRect(40, 0, 60, 18),
+            (1, 0): FakeRect(0, 18, 40, 18),
+            (1, 1): FakeRect(40, 18, 60, 18),
+        },
+        selected={(1, 1)},
+    )
+    wid = server._registry.register(table)
+
+    result = server._handle_command(
+        Request(method="item_view_inspect", params={"wid": wid, "max_rows": 1, "max_items": 10})
+    )
+
+    assert result == {
+        "kind": "table",
+        "rowCount": 2,
+        "columnCount": 2,
+        "rowsInspected": 1,
+        "columns": [
+            {"column": 0, "header": "ID", "hidden": False},
+            {"column": 1, "header": "Name", "hidden": False},
+        ],
+        "items": [
+            {"item": {"kind": "table_cell", "row": 0, "column": 0}, "row": 0, "column": 0, "columnHeader": "ID", "text": "001", "visible": True, "selected": False},
+            {"item": {"kind": "table_cell", "row": 0, "column": 1}, "row": 0, "column": 1, "columnHeader": "Name", "text": "Alice", "visible": True, "selected": False},
+        ],
+        "truncated": True,
+    }
+
+
+def test_handle_command_item_view_inspect_summarizes_tree(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tree = FakeTreeView(
+        [FakeTreeNode("Settings", [FakeTreeNode("General"), FakeTreeNode("Advanced")])],
+        rects={
+            ("Settings",): FakeRect(4, 6, 60, 16),
+            ("Settings", "Advanced"): FakeRect(12, 28, 80, 18),
+        },
+        expanded_paths={("Settings",)},
+        selected_paths={("Settings", "Advanced")},
+    )
+    wid = server._registry.register(tree)
+
+    result = server._handle_command(
+        Request(method="item_view_inspect", params={"wid": wid, "max_depth": 2, "max_items": 10})
+    )
+
+    assert result == {
+        "kind": "tree",
+        "maxDepth": 2,
+        "items": [
+            {"item": {"kind": "tree_node", "path": [0]}, "depth": 0, "text": "Settings", "labelPath": ["Settings"], "visible": True, "selected": False, "expanded": True, "hasChildren": True},
+            {"item": {"kind": "tree_node", "path": [0, 1]}, "depth": 1, "text": "Advanced", "labelPath": ["Settings", "Advanced"], "visible": True, "selected": True, "expanded": False, "hasChildren": False},
+        ],
+        "truncated": False,
+    }
+
+
+def test_handle_command_item_view_inspect_summarizes_list(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    list_view = FakeListView(
+        ["Alpha", "Beta", "Gamma"],
+        rects={0: FakeRect(0, 0, 50, 18), 1: FakeRect(0, 18, 50, 18)},
+        selected_rows={1},
+    )
+    wid = server._registry.register(list_view)
+
+    result = server._handle_command(
+        Request(method="item_view_inspect", params={"wid": wid, "max_rows": 2, "max_items": 10})
+    )
+
+    assert result == {
+        "kind": "list",
+        "rowCount": 3,
+        "rowsInspected": 2,
+        "items": [
+            {"item": {"kind": "list_item", "row": 0}, "row": 0, "text": "Alpha", "visible": True, "selected": False},
+            {"item": {"kind": "list_item", "row": 1}, "row": 1, "text": "Beta", "visible": True, "selected": True},
+        ],
+        "truncated": True,
+    }
 
 
 def test_handle_command_item_text_rejects_ambiguous_tree_path_segment(monkeypatch):

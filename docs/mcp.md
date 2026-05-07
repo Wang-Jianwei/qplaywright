@@ -90,9 +90,10 @@ qplaywright-mcp cli input #amount_editor 123.45 --submit
 1. `session` with `action="attach"` or `action="launch"` to establish the active session.
 2. `window` with `action="list"` to discover visible top-level windows.
 3. `window` with `action="select"` when the desired scope is not the current active window.
-4. `snapshot` or `inspect` to understand the current UI and obtain stable refs.
-5. Use action tools like `click`, `input`, `invoke`, `set_checked`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and `screenshot`.
-6. `session` with `action="close"` when finished.
+4. `snapshot` or `inspect` to understand the widget tree and obtain stable refs.
+5. `inspect_items` when the target widget is a table, tree, or list and you need structured descendant item targets.
+6. Use action tools like `click`, `input`, `invoke`, `set_checked`, `set_expanded`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and `screenshot`.
+7. `session` with `action="close"` when finished.
 
 ## Exposed MCP Interfaces
 
@@ -116,16 +117,18 @@ The server can be exposed through:
 | `session` | Attach, launch, inspect status, or close the active MCP-side session |
 | `window` | List, select, resize, or close one top-level Qt window |
 | `snapshot` | Return a text snapshot and stable refs for the active window or one target |
-| `inspect` | Inspect one target or return the active window widget tree in debug mode |
-| `click` | Click or double-click the first matched widget |
+| `inspect` | Inspect one widget or item target, or return the active window widget tree in debug mode |
+| `inspect_items` | Enumerate structured table/tree/list descendants for one owner widget |
+| `click` | Click or double-click the first matched widget or one item target |
 | `input` | Replace or append text, optionally submitting with Enter |
 | `invoke` | Invoke one exposed custom widget method by exact name |
 | `press_key` | Send one key press to the matched widget |
 | `set_checked` | Check or uncheck the matched widget |
+| `set_expanded` | Expand or collapse one structured tree node item target |
 | `choose` | Select one combobox option by `value`, `index`, or `label` |
-| `wait` | Wait until a widget reaches a supported state |
+| `wait` | Wait until a widget or item target reaches a supported state |
 | `screenshot` | Capture a screenshot of the active window or a matched widget |
-| `hover` | Hover over the first matched widget |
+| `hover` | Hover over the first matched widget or one item target |
 | `scroll` | Send a mouse wheel scroll event to the matched widget |
 
 ## Core Model
@@ -151,15 +154,19 @@ There is no parallel top-level `width` / `height` return shape anymore.
 
 ### Unified Target
 
-Widget-oriented tools accept a single `target` value.
+Targeted tools accept a single `target` value.
 That value may be either:
 
 - a qplaywright selector such as `#amount_editor`, `role=button`, `text=Submit`, or `.QLabel`
 - a snapshot ref such as `e12`
+- a structured item target object such as `{"owner": "#orders_table", "item": {"kind": "table_cell", "row": 3, "column": 1}}`
+- a structured item target object such as `{"owner": "#settings_tree", "item": {"kind": "tree_node", "path": [0, 1]}}`
+- a structured item target object such as `{"owner": "#task_list", "item": {"kind": "list_item", "row": 2}}`
 
 The selector side of `target` keeps the existing atomic qplaywright forms.
 This contract does not define inline composite syntax such as `role=button >> has-text=Submit`.
 When you need compound disambiguation, use `snapshot` or `inspect` first, then continue with the returned snapshot ref.
+When you need structured item descendants, first resolve the owner widget, then call `inspect_items` and reuse the returned item `target` objects.
 
 ### Optional Post-Action Observation
 
@@ -174,7 +181,7 @@ When `include_snapshot=true`, the response also includes:
 Action tools also support `include_state=false` by default.
 When `include_state=true`, the response includes a compact target-level `state`
 payload such as `exists`, `count`, `visible`, `enabled`, `checked`, `text`,
-`currentText`, and `value` when those fields are available.
+`currentText`, `value`, `expanded`, and `selected` when those fields are available.
 
 `include_state` and `include_snapshot` are independent and may both be `true`
 in the same request.
@@ -324,16 +331,34 @@ Request:
 ```
 
 When `target` is omitted, `inspect` returns the active window tree in debug mode.
-When `target` is provided, `inspect` returns widget state and optional method metadata.
+When `target` is provided, `inspect` returns widget or item-target state.
 If multiple widgets match the target, scalar fields describe the first match and `count` reports the total number of matches.
 When `target` is omitted, `inspect` filters common Qt infrastructure widgets by default.
 Set `include_infrastructure=true` to inspect the unfiltered raw widget tree.
+For structured item targets, `inspect` returns item metadata such as `kind`, `row`, `column`, `path`, `selected`, and `expanded` when those fields apply.
 
 Targeted `inspect` may include:
 
 - `geometry` for widget-local layout data
 - `globalBoundingBox` for screen-space bounds
 - `bounding_box` as the existing locator-compatible bounding box field
+
+### inspect_items
+
+Request:
+
+```json
+{
+  "owner": "#settings_tree",
+  "max_depth": 3,
+  "max_items": 50
+}
+```
+
+`inspect_items` enumerates structured descendants for one table, tree, or list owner widget.
+Each returned entry includes an `item` descriptor plus a reusable `target` object in the form `{owner, item}`.
+Use those returned `target` objects directly with `inspect`, `click`, `hover`, `wait`, and `set_expanded`.
+Snapshot refs remain widget-only; item discovery is handled by `inspect_items`.
 
 When `target` is omitted and `topmost_only=true`, the returned tree is an
 approximate frontmost-visible view and may be incomplete.
@@ -350,6 +375,18 @@ Common action request shape:
 }
 ```
 
+For item-view descendants, the same `target` field may be a structured object:
+
+```json
+{
+  "target": {
+    "owner": "#settings_tree",
+    "item": {"kind": "tree_node", "path": [0, 1]}
+  },
+  "include_state": true
+}
+```
+
 Tool-specific fields:
 
 - `click`: optional `count`
@@ -357,8 +394,9 @@ Tool-specific fields:
 - `invoke`: `method`, optional `args`
 - `press_key`: `key`
 - `set_checked`: `checked`
+- `set_expanded`: `expanded` for structured tree node item targets only
 - `choose`: exactly one of `value`, `index`, or `label`
-- `wait`: optional `state` or `condition` + `expected`, optional `timeout`
+- `wait`: optional `state` or `condition` + `expected`, optional `timeout`; item targets support `visible`/`hidden` and `text_equals`/`text_contains`
 - `hover`: no extra fields
 - `scroll`: optional `delta_x`, `delta_y`
 

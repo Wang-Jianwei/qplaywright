@@ -298,6 +298,7 @@ METHOD_ITEM_DBLCLICK = "item_dblclick"
 METHOD_ITEM_HOVER = "item_hover"
 METHOD_ITEM_EXPAND = "item_expand"
 METHOD_ITEM_COLLAPSE = "item_collapse"
+METHOD_ITEM_VIEW_INSPECT = "item_view_inspect"
 
 # Actions
 METHOD_CLICK = "click"
