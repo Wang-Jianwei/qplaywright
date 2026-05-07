@@ -309,6 +309,33 @@ def test_widget_tree_snapshot_skips_non_widget_children():
     assert [entry["objectName"] for entry in payload["children"]] == ["child"]
 
 
+def test_widget_tree_snapshot_captures_live_delegate_editor_widget():
+    server._registry.clear()
+    viewport = FakeWidget(class_name="QWidget", object_name="table_viewport")
+    table = FakeWidget(class_name="QTableView", object_name="orders_table", children=[viewport])
+
+    before = server._widget_tree_to_dict(table, max_depth=2)
+
+    assert before["objectName"] == "orders_table"
+    assert before["children"][0]["objectName"] == "table_viewport"
+    assert before["children"][0].get("children") is None
+
+    editor = FakeComboWidget(
+        class_name="QComboBox",
+        object_name="status_editor",
+        properties={"currentText": "Ready", "accessibleName": "Status editor"},
+    )
+    viewport._children.append(editor)
+
+    after = server._widget_tree_to_dict(table, max_depth=2)
+
+    editor_payload = after["children"][0]["children"][0]
+    assert editor_payload["class"] == "QComboBox"
+    assert editor_payload["objectName"] == "status_editor"
+    assert editor_payload["currentText"] == "Ready"
+    assert editor_payload["accessibleName"] == "Status editor"
+
+
 def test_widget_properties_include_qt_and_dynamic_properties():
     widget = FakeWidget(
         properties={
