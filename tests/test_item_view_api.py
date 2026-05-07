@@ -690,9 +690,27 @@ class FakeQtTableViewBase:
     pass
 
 
+class FakeQtTreeViewBase:
+    pass
+
+
+class FakeQtListViewBase:
+    pass
+
+
 class FakeDerivedTableView(FakeQtTableViewBase, FakeTableView):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, class_name="FancyOrdersTable", **kwargs)
+
+
+class FakeDerivedTreeView(FakeQtTreeViewBase, FakeTreeView):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, class_name="FancySettingsTree", **kwargs)
+
+
+class FakeDerivedListView(FakeQtListViewBase, FakeListView):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, class_name="FancyTaskList", **kwargs)
 
 
 def _install_fake_item_view_qt(monkeypatch):
@@ -723,6 +741,8 @@ def _install_fake_item_view_qt(monkeypatch):
         SimpleNamespace(
             QAbstractItemView=SimpleNamespace(EnsureVisible="ensure_visible"),
             QTableView=FakeQtTableViewBase,
+            QTreeView=FakeQtTreeViewBase,
+            QListView=FakeQtListViewBase,
         ),
     )
     monkeypatch.setattr(server, "_update_visual_feedback", lambda *args, **kwargs: None)
@@ -984,6 +1004,24 @@ def test_handle_command_item_view_inspect_summarizes_table(monkeypatch):
     }
 
 
+def test_handle_command_item_view_inspect_accepts_qtableview_subclass(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    table = FakeDerivedTableView(
+        rows=[["001", "Alice"]],
+        headers=["ID", "Name"],
+        rects={(0, 0): FakeRect(0, 0, 40, 18), (0, 1): FakeRect(40, 0, 60, 18)},
+    )
+    wid = server._registry.register(table)
+
+    result = server._handle_command(
+        Request(method="item_view_inspect", params={"wid": wid, "max_rows": 1, "max_items": 10})
+    )
+
+    assert result["kind"] == "table"
+    assert result["items"][0]["text"] == "001"
+
+
 def test_handle_command_item_view_inspect_summarizes_tree(monkeypatch):
     _install_fake_item_view_qt(monkeypatch)
     server._registry.clear()
@@ -1011,6 +1049,27 @@ def test_handle_command_item_view_inspect_summarizes_tree(monkeypatch):
         ],
         "truncated": False,
     }
+
+
+def test_handle_command_item_view_inspect_accepts_qtreeview_subclass(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tree = FakeDerivedTreeView(
+        [FakeTreeNode("Settings", [FakeTreeNode("Advanced")])],
+        rects={
+            ("Settings",): FakeRect(4, 6, 60, 16),
+            ("Settings", "Advanced"): FakeRect(12, 28, 80, 18),
+        },
+        expanded_paths={("Settings",)},
+    )
+    wid = server._registry.register(tree)
+
+    result = server._handle_command(
+        Request(method="item_view_inspect", params={"wid": wid, "max_depth": 2, "max_items": 10})
+    )
+
+    assert result["kind"] == "tree"
+    assert result["items"][0]["text"] == "Settings"
 
 
 def test_handle_command_item_view_inspect_summarizes_list(monkeypatch):
@@ -1053,6 +1112,26 @@ def test_handle_command_item_text_rejects_ambiguous_tree_path_segment(monkeypatc
         server._handle_command(Request(method="item_text", params={"wid": wid, "item": {"kind": "tree_node", "path": ["Settings", "Advanced"]}}))
 
 
+def test_handle_command_item_text_accepts_qtreeview_subclass(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tree = FakeDerivedTreeView(
+        [FakeTreeNode("Settings", [FakeTreeNode("Advanced")])],
+        rects={
+            ("Settings",): FakeRect(4, 6, 60, 16),
+            ("Settings", "Advanced"): FakeRect(12, 28, 80, 18),
+        },
+        expanded_paths={("Settings",)},
+    )
+    wid = server._registry.register(tree)
+
+    result = server._handle_command(
+        Request(method="item_text", params={"wid": wid, "item": {"kind": "tree_node", "path": ["Settings", "Advanced"]}})
+    )
+
+    assert result == "Advanced"
+
+
 def test_handle_command_item_text_reads_list_item(monkeypatch):
     _install_fake_item_view_qt(monkeypatch)
     server._registry.clear()
@@ -1063,6 +1142,22 @@ def test_handle_command_item_text_reads_list_item(monkeypatch):
     wid = server._registry.register(list_view)
 
     result = server._handle_command(Request(method="item_text", params={"wid": wid, "item": {"kind": "list_item", "row": 1}}))
+
+    assert result == "Beta"
+
+
+def test_handle_command_item_text_accepts_qlistview_subclass(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    list_view = FakeDerivedListView(
+        ["Alpha", "Beta", "Gamma"],
+        rects={1: FakeRect(8, 16, 70, 18)},
+    )
+    wid = server._registry.register(list_view)
+
+    result = server._handle_command(
+        Request(method="item_text", params={"wid": wid, "item": {"kind": "list_item", "row": 1}})
+    )
 
     assert result == "Beta"
 

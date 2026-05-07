@@ -1130,6 +1130,30 @@ def _table_view(owner_widget):
     return owner_widget
 
 
+def _tree_view(owner_widget):
+    _import_qt()
+    tree_view_type = getattr(_QtWidgets, "QTreeView", None) if _QtWidgets is not None else None
+    if tree_view_type is not None and isinstance(owner_widget, tree_view_type):
+        return owner_widget
+
+    class_name = _widget_class_name(owner_widget)
+    if class_name not in {"QTreeView", "QTreeWidget"}:
+        raise ValueError(f"Item owner is not a supported tree widget: {class_name}")
+    return owner_widget
+
+
+def _list_view(owner_widget):
+    _import_qt()
+    list_view_type = getattr(_QtWidgets, "QListView", None) if _QtWidgets is not None else None
+    if list_view_type is not None and isinstance(owner_widget, list_view_type):
+        return owner_widget
+
+    class_name = _widget_class_name(owner_widget)
+    if class_name not in {"QListView", "QListWidget"}:
+        raise ValueError(f"Item owner is not a supported list widget: {class_name}")
+    return owner_widget
+
+
 def _table_model(owner_widget):
     view = _table_view(owner_widget)
     model_fn = getattr(view, "model", None)
@@ -1258,13 +1282,6 @@ def _resolve_table_item(owner_widget, descriptor: dict):
         "column": column,
         "index": index,
     }
-
-
-def _tree_view(owner_widget):
-    class_name = _widget_class_name(owner_widget)
-    if class_name not in {"QTreeView", "QTreeWidget"}:
-        raise ValueError(f"Item owner is not a supported tree widget: {class_name}")
-    return owner_widget
 
 
 def _tree_model(owner_widget):
@@ -1421,13 +1438,6 @@ def _resolve_tree_item(owner_widget, descriptor: dict):
         "path": list(path),
         "index": current_index,
     }
-
-
-def _list_view(owner_widget):
-    class_name = _widget_class_name(owner_widget)
-    if class_name not in {"QListView", "QListWidget"}:
-        raise ValueError(f"Item owner is not a supported list widget: {class_name}")
-    return owner_widget
 
 
 def _list_model(owner_widget):
@@ -2122,17 +2132,29 @@ def _inspect_item_view(
     max_items: int,
     include_hidden: bool,
 ) -> dict[str, Any]:
-    class_name = _widget_class_name(owner_widget)
     max_rows = max(0, int(max_rows))
     max_depth = max(0, int(max_depth))
     max_items = max(0, int(max_items))
 
-    if class_name in {"QTableView", "QTableWidget"}:
+    try:
+        _table_view(owner_widget)
         return _table_item_inspection(owner_widget, max_rows=max_rows, max_items=max_items, include_hidden=include_hidden)
-    if class_name in {"QListView", "QListWidget"}:
+    except ValueError:
+        pass
+
+    try:
+        _list_view(owner_widget)
         return _list_item_inspection(owner_widget, max_rows=max_rows, max_items=max_items, include_hidden=include_hidden)
-    if class_name in {"QTreeView", "QTreeWidget"}:
+    except ValueError:
+        pass
+
+    try:
+        _tree_view(owner_widget)
         return _tree_item_inspection(owner_widget, max_depth=max_depth, max_items=max_items, include_hidden=include_hidden)
+    except ValueError:
+        pass
+
+    class_name = _widget_class_name(owner_widget)
     raise ValueError(f"Widget does not expose supported item-view descendants: {class_name}")
 
 
