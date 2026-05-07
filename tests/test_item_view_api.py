@@ -205,6 +205,59 @@ def test_locator_root_node_builds_tree_descriptor_for_collapse():
     ]
 
 
+def test_locator_list_item_resolves_owner_widget_before_click():
+    conn = SequencedConnection({"find": {"wid": 44}, "item_click": True})
+    locator = Locator(cast(Any, conn), "#scroll_list", timeout=7.0)
+
+    locator.list_item("Scrollable item 010").click()
+
+    assert conn.calls == [
+        ("find", {"selector": "#scroll_list"}, 7.0),
+        (
+            "item_click",
+            {
+                "wid": 44,
+                "item": {
+                    "kind": "list_item",
+                    "text": "Scrollable item 010",
+                },
+            },
+            7.0,
+        ),
+    ]
+
+
+def test_locator_list_item_builds_numeric_descriptor_for_properties():
+    conn = FakeConnection()
+    locator = Locator(cast(Any, conn), "", widget_wid=18, timeout=8.0)
+
+    result = locator.list_item(3).properties()
+
+    assert result == {
+        "method": "item_properties",
+        "params": {
+            "wid": 18,
+            "item": {
+                "kind": "list_item",
+                "row": 3,
+            },
+        },
+    }
+    assert conn.calls == [
+        (
+            "item_properties",
+            {
+                "wid": 18,
+                "item": {
+                    "kind": "list_item",
+                    "row": 3,
+                },
+            },
+            8.0,
+        )
+    ]
+
+
 @dataclass(eq=True)
 class FakePoint:
     x_value: int
@@ -381,6 +434,50 @@ class FakeTreeSelectionModel:
         return self._model.text_path(index) in self._selected_paths
 
 
+class FakeListIndex:
+    def __init__(self, model, row: int, *, valid: bool = True):
+        self._model = model
+        self._row = row
+        self._valid = valid
+
+    def row(self) -> int:
+        return self._row
+
+    def column(self) -> int:
+        return 0
+
+    def isValid(self) -> bool:
+        return self._valid
+
+    def data(self, role=None):
+        return self._model.data(self, role)
+
+
+class FakeListModel:
+    def __init__(self, items: list[str]):
+        self._items = items
+
+    def rowCount(self) -> int:
+        return len(self._items)
+
+    def index(self, row: int, column: int, parent=None):
+        valid = column == 0 and 0 <= row < self.rowCount()
+        return FakeListIndex(self, row, valid=valid)
+
+    def data(self, index: FakeListIndex, role=None):
+        if not index.isValid():
+            return None
+        return self._items[index.row()]
+
+
+class FakeListSelectionModel:
+    def __init__(self, selected_rows: set[int] | None = None):
+        self._selected_rows = set(selected_rows or set())
+
+    def isSelected(self, index: FakeListIndex) -> bool:
+        return index.row() in self._selected_rows
+
+
 class FakeViewport:
     def __init__(self, *, global_origin: FakePoint = FakePoint(100, 200)):
         self._global_origin = global_origin
@@ -508,6 +605,45 @@ class FakeTreeView:
         path = self._path(index)
         self.collapse_calls.append(path)
         self._expanded_paths.discard(path)
+
+
+class FakeListView:
+    def __init__(
+        self,
+        items: list[str],
+        *,
+        rects: dict[int, FakeRect] | None = None,
+        hidden_rows: set[int] | None = None,
+        selected_rows: set[int] | None = None,
+        class_name: str = "QListView",
+    ):
+        self._meta = FakeMetaObject(class_name)
+        self._model = FakeListModel(items)
+        self._viewport = FakeViewport()
+        self._rects = dict(rects or {})
+        self._hidden_rows = set(hidden_rows or set())
+        self._selection_model = FakeListSelectionModel(selected_rows)
+        self.scroll_calls: list[tuple[int, tuple[object, ...]]] = []
+
+    def metaObject(self):
+        return self._meta
+
+    def model(self):
+        return self._model
+
+    def viewport(self):
+        return self._viewport
+
+    def selectionModel(self):
+        return self._selection_model
+
+    def visualRect(self, index: FakeListIndex):
+        if index.row() in self._hidden_rows:
+            return FakeRect(0, 0, 0, 0)
+        return self._rects.get(index.row(), FakeRect(0, 0, 0, 0))
+
+    def scrollTo(self, index: FakeListIndex, *args):
+        self.scroll_calls.append((index.row(), args))
 
 
 class FakeQTest:
@@ -770,3 +906,83 @@ def test_handle_command_item_text_rejects_ambiguous_tree_path_segment(monkeypatc
 
     with pytest.raises(ValueError, match="Ambiguous tree path segment: Advanced"):
         server._handle_command(Request(method="item_text", params={"wid": wid, "item": {"kind": "tree_node", "path": ["Settings", "Advanced"]}}))
+
+
+def test_handle_command_item_text_reads_list_item(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    list_view = FakeListView(
+        ["Alpha", "Beta", "Gamma"],
+        rects={1: FakeRect(8, 16, 70, 18)},
+    )
+    wid = server._registry.register(list_view)
+
+    result = server._handle_command(Request(method="item_text", params={"wid": wid, "item": {"kind": "list_item", "row": 1}}))
+
+    assert result == "Beta"
+
+
+def test_handle_command_item_properties_resolves_list_item_by_text(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    list_view = FakeListView(
+        ["Alpha", "Beta", "Gamma"],
+        rects={1: FakeRect(8, 16, 70, 18)},
+        selected_rows={1},
+    )
+    wid = server._registry.register(list_view)
+
+    result = server._handle_command(Request(method="item_properties", params={"wid": wid, "item": {"kind": "list_item", "text": "Beta"}}))
+
+    assert result == {
+        "kind": "list_item",
+        "row": 1,
+        "text": "Beta",
+        "selected": True,
+    }
+
+
+def test_handle_command_item_visible_false_for_hidden_list_row(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    list_view = FakeListView(
+        ["Alpha", "Beta"],
+        rects={1: FakeRect(8, 16, 70, 18)},
+        hidden_rows={1},
+    )
+    wid = server._registry.register(list_view)
+
+    result = server._handle_command(Request(method="item_visible", params={"wid": wid, "item": {"kind": "list_item", "row": 1}}))
+
+    assert result is False
+
+
+def test_handle_command_item_text_rejects_ambiguous_list_text(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    list_view = FakeListView(
+        ["Alpha", "Beta", "Beta"],
+        rects={1: FakeRect(8, 16, 70, 18), 2: FakeRect(8, 40, 70, 18)},
+    )
+    wid = server._registry.register(list_view)
+
+    with pytest.raises(ValueError, match="Ambiguous list item text: Beta"):
+        server._handle_command(Request(method="item_text", params={"wid": wid, "item": {"kind": "list_item", "text": "Beta"}}))
+
+
+def test_handle_command_item_click_uses_list_viewport_local_rect_center(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    list_view = FakeListView(
+        ["Alpha", "Beta", "Gamma"],
+        rects={1: FakeRect(8, 16, 70, 18)},
+    )
+    wid = server._registry.register(list_view)
+
+    result = server._handle_command(Request(method="item_click", params={"wid": wid, "item": {"kind": "list_item", "text": "Beta"}}))
+
+    assert result is True
+    assert FakeQTest.calls == [
+        ("click", list_view.viewport(), "left", "none", FakePoint(43, 25))
+    ]
+    assert list_view.scroll_calls == [(1, ("ensure_visible",))]

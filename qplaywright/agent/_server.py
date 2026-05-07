@@ -1417,6 +1417,76 @@ def _resolve_tree_item(owner_widget, descriptor: dict):
     }
 
 
+def _list_view(owner_widget):
+    class_name = _widget_class_name(owner_widget)
+    if class_name not in {"QListView", "QListWidget"}:
+        raise ValueError(f"Item owner is not a supported list widget: {class_name}")
+    return owner_widget
+
+
+def _list_model(owner_widget):
+    view = _list_view(owner_widget)
+    model_fn = getattr(view, "model", None)
+    if not callable(model_fn):
+        raise ValueError(f"List widget does not expose a model: {_widget_class_name(view)}")
+    model = model_fn()
+    if model is None:
+        raise ValueError("List widget model is not available")
+    return model
+
+
+def _resolve_list_item(owner_widget, descriptor: dict):
+    if not isinstance(descriptor, dict):
+        raise ValueError("Item descriptor must be an object")
+    if descriptor.get("kind") != "list_item":
+        raise ValueError(f"Unsupported item kind: {descriptor.get('kind')}")
+
+    has_row = "row" in descriptor
+    has_text = "text" in descriptor
+    if has_row == has_text:
+        raise ValueError("List item descriptor requires exactly one of row or text")
+
+    model = _list_model(owner_widget)
+    row_count = _model_row_count(model, None)
+
+    if has_row:
+        row = descriptor.get("row")
+        if isinstance(row, bool) or not isinstance(row, int):
+            raise ValueError("List item row must be an int")
+        if row < 0 or row >= row_count:
+            raise ValueError(f"List item row out of range: {row}")
+        index = _model_index(model, row, 0, None)
+        if not _is_valid_model_index(index):
+            raise ValueError(f"List item index is not valid: row={row}")
+        return {
+            "kind": "list_item",
+            "row": row,
+            "index": index,
+        }
+
+    text = descriptor.get("text")
+    if not isinstance(text, str) or not text:
+        raise ValueError("List item text must be a non-empty string")
+
+    matches = []
+    for row in range(row_count):
+        candidate = _model_index(model, row, 0, None)
+        if _index_display_text(model, candidate) == text:
+            matches.append((row, candidate))
+
+    if not matches:
+        raise ValueError(f"List item text not found: {text}")
+    if len(matches) > 1:
+        raise ValueError(f"Ambiguous list item text: {text}")
+
+    row, index = matches[0]
+    return {
+        "kind": "list_item",
+        "row": row,
+        "index": index,
+    }
+
+
 def _resolve_item_target(owner_widget, descriptor: dict):
     if not isinstance(descriptor, dict):
         raise ValueError("Item descriptor must be an object")
@@ -1424,6 +1494,8 @@ def _resolve_item_target(owner_widget, descriptor: dict):
     kind = descriptor.get("kind")
     if kind == "table_cell":
         return _resolve_table_item(owner_widget, descriptor)
+    if kind == "list_item":
+        return _resolve_list_item(owner_widget, descriptor)
     if kind == "tree_node":
         return _resolve_tree_item(owner_widget, descriptor)
     raise ValueError(f"Unsupported item kind: {kind}")
@@ -1613,9 +1685,79 @@ def _tree_index_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
     }
 
 
+def _list_index_visible(owner_widget, resolved_target) -> bool:
+    view = _list_view(owner_widget)
+    rect_fn = getattr(view, "visualRect", None)
+    if not callable(rect_fn):
+        raise ValueError("List widget does not expose visualRect()")
+
+    rect = rect_fn(resolved_target["index"])
+    return not _rect_is_empty(rect)
+
+
+def _list_index_rect(owner_widget, resolved_target):
+    view = _list_view(owner_widget)
+    scroll_to = getattr(view, "scrollTo", None)
+    if callable(scroll_to):
+        hint = _qt_ensure_visible_hint()
+        if hint is None:
+            scroll_to(resolved_target["index"])
+        else:
+            scroll_to(resolved_target["index"], hint)
+
+    rect_fn = getattr(view, "visualRect", None)
+    if not callable(rect_fn):
+        raise ValueError("List widget does not expose visualRect()")
+
+    rect = rect_fn(resolved_target["index"])
+    if _rect_is_empty(rect):
+        raise ValueError("List item does not have a usable visible rectangle")
+    return rect
+
+
+def _list_index_text(owner_widget, resolved_target) -> str:
+    model = _list_model(owner_widget)
+    return _index_display_text(model, resolved_target["index"])
+
+
+def _list_index_properties(owner_widget, resolved_target) -> dict[str, Any]:
+    view = _list_view(owner_widget)
+    payload = {
+        "kind": "list_item",
+        "row": int(resolved_target["row"]),
+        "text": _list_index_text(owner_widget, resolved_target),
+        "selected": False,
+    }
+
+    selection_model = _selection_model(view)
+    is_selected = getattr(selection_model, "isSelected", None) if selection_model is not None else None
+    if callable(is_selected):
+        payload["selected"] = bool(is_selected(resolved_target["index"]))
+    return payload
+
+
+def _list_index_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
+    view = _list_view(owner_widget)
+    viewport = _primary_event_target(view)
+    rect = _list_index_rect(owner_widget, resolved_target)
+    top_left = rect.topLeft()
+    global_pos = viewport.mapToGlobal(top_left)
+
+    width = rect.width() if callable(getattr(rect, "width", None)) else getattr(rect, "width")
+    height = rect.height() if callable(getattr(rect, "height", None)) else getattr(rect, "height")
+    return {
+        "x": int(global_pos.x() if callable(getattr(global_pos, "x", None)) else global_pos.x),
+        "y": int(global_pos.y() if callable(getattr(global_pos, "y", None)) else global_pos.y),
+        "width": int(width),
+        "height": int(height),
+    }
+
+
 def _item_text(owner_widget, resolved_target) -> str:
     if resolved_target["kind"] == "table_cell":
         return _table_index_text(owner_widget, resolved_target)
+    if resolved_target["kind"] == "list_item":
+        return _list_index_text(owner_widget, resolved_target)
     if resolved_target["kind"] == "tree_node":
         return _tree_index_text(owner_widget, resolved_target)
     raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
@@ -1624,6 +1766,8 @@ def _item_text(owner_widget, resolved_target) -> str:
 def _item_properties(owner_widget, resolved_target) -> dict[str, Any]:
     if resolved_target["kind"] == "table_cell":
         return _table_index_properties(owner_widget, resolved_target)
+    if resolved_target["kind"] == "list_item":
+        return _list_index_properties(owner_widget, resolved_target)
     if resolved_target["kind"] == "tree_node":
         return _tree_index_properties(owner_widget, resolved_target)
     raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
@@ -1632,6 +1776,8 @@ def _item_properties(owner_widget, resolved_target) -> dict[str, Any]:
 def _item_visible(owner_widget, resolved_target) -> bool:
     if resolved_target["kind"] == "table_cell":
         return _table_index_visible(owner_widget, resolved_target)
+    if resolved_target["kind"] == "list_item":
+        return _list_index_visible(owner_widget, resolved_target)
     if resolved_target["kind"] == "tree_node":
         return _tree_index_visible(owner_widget, resolved_target)
     raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
@@ -1640,6 +1786,8 @@ def _item_visible(owner_widget, resolved_target) -> bool:
 def _item_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
     if resolved_target["kind"] == "table_cell":
         return _table_index_bounding_box(owner_widget, resolved_target)
+    if resolved_target["kind"] == "list_item":
+        return _list_index_bounding_box(owner_widget, resolved_target)
     if resolved_target["kind"] == "tree_node":
         return _tree_index_bounding_box(owner_widget, resolved_target)
     raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
@@ -1717,9 +1865,29 @@ def _hover_tree_index(owner_widget, resolved_target):
     _hover_widget(viewport, local_pos)
 
 
+def _click_list_index(owner_widget, resolved_target, *, double: bool = False):
+    view = _list_view(owner_widget)
+    viewport = _primary_event_target(view)
+    rect = _list_index_rect(owner_widget, resolved_target)
+    local_pos = rect.center()
+    _click_widget_at(viewport, local_pos, double=double)
+
+
+def _hover_list_index(owner_widget, resolved_target):
+    view = _list_view(owner_widget)
+    viewport = _primary_event_target(view)
+    rect = _list_index_rect(owner_widget, resolved_target)
+    local_pos = rect.center()
+    _move_visual_cursor(viewport, local_pos)
+    _hover_widget(viewport, local_pos)
+
+
 def _click_item(owner_widget, resolved_target, *, double: bool = False):
     if resolved_target["kind"] == "table_cell":
         _click_table_index(owner_widget, resolved_target, double=double)
+        return
+    if resolved_target["kind"] == "list_item":
+        _click_list_index(owner_widget, resolved_target, double=double)
         return
     if resolved_target["kind"] == "tree_node":
         _click_tree_index(owner_widget, resolved_target, double=double)
@@ -1730,6 +1898,9 @@ def _click_item(owner_widget, resolved_target, *, double: bool = False):
 def _hover_item(owner_widget, resolved_target):
     if resolved_target["kind"] == "table_cell":
         _hover_table_index(owner_widget, resolved_target)
+        return
+    if resolved_target["kind"] == "list_item":
+        _hover_list_index(owner_widget, resolved_target)
         return
     if resolved_target["kind"] == "tree_node":
         _hover_tree_index(owner_widget, resolved_target)

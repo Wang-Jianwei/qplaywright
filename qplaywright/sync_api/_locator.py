@@ -233,6 +233,23 @@ class Locator:
 
         return ItemLocator(self._conn, self._resolve_owner_wid(), item, timeout=self._timeout)
 
+    def list_item(self, item: int | str) -> ItemLocator:
+        descriptor: dict[str, Any] = {"kind": "list_item"}
+        if isinstance(item, bool):
+            raise TypeError("item must be an int or str")
+        if isinstance(item, int):
+            if item < 0:
+                raise ValueError("list item index must be >= 0")
+            descriptor["row"] = item
+        elif isinstance(item, str):
+            if not item:
+                raise ValueError("list item text must not be empty")
+            descriptor["text"] = item
+        else:
+            raise TypeError("item must be an int or str")
+
+        return ItemLocator(self._conn, self._resolve_owner_wid(), descriptor, timeout=self._timeout)
+
     def node(self, path: list[str | int]) -> ItemLocator:
         item = {
             "kind": "tree_node",

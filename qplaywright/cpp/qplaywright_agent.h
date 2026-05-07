@@ -2124,6 +2124,10 @@ private:
                 ResolvedTableItem target = resolveTableItem(owner, item);
                 return tableIndexText(owner, target);
             }
+            if (kind == "list_item") {
+                ResolvedListItem target = resolveListItem(owner, item);
+                return listIndexText(owner, target);
+            }
             if (kind == "tree_node") {
                 ResolvedTreeItem target = resolveTreeItem(owner, item);
                 return treeIndexText(owner, target);
@@ -2138,6 +2142,10 @@ private:
             if (kind == "table_cell") {
                 ResolvedTableItem target = resolveTableItem(owner, item);
                 return tableIndexProperties(owner, target);
+            }
+            if (kind == "list_item") {
+                ResolvedListItem target = resolveListItem(owner, item);
+                return listIndexProperties(owner, target);
             }
             if (kind == "tree_node") {
                 ResolvedTreeItem target = resolveTreeItem(owner, item);
@@ -2154,6 +2162,10 @@ private:
                 ResolvedTableItem target = resolveTableItem(owner, item);
                 return tableIndexVisible(owner, target);
             }
+            if (kind == "list_item") {
+                ResolvedListItem target = resolveListItem(owner, item);
+                return listIndexVisible(owner, target);
+            }
             if (kind == "tree_node") {
                 ResolvedTreeItem target = resolveTreeItem(owner, item);
                 return treeIndexVisible(owner, target);
@@ -2168,6 +2180,10 @@ private:
             if (kind == "table_cell") {
                 ResolvedTableItem target = resolveTableItem(owner, item);
                 return tableIndexBoundingBox(owner, target);
+            }
+            if (kind == "list_item") {
+                ResolvedListItem target = resolveListItem(owner, item);
+                return listIndexBoundingBox(owner, target);
             }
             if (kind == "tree_node") {
                 ResolvedTreeItem target = resolveTreeItem(owner, item);
@@ -2255,6 +2271,11 @@ private:
                 clickTableIndex(owner, target, false);
                 return true;
             }
+            if (kind == "list_item") {
+                ResolvedListItem target = resolveListItem(owner, item);
+                clickListIndex(owner, target, false);
+                return true;
+            }
             if (kind == "tree_node") {
                 ResolvedTreeItem target = resolveTreeItem(owner, item);
                 clickTreeIndex(owner, target, false);
@@ -2272,6 +2293,11 @@ private:
                 clickTableIndex(owner, target, true);
                 return true;
             }
+            if (kind == "list_item") {
+                ResolvedListItem target = resolveListItem(owner, item);
+                clickListIndex(owner, target, true);
+                return true;
+            }
             if (kind == "tree_node") {
                 ResolvedTreeItem target = resolveTreeItem(owner, item);
                 clickTreeIndex(owner, target, true);
@@ -2287,6 +2313,11 @@ private:
             if (kind == "table_cell") {
                 ResolvedTableItem target = resolveTableItem(owner, item);
                 hoverTableIndex(owner, target);
+                return true;
+            }
+            if (kind == "list_item") {
+                ResolvedListItem target = resolveListItem(owner, item);
+                hoverListIndex(owner, target);
                 return true;
             }
             if (kind == "tree_node") {
@@ -2541,6 +2572,12 @@ private:
         QModelIndex index;
     };
 
+    struct ResolvedListItem
+    {
+        int row;
+        QModelIndex index;
+    };
+
     struct ResolvedTreeItem
     {
         QModelIndex index;
@@ -2575,6 +2612,17 @@ private:
         if (!view) {
             throw std::runtime_error(
                 ("Item owner is not a supported tree widget: " + QString::fromLatin1(owner->metaObject()->className())).toStdString()
+            );
+        }
+        return view;
+    }
+
+    QListView *listView(QWidget *owner)
+    {
+        QListView *view = qobject_cast<QListView *>(owner);
+        if (!view) {
+            throw std::runtime_error(
+                ("Item owner is not a supported list widget: " + QString::fromLatin1(owner->metaObject()->className())).toStdString()
             );
         }
         return view;
@@ -2642,6 +2690,54 @@ private:
         }
         
         return {row, column, index};
+    }
+
+    ResolvedListItem resolveListItem(QWidget *owner, const QJsonObject &descriptor)
+    {
+        if (descriptor.value("kind").toString() != "list_item")
+            throw std::runtime_error(("Unsupported item kind: " + descriptor.value("kind").toString()).toStdString());
+
+        const bool hasRow = descriptor.contains("row");
+        const bool hasText = descriptor.contains("text");
+        if (hasRow == hasText)
+            throw std::runtime_error("List item descriptor requires exactly one of row or text");
+
+        QListView *view = listView(owner);
+        auto *model = view->model();
+        if (!model)
+            throw std::runtime_error("List widget model is not available");
+
+        const int rowCount = model->rowCount();
+        if (hasRow) {
+            if (!descriptor.value("row").isDouble())
+                throw std::runtime_error("List item row must be an int");
+
+            const int row = descriptor.value("row").toInt();
+            if (row < 0 || row >= rowCount)
+                throw std::runtime_error(("List item row out of range: " + QString::number(row)).toStdString());
+
+            const QModelIndex index = model->index(row, 0);
+            if (!index.isValid())
+                throw std::runtime_error(("List item index is not valid: row=" + QString::number(row)).toStdString());
+            return {row, index};
+        }
+
+        const QString text = descriptor.value("text").toString();
+        if (text.isEmpty())
+            throw std::runtime_error("List item text must be a non-empty string");
+
+        QVector<QPair<int, QModelIndex>> matches;
+        for (int row = 0; row < rowCount; ++row) {
+            const QModelIndex candidate = model->index(row, 0);
+            if (model->data(candidate, Qt::DisplayRole).toString() == text)
+                matches.append(qMakePair(row, candidate));
+        }
+
+        if (matches.isEmpty())
+            throw std::runtime_error(("List item text not found: " + text).toStdString());
+        if (matches.size() > 1)
+            throw std::runtime_error(("Ambiguous list item text: " + text).toStdString());
+        return {matches.first().first, matches.first().second};
     }
 
     ResolvedTreeItem resolveTreeItem(QWidget *owner, const QJsonObject &descriptor)
@@ -2713,6 +2809,15 @@ private:
         return model->data(target.index, Qt::DisplayRole).toString();
     }
 
+    QString listIndexText(QWidget *owner, const ResolvedListItem &target)
+    {
+        QListView *view = listView(owner);
+        auto *model = view->model();
+        if (!model)
+            throw std::runtime_error("List widget model is not available");
+        return model->data(target.index, Qt::DisplayRole).toString();
+    }
+
     QJsonArray treeIndexPath(QAbstractItemModel *model, const QModelIndex &index)
     {
         QStringList reversed;
@@ -2742,6 +2847,13 @@ private:
         QTableView *view = tableView(owner);
         if (view->isColumnHidden(target.column))
             return false;
+        const QRect rect = view->visualRect(target.index);
+        return !rect.isEmpty();
+    }
+
+    bool listIndexVisible(QWidget *owner, const ResolvedListItem &target)
+    {
+        QListView *view = listView(owner);
         const QRect rect = view->visualRect(target.index);
         return !rect.isEmpty();
     }
@@ -2786,6 +2898,16 @@ private:
         return rect;
     }
 
+    QRect listIndexRect(QWidget *owner, const ResolvedListItem &target)
+    {
+        QListView *view = listView(owner);
+        view->scrollTo(target.index, QAbstractItemView::EnsureVisible);
+        const QRect rect = view->visualRect(target.index);
+        if (rect.isEmpty())
+            throw std::runtime_error("List item does not have a usable visible rectangle");
+        return rect;
+    }
+
     QRect treeIndexRect(QWidget *owner, const ResolvedTreeItem &target)
     {
         QTreeView *view = treeView(owner);
@@ -2815,6 +2937,17 @@ private:
         return payload;
     }
 
+    QJsonObject listIndexProperties(QWidget *owner, const ResolvedListItem &target)
+    {
+        QListView *view = listView(owner);
+        QJsonObject payload;
+        payload["kind"] = "list_item";
+        payload["row"] = target.row;
+        payload["text"] = listIndexText(owner, target);
+        payload["selected"] = view->selectionModel() && view->selectionModel()->isSelected(target.index);
+        return payload;
+    }
+
     QJsonObject treeIndexProperties(QWidget *owner, const ResolvedTreeItem &target)
     {
         QTreeView *view = treeView(owner);
@@ -2836,6 +2969,20 @@ private:
         QTableView *view = tableView(owner);
         QWidget *targetWidget = primaryEventTarget(view);
         const QRect rect = tableIndexRect(owner, target);
+        const QPoint global = targetWidget->mapToGlobal(rect.topLeft());
+        QJsonObject payload;
+        payload["x"] = global.x();
+        payload["y"] = global.y();
+        payload["width"] = rect.width();
+        payload["height"] = rect.height();
+        return payload;
+    }
+
+    QJsonObject listIndexBoundingBox(QWidget *owner, const ResolvedListItem &target)
+    {
+        QListView *view = listView(owner);
+        QWidget *targetWidget = primaryEventTarget(view);
+        const QRect rect = listIndexRect(owner, target);
         const QPoint global = targetWidget->mapToGlobal(rect.topLeft());
         QJsonObject payload;
         payload["x"] = global.x();
@@ -3050,6 +3197,14 @@ private:
         clickWidgetAt(targetWidget, rect.center(), doubleClick);
     }
 
+    void clickListIndex(QWidget *owner, const ResolvedListItem &target, bool doubleClick)
+    {
+        QListView *view = listView(owner);
+        QWidget *targetWidget = primaryEventTarget(view);
+        const QRect rect = listIndexRect(owner, target);
+        clickWidgetAt(targetWidget, rect.center(), doubleClick);
+    }
+
     void clickTreeIndex(QWidget *owner, const ResolvedTreeItem &target, bool doubleClick)
     {
         QTreeView *view = treeView(owner);
@@ -3160,6 +3315,37 @@ private:
         QTableView *view = tableView(owner);
         QWidget *targetWidget = primaryEventTarget(view);
         const QRect rect = tableIndexRect(owner, target);
+        const QPoint center = rect.center();
+        updateVisualFeedback(targetWidget, center, 0);
+        const QPoint globalPos = targetWidget->mapToGlobal(center);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QMouseEvent event(
+            QEvent::MouseMove,
+            QPointF(center),
+            QPointF(globalPos),
+            Qt::NoButton,
+            Qt::NoButton,
+            Qt::NoModifier
+        );
+#else
+        QMouseEvent event(
+            QEvent::MouseMove,
+            center,
+            globalPos,
+            Qt::NoButton,
+            Qt::NoButton,
+            Qt::NoModifier
+        );
+#endif
+        QApplication::sendEvent(targetWidget, &event);
+        QApplication::processEvents();
+    }
+
+    void hoverListIndex(QWidget *owner, const ResolvedListItem &target)
+    {
+        QListView *view = listView(owner);
+        QWidget *targetWidget = primaryEventTarget(view);
+        const QRect rect = listIndexRect(owner, target);
         const QPoint center = rect.center();
         updateVisualFeedback(targetWidget, center, 0);
         const QPoint globalPos = targetWidget->mapToGlobal(center);
