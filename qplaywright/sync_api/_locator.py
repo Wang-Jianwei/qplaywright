@@ -40,10 +40,36 @@ from qplaywright.protocol import (
     METHOD_ITEM_CLICK,
     METHOD_ITEM_DBLCLICK,
     METHOD_ITEM_HOVER,
+    METHOD_ITEM_EXPAND,
+    METHOD_ITEM_COLLAPSE,
 )
 
 if TYPE_CHECKING:
     from qplaywright.sync_api._connection import Connection
+
+
+def _normalize_tree_path(path: list[str | int]) -> list[str | int]:
+    if not isinstance(path, list):
+        raise TypeError("path must be a list")
+    if not path:
+        raise ValueError("path must not be empty")
+
+    normalized: list[str | int] = []
+    for segment in path:
+        if isinstance(segment, bool):
+            raise TypeError("tree path segments must be int or str")
+        if isinstance(segment, int):
+            if segment < 0:
+                raise ValueError("tree path indices must be >= 0")
+            normalized.append(segment)
+            continue
+        if isinstance(segment, str):
+            if not segment:
+                raise ValueError("tree path text segments must not be empty")
+            normalized.append(segment)
+            continue
+        raise TypeError("tree path segments must be int or str")
+    return normalized
 
 
 class ItemLocator:
@@ -89,6 +115,12 @@ class ItemLocator:
 
     def hover(self) -> None:
         self._send(METHOD_ITEM_HOVER)
+
+    def expand(self) -> None:
+        self._send(METHOD_ITEM_EXPAND)
+
+    def collapse(self) -> None:
+        self._send(METHOD_ITEM_COLLAPSE)
 
     def __repr__(self) -> str:
         return f"ItemLocator(owner_wid={self._owner_wid}, item={self._item!r})"
@@ -200,6 +232,20 @@ class Locator:
             raise TypeError("column must be an int or str")
 
         return ItemLocator(self._conn, self._resolve_owner_wid(), item, timeout=self._timeout)
+
+    def node(self, path: list[str | int]) -> ItemLocator:
+        item = {
+            "kind": "tree_node",
+            "path": _normalize_tree_path(path),
+        }
+        return ItemLocator(self._conn, self._resolve_owner_wid(), item, timeout=self._timeout)
+
+    def root_node(self, index: int) -> ItemLocator:
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise TypeError("index must be an int")
+        if index < 0:
+            raise ValueError("index must be >= 0")
+        return self.node([index])
 
     def nth(self, index: int) -> Locator:
         """Select the nth matching widget (0-based)."""

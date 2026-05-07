@@ -46,6 +46,8 @@ from qplaywright.protocol import (
     METHOD_ITEM_CLICK,
     METHOD_ITEM_DBLCLICK,
     METHOD_ITEM_HOVER,
+    METHOD_ITEM_EXPAND,
+    METHOD_ITEM_COLLAPSE,
     METHOD_IS_VISIBLE,
     METHOD_IS_ENABLED,
     METHOD_IS_CHECKED,
@@ -1252,6 +1254,181 @@ def _resolve_table_item(owner_widget, descriptor: dict):
     }
 
 
+def _tree_view(owner_widget):
+    class_name = _widget_class_name(owner_widget)
+    if class_name not in {"QTreeView", "QTreeWidget"}:
+        raise ValueError(f"Item owner is not a supported tree widget: {class_name}")
+    return owner_widget
+
+
+def _tree_model(owner_widget):
+    view = _tree_view(owner_widget)
+    model_fn = getattr(view, "model", None)
+    if not callable(model_fn):
+        raise ValueError(f"Tree widget does not expose a model: {_widget_class_name(view)}")
+    model = model_fn()
+    if model is None:
+        raise ValueError("Tree widget model is not available")
+    return model
+
+
+def _invalid_model_index():
+    model_index_type = getattr(_QtCore, "QModelIndex", None) if _QtCore is not None else None
+    if callable(model_index_type):
+        try:
+            return model_index_type()
+        except Exception:
+            return None
+    return None
+
+
+def _call_with_optional_parent(fn, parent_index):
+    if parent_index is not None:
+        try:
+            return fn(parent_index)
+        except TypeError:
+            pass
+    return fn()
+
+
+def _model_row_count(model, parent_index):
+    row_count_fn = getattr(model, "rowCount", None)
+    if not callable(row_count_fn):
+        raise ValueError("Tree model does not expose rowCount()")
+    return int(_call_with_optional_parent(row_count_fn, parent_index))
+
+
+def _model_index(model, row: int, column: int, parent_index):
+    index_fn = getattr(model, "index", None)
+    if not callable(index_fn):
+        raise ValueError("Tree model does not expose index()")
+    if parent_index is not None:
+        try:
+            return index_fn(row, column, parent_index)
+        except TypeError:
+            pass
+    return index_fn(row, column)
+
+
+def _tree_index_parent(index):
+    parent_fn = getattr(index, "parent", None)
+    if not callable(parent_fn):
+        return None
+    parent = parent_fn()
+    if not _is_valid_model_index(parent):
+        return None
+    return parent
+
+
+def _tree_index_path(model, index) -> list[str]:
+    parts: list[str] = []
+    current = index
+    while _is_valid_model_index(current):
+        parts.append(_index_display_text(model, current))
+        current = _tree_index_parent(current)
+    parts.reverse()
+    return parts
+
+
+def _tree_index_is_expanded(view, index) -> bool:
+    is_expanded = getattr(view, "isExpanded", None)
+    if callable(is_expanded):
+        return bool(is_expanded(index))
+    return False
+
+
+def _tree_index_hidden(view, index) -> bool:
+    is_index_hidden = getattr(view, "isIndexHidden", None)
+    if callable(is_index_hidden):
+        return bool(is_index_hidden(index))
+
+    is_row_hidden = getattr(view, "isRowHidden", None)
+    if not callable(is_row_hidden):
+        return False
+
+    row_fn = getattr(index, "row", None)
+    row = row_fn() if callable(row_fn) else None
+    if row is None:
+        return False
+
+    parent_index = _tree_index_parent(index)
+    if parent_index is not None:
+        try:
+            return bool(is_row_hidden(int(row), parent_index))
+        except TypeError:
+            pass
+    try:
+        return bool(is_row_hidden(int(row)))
+    except TypeError:
+        return False
+
+
+def _tree_index_hidden_by_collapsed_ancestor(view, index) -> bool:
+    current = _tree_index_parent(index)
+    while current is not None:
+        if not _tree_index_is_expanded(view, current):
+            return True
+        current = _tree_index_parent(current)
+    return False
+
+
+def _resolve_tree_item(owner_widget, descriptor: dict):
+    if not isinstance(descriptor, dict):
+        raise ValueError("Item descriptor must be an object")
+    if descriptor.get("kind") != "tree_node":
+        raise ValueError(f"Unsupported item kind: {descriptor.get('kind')}")
+
+    path = descriptor.get("path")
+    if not isinstance(path, list) or not path:
+        raise ValueError("Tree node descriptor requires a non-empty path list")
+
+    model = _tree_model(owner_widget)
+    parent_index = _invalid_model_index()
+    current_index = None
+    for depth, segment in enumerate(path):
+        if isinstance(segment, bool) or not isinstance(segment, (int, str)):
+            raise ValueError("Tree path segments must be int or str")
+
+        row_count = _model_row_count(model, parent_index)
+        if isinstance(segment, int):
+            if segment < 0 or segment >= row_count:
+                raise ValueError(f"Tree path index out of range at depth {depth}: {segment}")
+            current_index = _model_index(model, segment, 0, parent_index)
+        else:
+            matches = []
+            for row in range(row_count):
+                candidate = _model_index(model, row, 0, parent_index)
+                if _index_display_text(model, candidate) == segment:
+                    matches.append(candidate)
+            if not matches:
+                raise ValueError(f"Tree path segment not found: {segment}")
+            if len(matches) > 1:
+                raise ValueError(f"Ambiguous tree path segment: {segment}")
+            current_index = matches[0]
+
+        if not _is_valid_model_index(current_index):
+            raise ValueError(f"Tree node index is not valid at depth {depth}: {segment}")
+        parent_index = current_index
+
+    return {
+        "kind": "tree_node",
+        "path": list(path),
+        "index": current_index,
+    }
+
+
+def _resolve_item_target(owner_widget, descriptor: dict):
+    if not isinstance(descriptor, dict):
+        raise ValueError("Item descriptor must be an object")
+
+    kind = descriptor.get("kind")
+    if kind == "table_cell":
+        return _resolve_table_item(owner_widget, descriptor)
+    if kind == "tree_node":
+        return _resolve_tree_item(owner_widget, descriptor)
+    raise ValueError(f"Unsupported item kind: {kind}")
+
+
 def _rect_is_empty(rect) -> bool:
     if rect is None:
         return True
@@ -1346,6 +1523,128 @@ def _table_index_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
     }
 
 
+def _tree_index_visible(owner_widget, resolved_target) -> bool:
+    view = _tree_view(owner_widget)
+    index = resolved_target["index"]
+
+    is_column_hidden = getattr(view, "isColumnHidden", None)
+    if callable(is_column_hidden) and is_column_hidden(0):
+        return False
+    if _tree_index_hidden_by_collapsed_ancestor(view, index):
+        return False
+    if _tree_index_hidden(view, index):
+        return False
+
+    rect_fn = getattr(view, "visualRect", None)
+    if not callable(rect_fn):
+        raise ValueError("Tree widget does not expose visualRect()")
+
+    rect = rect_fn(index)
+    return not _rect_is_empty(rect)
+
+
+def _tree_index_rect(owner_widget, resolved_target):
+    view = _tree_view(owner_widget)
+    index = resolved_target["index"]
+
+    is_column_hidden = getattr(view, "isColumnHidden", None)
+    if callable(is_column_hidden) and is_column_hidden(0):
+        raise ValueError("Tree node is not visible because column 0 is hidden")
+    if _tree_index_hidden_by_collapsed_ancestor(view, index):
+        raise ValueError("Tree node is not visible because an ancestor is collapsed")
+    if _tree_index_hidden(view, index):
+        raise ValueError("Tree node is hidden in the current view")
+
+    scroll_to = getattr(view, "scrollTo", None)
+    if callable(scroll_to):
+        hint = _qt_ensure_visible_hint()
+        if hint is None:
+            scroll_to(index)
+        else:
+            scroll_to(index, hint)
+
+    rect_fn = getattr(view, "visualRect", None)
+    if not callable(rect_fn):
+        raise ValueError("Tree widget does not expose visualRect()")
+
+    rect = rect_fn(index)
+    if _rect_is_empty(rect):
+        raise ValueError("Tree node does not have a usable visible rectangle")
+    return rect
+
+
+def _tree_index_text(owner_widget, resolved_target) -> str:
+    model = _tree_model(owner_widget)
+    return _index_display_text(model, resolved_target["index"])
+
+
+def _tree_index_properties(owner_widget, resolved_target) -> dict[str, Any]:
+    view = _tree_view(owner_widget)
+    model = _tree_model(owner_widget)
+    payload = {
+        "kind": "tree_node",
+        "text": _tree_index_text(owner_widget, resolved_target),
+        "path": _tree_index_path(model, resolved_target["index"]),
+        "expanded": _tree_index_is_expanded(view, resolved_target["index"]),
+        "selected": False,
+    }
+
+    selection_model = _selection_model(view)
+    is_selected = getattr(selection_model, "isSelected", None) if selection_model is not None else None
+    if callable(is_selected):
+        payload["selected"] = bool(is_selected(resolved_target["index"]))
+    return payload
+
+
+def _tree_index_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
+    view = _tree_view(owner_widget)
+    viewport = _primary_event_target(view)
+    rect = _tree_index_rect(view, resolved_target)
+    top_left = rect.topLeft()
+    global_pos = viewport.mapToGlobal(top_left)
+
+    width = rect.width() if callable(getattr(rect, "width", None)) else getattr(rect, "width")
+    height = rect.height() if callable(getattr(rect, "height", None)) else getattr(rect, "height")
+    return {
+        "x": int(global_pos.x() if callable(getattr(global_pos, "x", None)) else global_pos.x),
+        "y": int(global_pos.y() if callable(getattr(global_pos, "y", None)) else global_pos.y),
+        "width": int(width),
+        "height": int(height),
+    }
+
+
+def _item_text(owner_widget, resolved_target) -> str:
+    if resolved_target["kind"] == "table_cell":
+        return _table_index_text(owner_widget, resolved_target)
+    if resolved_target["kind"] == "tree_node":
+        return _tree_index_text(owner_widget, resolved_target)
+    raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
+
+
+def _item_properties(owner_widget, resolved_target) -> dict[str, Any]:
+    if resolved_target["kind"] == "table_cell":
+        return _table_index_properties(owner_widget, resolved_target)
+    if resolved_target["kind"] == "tree_node":
+        return _tree_index_properties(owner_widget, resolved_target)
+    raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
+
+
+def _item_visible(owner_widget, resolved_target) -> bool:
+    if resolved_target["kind"] == "table_cell":
+        return _table_index_visible(owner_widget, resolved_target)
+    if resolved_target["kind"] == "tree_node":
+        return _tree_index_visible(owner_widget, resolved_target)
+    raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
+
+
+def _item_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
+    if resolved_target["kind"] == "table_cell":
+        return _table_index_bounding_box(owner_widget, resolved_target)
+    if resolved_target["kind"] == "tree_node":
+        return _tree_index_bounding_box(owner_widget, resolved_target)
+    raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
+
+
 def _click_widget_at(widget, pos, *, double: bool = False):
     _import_qt()
     QTest = _QtTest
@@ -1399,6 +1698,79 @@ def _hover_table_index(owner_widget, resolved_target):
     local_pos = rect.center()
     _move_visual_cursor(viewport, local_pos)
     _hover_widget(viewport, local_pos)
+
+
+def _click_tree_index(owner_widget, resolved_target, *, double: bool = False):
+    view = _tree_view(owner_widget)
+    viewport = _primary_event_target(view)
+    rect = _tree_index_rect(view, resolved_target)
+    local_pos = rect.center()
+    _click_widget_at(viewport, local_pos, double=double)
+
+
+def _hover_tree_index(owner_widget, resolved_target):
+    view = _tree_view(owner_widget)
+    viewport = _primary_event_target(view)
+    rect = _tree_index_rect(view, resolved_target)
+    local_pos = rect.center()
+    _move_visual_cursor(viewport, local_pos)
+    _hover_widget(viewport, local_pos)
+
+
+def _click_item(owner_widget, resolved_target, *, double: bool = False):
+    if resolved_target["kind"] == "table_cell":
+        _click_table_index(owner_widget, resolved_target, double=double)
+        return
+    if resolved_target["kind"] == "tree_node":
+        _click_tree_index(owner_widget, resolved_target, double=double)
+        return
+    raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
+
+
+def _hover_item(owner_widget, resolved_target):
+    if resolved_target["kind"] == "table_cell":
+        _hover_table_index(owner_widget, resolved_target)
+        return
+    if resolved_target["kind"] == "tree_node":
+        _hover_tree_index(owner_widget, resolved_target)
+        return
+    raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
+
+
+def _expand_tree_index(owner_widget, resolved_target):
+    view = _tree_view(owner_widget)
+    index = resolved_target["index"]
+    expand_fn = getattr(view, "expand", None)
+    if callable(expand_fn):
+        expand_fn(index)
+        _process_events()
+        return
+
+    set_expanded = getattr(view, "setExpanded", None)
+    if callable(set_expanded):
+        set_expanded(index, True)
+        _process_events()
+        return
+
+    raise ValueError("Tree widget does not support expand()")
+
+
+def _collapse_tree_index(owner_widget, resolved_target):
+    view = _tree_view(owner_widget)
+    index = resolved_target["index"]
+    collapse_fn = getattr(view, "collapse", None)
+    if callable(collapse_fn):
+        collapse_fn(index)
+        _process_events()
+        return
+
+    set_expanded = getattr(view, "setExpanded", None)
+    if callable(set_expanded):
+        set_expanded(index, False)
+        _process_events()
+        return
+
+    raise ValueError("Tree widget does not support collapse()")
 
 
 def _key_to_qt(key_str: str):
@@ -1534,23 +1906,23 @@ def _handle_command(req: Request) -> Any:
 
     if method == METHOD_ITEM_TEXT:
         owner = _resolve_item_owner(params)
-        target = _resolve_table_item(owner, params.get("item") or {})
-        return _table_index_text(owner, target)
+        target = _resolve_item_target(owner, params.get("item") or {})
+        return _item_text(owner, target)
 
     if method == METHOD_ITEM_PROPERTIES:
         owner = _resolve_item_owner(params)
-        target = _resolve_table_item(owner, params.get("item") or {})
-        return _table_index_properties(owner, target)
+        target = _resolve_item_target(owner, params.get("item") or {})
+        return _item_properties(owner, target)
 
     if method == METHOD_ITEM_VISIBLE:
         owner = _resolve_item_owner(params)
-        target = _resolve_table_item(owner, params.get("item") or {})
-        return _table_index_visible(owner, target)
+        target = _resolve_item_target(owner, params.get("item") or {})
+        return _item_visible(owner, target)
 
     if method == METHOD_ITEM_BOUNDING_BOX:
         owner = _resolve_item_owner(params)
-        target = _resolve_table_item(owner, params.get("item") or {})
-        return _table_index_bounding_box(owner, target)
+        target = _resolve_item_target(owner, params.get("item") or {})
+        return _item_bounding_box(owner, target)
 
     # -- Actions -------------------------------------------------------------
     if method == METHOD_CLICK:
@@ -1628,20 +2000,36 @@ def _handle_command(req: Request) -> Any:
 
     if method == METHOD_ITEM_CLICK:
         owner = _resolve_item_owner(params)
-        target = _resolve_table_item(owner, params.get("item") or {})
-        _click_table_index(owner, target, double=False)
+        target = _resolve_item_target(owner, params.get("item") or {})
+        _click_item(owner, target, double=False)
         return True
 
     if method == METHOD_ITEM_DBLCLICK:
         owner = _resolve_item_owner(params)
-        target = _resolve_table_item(owner, params.get("item") or {})
-        _click_table_index(owner, target, double=True)
+        target = _resolve_item_target(owner, params.get("item") or {})
+        _click_item(owner, target, double=True)
         return True
 
     if method == METHOD_ITEM_HOVER:
         owner = _resolve_item_owner(params)
-        target = _resolve_table_item(owner, params.get("item") or {})
-        _hover_table_index(owner, target)
+        target = _resolve_item_target(owner, params.get("item") or {})
+        _hover_item(owner, target)
+        return True
+
+    if method == METHOD_ITEM_EXPAND:
+        owner = _resolve_item_owner(params)
+        target = _resolve_item_target(owner, params.get("item") or {})
+        if target["kind"] != "tree_node":
+            raise ValueError("expand() is only supported for tree nodes")
+        _expand_tree_index(owner, target)
+        return True
+
+    if method == METHOD_ITEM_COLLAPSE:
+        owner = _resolve_item_owner(params)
+        target = _resolve_item_target(owner, params.get("item") or {})
+        if target["kind"] != "tree_node":
+            raise ValueError("collapse() is only supported for tree nodes")
+        _collapse_tree_index(owner, target)
         return True
 
     if method == METHOD_FOCUS:

@@ -162,6 +162,49 @@ def test_item_locator_is_visible_sends_item_visible_request():
     ]
 
 
+def test_locator_node_resolves_owner_widget_before_expand():
+    conn = SequencedConnection({"find": {"wid": 31}, "item_expand": True})
+    locator = Locator(cast(Any, conn), "role=tree", timeout=5.0)
+
+    locator.node(["Settings", 1]).expand()
+
+    assert conn.calls == [
+        ("find", {"selector": "role=tree"}, 5.0),
+        (
+            "item_expand",
+            {
+                "wid": 31,
+                "item": {
+                    "kind": "tree_node",
+                    "path": ["Settings", 1],
+                },
+            },
+            5.0,
+        ),
+    ]
+
+
+def test_locator_root_node_builds_tree_descriptor_for_collapse():
+    conn = FakeConnection()
+    locator = Locator(cast(Any, conn), "", widget_wid=9, timeout=2.5)
+
+    locator.root_node(0).collapse()
+
+    assert conn.calls == [
+        (
+            "item_collapse",
+            {
+                "wid": 9,
+                "item": {
+                    "kind": "tree_node",
+                    "path": [0],
+                },
+            },
+            2.5,
+        )
+    ]
+
+
 @dataclass(eq=True)
 class FakePoint:
     x_value: int
@@ -259,6 +302,85 @@ class FakeSelectionModel:
         return (index.row(), index.column()) in self._selected
 
 
+class FakeTreeNode:
+    def __init__(self, text: str, children: list[FakeTreeNode] | None = None):
+        self.text = text
+        self.children = list(children or [])
+
+
+class FakeTreeIndex:
+    def __init__(self, model, node: FakeTreeNode | None = None, *, row: int = -1, parent=None, valid: bool = False):
+        self._model = model
+        self._node = node
+        self._row = row
+        self._parent = parent
+        self._valid = valid
+
+    def row(self) -> int:
+        return self._row
+
+    def column(self) -> int:
+        return 0
+
+    def parent(self):
+        return self._parent if self._parent is not None else self._model.invalid_index()
+
+    def isValid(self) -> bool:
+        return self._valid
+
+    def data(self, role=None):
+        return self._model.data(self, role)
+
+
+class FakeTreeModel:
+    def __init__(self, roots: list[FakeTreeNode]):
+        self._roots = roots
+
+    def invalid_index(self):
+        return FakeTreeIndex(self)
+
+    def _children(self, parent=None) -> list[FakeTreeNode]:
+        if parent is None or not parent.isValid():
+            return self._roots
+        assert parent._node is not None
+        return parent._node.children
+
+    def rowCount(self, parent=None) -> int:
+        return len(self._children(parent))
+
+    def index(self, row: int, column: int, parent=None):
+        children = self._children(parent)
+        if column != 0 or row < 0 or row >= len(children):
+            return self.invalid_index()
+        parent_index = parent if parent is not None and parent.isValid() else None
+        return FakeTreeIndex(self, children[row], row=row, parent=parent_index, valid=True)
+
+    def data(self, index: FakeTreeIndex, role=None):
+        if not index.isValid() or index._node is None:
+            return None
+        return index._node.text
+
+    def text_path(self, index: FakeTreeIndex) -> tuple[str, ...]:
+        if not index.isValid():
+            return ()
+        parts: list[str] = []
+        current = index
+        while current.isValid() and current._node is not None:
+            parts.append(current._node.text)
+            current = current.parent()
+        parts.reverse()
+        return tuple(parts)
+
+
+class FakeTreeSelectionModel:
+    def __init__(self, model: FakeTreeModel, selected_paths: set[tuple[str, ...]] | None = None):
+        self._model = model
+        self._selected_paths = set(selected_paths or set())
+
+    def isSelected(self, index: FakeTreeIndex) -> bool:
+        return self._model.text_path(index) in self._selected_paths
+
+
 class FakeViewport:
     def __init__(self, *, global_origin: FakePoint = FakePoint(100, 200)):
         self._global_origin = global_origin
@@ -319,6 +441,73 @@ class FakeTableView:
 
     def selectionModel(self):
         return self._selection_model
+
+
+class FakeTreeView:
+    def __init__(
+        self,
+        roots: list[FakeTreeNode],
+        *,
+        rects: dict[tuple[str, ...], FakeRect] | None = None,
+        expanded_paths: set[tuple[str, ...]] | None = None,
+        selected_paths: set[tuple[str, ...]] | None = None,
+        class_name: str = "QTreeView",
+    ):
+        self._meta = FakeMetaObject(class_name)
+        self._model = FakeTreeModel(roots)
+        self._viewport = FakeViewport()
+        self._rects = dict(rects or {})
+        self._expanded_paths = set(expanded_paths or set())
+        self._selection_model = FakeTreeSelectionModel(self._model, selected_paths)
+        self.scroll_calls: list[tuple[tuple[str, ...], tuple[object, ...]]] = []
+        self.expand_calls: list[tuple[str, ...]] = []
+        self.collapse_calls: list[tuple[str, ...]] = []
+
+    def metaObject(self):
+        return self._meta
+
+    def model(self):
+        return self._model
+
+    def viewport(self):
+        return self._viewport
+
+    def selectionModel(self):
+        return self._selection_model
+
+    def isColumnHidden(self, column: int) -> bool:
+        return False
+
+    def _path(self, index: FakeTreeIndex) -> tuple[str, ...]:
+        return self._model.text_path(index)
+
+    def _is_visible_path(self, path: tuple[str, ...]) -> bool:
+        for depth in range(1, len(path)):
+            if path[:depth] not in self._expanded_paths:
+                return False
+        return True
+
+    def visualRect(self, index: FakeTreeIndex):
+        path = self._path(index)
+        if not self._is_visible_path(path):
+            return FakeRect(0, 0, 0, 0)
+        return self._rects.get(path, FakeRect(0, 0, 0, 0))
+
+    def scrollTo(self, index: FakeTreeIndex, *args):
+        self.scroll_calls.append((self._path(index), args))
+
+    def isExpanded(self, index: FakeTreeIndex) -> bool:
+        return self._path(index) in self._expanded_paths
+
+    def expand(self, index: FakeTreeIndex):
+        path = self._path(index)
+        self.expand_calls.append(path)
+        self._expanded_paths.add(path)
+
+    def collapse(self, index: FakeTreeIndex):
+        path = self._path(index)
+        self.collapse_calls.append(path)
+        self._expanded_paths.discard(path)
 
 
 class FakeQTest:
@@ -467,3 +656,117 @@ def test_handle_command_item_click_uses_viewport_local_rect_center(monkeypatch):
         ("click", table.viewport(), "left", "none", FakePoint(30, 29))
     ]
     assert table.scroll_calls == [(0, 1, ("ensure_visible",))]
+
+
+def test_handle_command_item_text_reads_tree_node(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tree = FakeTreeView(
+        [FakeTreeNode("Settings", [FakeTreeNode("General"), FakeTreeNode("Advanced")])],
+        rects={
+            ("Settings",): FakeRect(4, 6, 60, 16),
+            ("Settings", "Advanced"): FakeRect(12, 28, 80, 18),
+        },
+        expanded_paths={("Settings",)},
+    )
+    wid = server._registry.register(tree)
+
+    result = server._handle_command(Request(method="item_text", params={"wid": wid, "item": {"kind": "tree_node", "path": ["Settings", "Advanced"]}}))
+
+    assert result == "Advanced"
+
+
+def test_handle_command_item_properties_reports_tree_state(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tree = FakeTreeView(
+        [FakeTreeNode("Settings", [FakeTreeNode("General"), FakeTreeNode("Advanced")])],
+        rects={
+            ("Settings",): FakeRect(4, 6, 60, 16),
+            ("Settings", "Advanced"): FakeRect(12, 28, 80, 18),
+        },
+        expanded_paths={("Settings",), ("Settings", "Advanced")},
+        selected_paths={("Settings", "Advanced")},
+    )
+    wid = server._registry.register(tree)
+
+    result = server._handle_command(Request(method="item_properties", params={"wid": wid, "item": {"kind": "tree_node", "path": ["Settings", "Advanced"]}}))
+
+    assert result == {
+        "kind": "tree_node",
+        "text": "Advanced",
+        "path": ["Settings", "Advanced"],
+        "expanded": True,
+        "selected": True,
+    }
+
+
+def test_handle_command_item_visible_false_when_tree_node_hidden_by_collapsed_ancestor(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tree = FakeTreeView(
+        [FakeTreeNode("Settings", [FakeTreeNode("Advanced")])],
+        rects={
+            ("Settings",): FakeRect(4, 6, 60, 16),
+            ("Settings", "Advanced"): FakeRect(12, 28, 80, 18),
+        },
+    )
+    wid = server._registry.register(tree)
+
+    result = server._handle_command(Request(method="item_visible", params={"wid": wid, "item": {"kind": "tree_node", "path": ["Settings", "Advanced"]}}))
+
+    assert result is False
+
+
+def test_handle_command_item_click_uses_tree_viewport_local_rect_center(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tree = FakeTreeView(
+        [FakeTreeNode("Settings", [FakeTreeNode("Advanced")])],
+        rects={
+            ("Settings",): FakeRect(4, 6, 60, 16),
+            ("Settings", "Advanced"): FakeRect(12, 28, 80, 18),
+        },
+        expanded_paths={("Settings",)},
+    )
+    wid = server._registry.register(tree)
+
+    result = server._handle_command(Request(method="item_click", params={"wid": wid, "item": {"kind": "tree_node", "path": ["Settings", "Advanced"]}}))
+
+    assert result is True
+    assert FakeQTest.calls == [
+        ("click", tree.viewport(), "left", "none", FakePoint(52, 37))
+    ]
+    assert tree.scroll_calls == [(("Settings", "Advanced"), ("ensure_visible",))]
+
+
+def test_handle_command_item_expand_and_collapse_tree_node(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tree = FakeTreeView(
+        [FakeTreeNode("Settings", [FakeTreeNode("Advanced")])],
+        rects={("Settings",): FakeRect(4, 6, 60, 16)},
+    )
+    wid = server._registry.register(tree)
+
+    expand_result = server._handle_command(Request(method="item_expand", params={"wid": wid, "item": {"kind": "tree_node", "path": ["Settings"]}}))
+    collapse_result = server._handle_command(Request(method="item_collapse", params={"wid": wid, "item": {"kind": "tree_node", "path": ["Settings"]}}))
+
+    assert expand_result is True
+    assert collapse_result is True
+    assert tree.expand_calls == [("Settings",)]
+    assert tree.collapse_calls == [("Settings",)]
+
+
+def test_handle_command_item_text_rejects_ambiguous_tree_path_segment(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tree = FakeTreeView(
+        [FakeTreeNode("Settings", [FakeTreeNode("Advanced"), FakeTreeNode("Advanced")])],
+        rects={("Settings",): FakeRect(4, 6, 60, 16)},
+        expanded_paths={("Settings",)},
+    )
+    wid = server._registry.register(tree)
+
+    with pytest.raises(ValueError, match="Ambiguous tree path segment: Advanced"):
+        server._handle_command(Request(method="item_text", params={"wid": wid, "item": {"kind": "tree_node", "path": ["Settings", "Advanced"]}}))
