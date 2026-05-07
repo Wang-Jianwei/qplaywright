@@ -359,6 +359,8 @@ Request:
 Each returned entry includes an `item` descriptor plus a reusable `target` object in the form `{owner, item}`.
 Use those returned `target` objects directly with `inspect`, `click`, `hover`, `wait`, and `set_expanded`.
 Snapshot refs remain widget-only; item discovery is handled by `inspect_items`.
+When `snapshot` or widget-tree `inspect` encounters a table, tree, or list owner widget, it may include an `itemView`
+hint so the next discovery step is explicit instead of implying that per-cell delegates are normal widget descendants.
 
 When `target` is omitted and `topmost_only=true`, the returned tree is an
 approximate frontmost-visible view and may be incomplete.
@@ -419,6 +421,18 @@ When `target` is omitted, the current active window is captured.
 When clipping fields are provided, all of `x`, `y`, `width`, and `height` must be present.
 When `path` is omitted, the MCP server writes the capture to a managed temporary PNG file and returns that file path.
 These managed screenshot files live under a dedicated qplaywright temp directory and are cleaned up when the MCP server exits.
+
+## Item Views And Snapshot
+
+`snapshot` and targetless `inspect` serialize the real QWidget tree.
+For item views, that means:
+
+- real child widgets such as persistent editors or `setIndexWidget()` content can appear when Qt has actually created them
+- paint-only delegates and non-persistent editors do not appear as widgets, because they are not stable QWidget descendants
+- item-view owner widgets may expose `itemView: {kind, discoverableBy}` to point you to `inspect_items`
+
+If you need to discover table cells, tree nodes, or list rows reliably, use `inspect_items` first instead of expecting `snapshot`
+to materialize delegate-painted item content as standalone widgets.
 
 ## End-to-End Demo
 

@@ -427,6 +427,17 @@ def _widget_class_name(widget) -> str:
     return mo.className() if mo else type(widget).__name__
 
 
+def _widget_item_view_kind(widget) -> str:
+    hierarchy = set(_class_hierarchy(widget))
+    if hierarchy.intersection({"QTableView", "QTableWidget"}):
+        return "table"
+    if hierarchy.intersection({"QTreeView", "QTreeWidget"}):
+        return "tree"
+    if hierarchy.intersection({"QListView", "QListWidget"}):
+        return "list"
+    return ""
+
+
 def _class_hierarchy(widget) -> list[str]:
     """Return the full class hierarchy of a widget."""
     classes = []
@@ -608,6 +619,13 @@ def widget_to_dict(widget, *, depth: int = 0, max_depth: int = 50) -> dict:
     declared_role = _declared_role(widget)
     if declared_role:
         info["roles"] = [declared_role]
+
+    item_view_kind = _widget_item_view_kind(widget)
+    if item_view_kind:
+        info["itemView"] = {
+            "kind": item_view_kind,
+            "discoverableBy": "inspect_items",
+        }
 
     if hasattr(widget, "isChecked"):
         info["checked"] = widget.isChecked()

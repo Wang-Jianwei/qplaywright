@@ -810,7 +810,10 @@ def _resolve_item_locator(
     resolve_owner_wid = getattr(owner_locator, "_resolve_owner_wid", None)
     if not callable(resolve_owner_wid):
         raise RuntimeError("Resolved owner locator does not expose owner widget resolution")
-    owner_wid = int(resolve_owner_wid())
+    owner_wid_value = resolve_owner_wid()
+    if isinstance(owner_wid_value, bool) or not isinstance(owner_wid_value, int):
+        raise RuntimeError(f"Resolved owner wid must be an integer, got {type(owner_wid_value).__name__}")
+    owner_wid = int(owner_wid_value)
     return ItemLocator(connection.app._conn, owner_wid, normalized["item"], timeout=connection.timeout)
 
 
@@ -1052,10 +1055,14 @@ def _item_view_inspect(
     if client is None:
         raise RuntimeError("Active session does not expose the raw transport required for item discovery")
 
+    owner_wid_value = resolve_owner_wid()
+    if isinstance(owner_wid_value, bool) or not isinstance(owner_wid_value, int):
+        raise RuntimeError(f"Resolved owner wid must be an integer, got {type(owner_wid_value).__name__}")
+
     payload = client.send(
         METHOD_ITEM_VIEW_INSPECT,
         {
-            "wid": int(resolve_owner_wid()),
+            "wid": int(owner_wid_value),
             "max_rows": max_rows,
             "max_depth": max_depth,
             "max_items": max_items,
@@ -1158,8 +1165,10 @@ def _format_widget_snapshot(nodes: list[dict[str, Any]], *, depth: int = 10, lev
             selector = f" target=.{node['class']}"
 
         label, marker = _snapshot_display_label(node)
+        item_view_marker = _snapshot_item_view_marker(node)
         text_part = f' "{label}"' if label else ""
-        marker_part = f" {marker}" if marker else ""
+        markers = " ".join(part for part in (marker, item_view_marker) if part)
+        marker_part = f" {markers}" if markers else ""
         line = f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{selector}"
         lines.append(line)
 
@@ -1211,6 +1220,19 @@ def _snapshot_display_label(node: dict[str, Any]) -> tuple[str, str]:
     return "", ""
 
 
+def _snapshot_item_view_marker(node: dict[str, Any]) -> str:
+    item_view = node.get("itemView")
+    if not isinstance(item_view, dict):
+        return ""
+    kind = item_view.get("kind")
+    if not isinstance(kind, str) or not kind:
+        return ""
+    discoverable_by = item_view.get("discoverableBy")
+    if isinstance(discoverable_by, str) and discoverable_by:
+        return f"[item-view={kind}; use {discoverable_by}]"
+    return f"[item-view={kind}]"
+
+
 def _snapshot_entry(node: dict[str, Any], ref: str | None) -> dict[str, Any]:
     entry = {
         "ref": ref,
@@ -1226,6 +1248,9 @@ def _snapshot_entry(node: dict[str, Any], ref: str | None) -> dict[str, Any]:
         if value is None or value == "":
             continue
         entry[key] = value
+    item_view = node.get("itemView")
+    if isinstance(item_view, dict) and item_view:
+        entry["itemView"] = dict(item_view)
     return entry
 
 
@@ -2179,6 +2204,7 @@ if FastMCP is not None:
             locator = _resolve_locator(connection_state, target=target)
 
             if condition is None:
+                assert state is not None
                 locator.wait_for(state=state, timeout=timeout)
                 payload = {
                     "ok": True,
@@ -2187,6 +2213,7 @@ if FastMCP is not None:
                     "timeout": timeout,
                 }
             else:
+                assert normalized_expected is not None
                 _wait_for_locator_condition(
                     locator,
                     condition=condition,
@@ -2203,6 +2230,7 @@ if FastMCP is not None:
         else:
             locator = _resolve_item_locator(connection_state, target=target)
             if condition is None:
+                assert state is not None
                 _wait_for_item_locator_state(locator, state=state, timeout=effective_timeout)
                 payload = {
                     "ok": True,

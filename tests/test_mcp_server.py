@@ -819,6 +819,35 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
     assert result["save_to"] == "snapshot.txt"
 
 
+def test_format_widget_snapshot_marks_item_view_owner_for_inspect_items():
+    snapshot = mcp_server._format_widget_snapshot(
+        [
+            {
+                "wid": 11,
+                "class": "FancyOrdersTable",
+                "objectName": "orders_table",
+                "itemView": {"kind": "table", "discoverableBy": "inspect_items"},
+                "children": [],
+            }
+        ]
+    )
+
+    assert snapshot == "- FancyOrdersTable [item-view=table; use inspect_items] target=#orders_table"
+
+
+def test_snapshot_entry_preserves_item_view_hint():
+    entry = mcp_server._snapshot_entry(
+        {
+            "wid": 11,
+            "class": "FancyOrdersTable",
+            "itemView": {"kind": "table", "discoverableBy": "inspect_items"},
+        },
+        "e1",
+    )
+
+    assert entry["itemView"] == {"kind": "table", "discoverableBy": "inspect_items"}
+
+
 def test_inspect_without_target_returns_active_window_tree(monkeypatch):
     state = mcp_server.ServerState()
     state.connection = mcp_server.ManagedConnection(

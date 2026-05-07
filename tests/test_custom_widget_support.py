@@ -223,6 +223,18 @@ def test_widget_to_dict_includes_custom_role_from_class_metadata():
     assert payload["value"] == "Admin"
 
 
+def test_widget_to_dict_marks_item_view_owner_for_discovery():
+    qt_widget = FakeMetaObject("QWidget")
+    abstract_scroll_area = FakeMetaObject("QAbstractScrollArea", super_class=qt_widget)
+    abstract_item_view = FakeMetaObject("QAbstractItemView", super_class=abstract_scroll_area)
+    table_view = FakeMetaObject("QTableView", super_class=abstract_item_view)
+    widget = FakeWidget(class_name="FancyOrdersTable", super_class=table_view)
+
+    payload = selector.widget_to_dict(widget, max_depth=0)
+
+    assert payload["itemView"] == {"kind": "table", "discoverableBy": "inspect_items"}
+
+
 def test_widget_text_still_uses_standard_accessors():
     widget = FakeTextWidget(properties={"text": "Fancy Value"})
 
