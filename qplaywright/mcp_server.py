@@ -429,10 +429,13 @@ async def _patched_mcp_session_receive_loop(session: Any) -> None:
                     request_meta=validated_request.root.params.meta if validated_request.root.params else None,
                     request=validated_request,
                     session=session,
+                    on_complete=lambda r: session._in_flight.pop(r.request_id, None),
+                    message_metadata=getattr(message, "metadata", None),
                 )
+                session._in_flight[responder.request_id] = responder
 
                 await session._received_request(responder)
-                if not responder._responded:
+                if responder.in_flight:
                     await session._incoming_message_stream_writer.send(responder)
             elif isinstance(message.root, JSONRPCNotification):
                 payload = message.root.model_dump(by_alias=True, mode="json", exclude_none=True)
