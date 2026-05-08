@@ -82,8 +82,13 @@ qplaywright-mcp cli window list
 qplaywright-mcp cli window select --title Dialog
 qplaywright-mcp cli snapshot --depth 4 --topmost-only
 qplaywright-mcp cli click text=Start --count 2
+qplaywright-mcp cli click --x 320 --y 180
+qplaywright-mcp cli hover --x 320 --y 180
 qplaywright-mcp cli input #amount_editor 123.45 --submit
 ```
+
+When `click` or `hover` omits `target`, `x` and `y` are interpreted as coordinates relative to the active window.
+If the active window is not the desired scope, switch it first with `window select`.
 
 ## Typical Tool Flow
 
@@ -119,7 +124,7 @@ The server can be exposed through:
 | `snapshot` | Return a text snapshot and stable refs for the active window or one target |
 | `inspect` | Inspect one widget or item target, or return the active window widget tree in debug mode |
 | `inspect_items` | Enumerate structured table/tree/list/tab descendants for one owner widget |
-| `click` | Click or double-click the first matched widget or one item target |
+| `click` | Click or double-click the first matched widget, one item target, or one active-window coordinate |
 | `input` | Replace or append text, optionally submitting with Enter |
 | `invoke` | Invoke one exposed custom widget method by exact name |
 | `press_key` | Send one key press to the matched widget |
@@ -128,7 +133,7 @@ The server can be exposed through:
 | `choose` | Select one combobox option by `value`, `index`, or `label` |
 | `wait` | Wait until a widget or item target reaches a supported state |
 | `screenshot` | Capture a screenshot of the active window or a matched widget |
-| `hover` | Hover over the first matched widget or one item target |
+| `hover` | Hover over the first matched widget, one item target, or one active-window coordinate |
 | `scroll` | Send a mouse wheel scroll event to the matched widget |
 
 ## Core Model
@@ -392,7 +397,7 @@ For item-view descendants, the same `target` field may be a structured object:
 
 Tool-specific fields:
 
-- `click`: optional `count`
+- `click`: optional `count`, or `x` + `y` together when `target` is omitted
 - `input`: `text`, optional `mode`, `delay`, `submit`
 - `invoke`: `method`, optional `args`
 - `press_key`: `key`
@@ -400,7 +405,7 @@ Tool-specific fields:
 - `set_expanded`: `expanded` for structured tree node item targets only
 - `choose`: exactly one of `value`, `index`, or `label`
 - `wait`: optional `state` or `condition` + `expected`, optional `timeout`; item targets support `visible`/`hidden` and `text_equals`/`text_contains`
-- `hover`: no extra fields
+- `hover`: optional `x` + `y` together when `target` is omitted
 - `scroll`: optional `delta_x`, `delta_y`
 
 ### screenshot

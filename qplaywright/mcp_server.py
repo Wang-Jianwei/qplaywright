@@ -1477,6 +1477,7 @@ def _pointer_action_coords(*, x: int | None, y: int | None) -> dict[str, int]:
         raise ValueError("Coordinate pointer actions require x and y together")
     if x is None:
         return {}
+    assert y is not None
 
     point_x = int(x)
     point_y = int(y)
@@ -2517,6 +2518,8 @@ def _cli_usage_text() -> str:
         "  qplaywright-mcp cli window select --title Dialog\n"
         "  qplaywright-mcp cli snapshot --depth 4 --topmost-only\n"
         "  qplaywright-mcp cli click text=Start --count 2\n"
+        "  qplaywright-mcp cli click --x 320 --y 180\n"
+        "  qplaywright-mcp cli hover --x 320 --y 180\n"
         "  qplaywright-mcp cli input #amount_editor 123.45 --submit\n"
         "  qplaywright-mcp cli session '{\"action\": \"attach\", \"port\": 19877}'\n"
         "  qplaywright-mcp cli resource '{\"uri\": \"qplaywright://help/selectors\"}'\n"
@@ -2532,7 +2535,8 @@ def _cli_usage_text() -> str:
         "  session attach|launch|status|close\n"
         "  window list|select\n"
         "  snapshot [--target TARGET] [--depth N] [--topmost-only] [--save-to PATH]\n"
-        "  click TARGET [--count 1|2] [--include-snapshot]\n"
+        "  click [TARGET] [--count 1|2] [--x X --y Y] [--include-snapshot]\n"
+        "  hover [TARGET] [--x X --y Y] [--include-snapshot]\n"
         "  input TARGET TEXT [--mode replace|append] [--delay MS] [--submit]\n"
         "  wait TARGET [--state STATE | --condition CONDITION --expected VALUE] [--timeout SEC]\n"
         "\n"

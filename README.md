@@ -92,6 +92,7 @@ with sync_qplaywright() as qp:
     app = qp.connect(port=19876, agent_name="GitHub Copilot")
     window = app.main_window()
     window.get_by_role("button", name="Submit").click()
+    window.click_at(320, 180)
 ```
 
 Structured descendants use explicit item locators instead of pretending model items are widgets:
@@ -152,8 +153,13 @@ qplaywright-mcp cli session attach --port 19877
 qplaywright-mcp cli window select --title Dialog
 qplaywright-mcp cli snapshot --depth 4 --topmost-only
 qplaywright-mcp cli click text=Start --count 2
+qplaywright-mcp cli click --x 320 --y 180
+qplaywright-mcp cli hover --x 320 --y 180
 qplaywright-mcp cli input #amount_editor 123.45 --submit
 ```
+
+When `click` or `hover` omits `target`, `x` and `y` are interpreted as coordinates relative to the active window.
+Use `window select` first when the intended target window is not already active.
 
 You can also run one tool call without starting the REPL:
 
