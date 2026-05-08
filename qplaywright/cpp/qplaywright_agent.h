@@ -2033,6 +2033,8 @@ private:
                 QWidget *cw = qobject_cast<QWidget *>(child);
                 if (!cw || isAutomationOverlayWidget(cw))
                     continue;
+                if (cw->isWindow() && !cw->isVisible())
+                    continue;
                 if (topmostOnly && !isTopmostVisibleWidget(cw))
                     continue;
                 children.append(serializeWidgetTree(cw, depth + 1, maxDepth, topmostOnly));

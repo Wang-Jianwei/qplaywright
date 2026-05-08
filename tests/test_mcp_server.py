@@ -447,7 +447,7 @@ def test_inspect_accepts_item_target(monkeypatch):
     assert result["count"] == 1
     assert result["kind"] == "tree_node"
     assert result["text"] == "Advanced"
-    assert result["is_visible"] is True
+    assert result["visible"] is True
     assert result["properties"]["selected"] is True
 
 
@@ -800,7 +800,7 @@ def test_inspect_target_uses_target_payload(monkeypatch):
 
     assert result["target"] == "#amount"
     assert result["geometry"] == {"x": 11, "y": 22, "width": 130, "height": 28}
-    assert result["globalBoundingBox"] == {"x": 1, "y": 2, "width": 3, "height": 4}
+    assert result["global_bounding_box"] == {"x": 1, "y": 2, "width": 3, "height": 4}
     assert result["methods"][0]["name"] == "setAmount"
     assert result["properties"]["myText"] == "pressme"
 
@@ -1152,10 +1152,10 @@ def test_inspect_locator_handles_empty_and_present_results():
     assert present["count"] == 2
     assert present["text"] == "Save"
     assert present["value"] == "ready"
-    assert present["objectName"] == "amount_editor"
-    assert present["accessibleName"] == "Amount editor"
+    assert present["object_name"] == "amount_editor"
+    assert present["accessible_name"] == "Amount editor"
     assert present["geometry"] == {"x": 11, "y": 22, "width": 130, "height": 28}
-    assert present["globalBoundingBox"] == {"x": 1, "y": 2, "width": 3, "height": 4}
+    assert present["global_bounding_box"] == {"x": 1, "y": 2, "width": 3, "height": 4}
     assert present["property_value"] == "attr:placeholderText"
 
     with_methods = mcp_server._inspect_locator(FakeLocator(count=1), include_methods=True, include_properties=True)
@@ -1183,9 +1183,9 @@ def test_inspect_locator_omits_empty_text_and_value_for_a11y_only_widget():
 
     result = mcp_server._inspect_locator(A11yOnlyLocator(count=1))
 
-    assert result["objectName"] == "measure_type_btn"
-    assert result["accessibleName"] == "功率扫描"
-    assert result["accessibleDescription"] == "切换测量类型为功率扫描"
+    assert result["object_name"] == "measure_type_btn"
+    assert result["accessible_name"] == "功率扫描"
+    assert result["accessible_description"] == "切换测量类型为功率扫描"
     assert "text" not in result
     assert "value" not in result
 
@@ -1637,6 +1637,86 @@ def test_summarize_windows_uses_geometry_payload():
     ]
 
 
+def test_summarize_windows_prefers_unblocked_modal_window():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    summaries = mcp_server._summarize_windows(
+        connection,
+        [
+            {
+                "wid": 11,
+                "title": "Main",
+                "class": "DemoWindow",
+                "geometry": {"x": 5, "y": 7, "width": 640, "height": 720},
+                "is_modal": False,
+                "blocked_by_modal": True,
+            },
+            {
+                "wid": 22,
+                "title": "Payment Review",
+                "class": "QDialog",
+                "geometry": {"x": 40, "y": 50, "width": 480, "height": 320},
+                "is_modal": True,
+                "blocked_by_modal": False,
+            },
+        ],
+    )
+
+    assert summaries[0]["is_active"] is False
+    assert summaries[1]["is_active"] is True
+
+
+def test_active_window_summary_prefers_precomputed_active_window():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    active_window = mcp_server._active_window_summary(
+        connection,
+        windows=[
+            {
+                "wid": 22,
+                "title": "Payment Review",
+                "class": "QDialog",
+                "geometry": {"x": 40, "y": 50, "width": 480, "height": 320},
+                "is_active": True,
+                "is_modal": True,
+            },
+            {
+                "wid": 11,
+                "title": "Main",
+                "class": "DemoWindow",
+                "geometry": {"x": 5, "y": 7, "width": 640, "height": 720},
+                "is_active": False,
+                "is_modal": False,
+            },
+        ],
+    )
+
+    assert active_window == {
+        "wid": 22,
+        "title": "Payment Review",
+        "class": "QDialog",
+        "geometry": {"x": 40, "y": 50, "width": 480, "height": 320},
+        "is_active": True,
+        "is_modal": True,
+    }
+
+
 def test_scroll_rejects_zero_delta(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
@@ -1939,7 +2019,8 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
     result = mcp_server._snapshot_result(connection, target="w9", depth=3)
 
     assert transport.calls == [
-        {"method": "find", "params": {"wid": 42, "max_depth": 3}, "timeout": 30.0}
+        {"method": "find", "params": {"wid": 42, "max_depth": 3}, "timeout": 30.0},
+        {"method": "list_windows", "params": None, "timeout": None},
     ]
     assert connection.handle_to_wid == {"w9": 42, "w10": 43}
     assert connection.wid_to_handle == {42: "w9", 43: "w10"}
@@ -2233,6 +2314,24 @@ def test_run_cli_typed_window_select(monkeypatch, capsys):
     }
 
 
+def test_try_run_typed_cli_from_command_line_keeps_quoted_title(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_server,
+        "window",
+        lambda **kwargs: {"ok": True, **kwargs},
+    )
+
+    exit_code = mcp_server._try_run_typed_cli_from_command_line('window select --title "Payment Review"')
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "action": "select",
+        "title": "Payment Review",
+    }
+
+
 def test_run_cli_typed_snapshot(monkeypatch, capsys):
     monkeypatch.setattr(
         mcp_server,
@@ -2251,6 +2350,54 @@ def test_run_cli_typed_snapshot(monkeypatch, capsys):
         "save_to": "snapshot.txt",
         "target": None,
         "topmost_only": True,
+    }
+
+
+def test_run_cli_typed_find(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_server,
+        "find",
+        lambda **kwargs: {"ok": True, **kwargs},
+    )
+
+    exit_code = mcp_server._run_cli(["find", "--root", "w12", "--role", "button", "--has-text", "submit", "--limit", "3"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "root": "w12",
+        "role": "button",
+        "has_text": "submit",
+        "text": None,
+        "class_": None,
+        "object_name": None,
+        "accessible_name": None,
+        "include_infrastructure": False,
+        "limit": 3,
+    }
+
+
+def test_run_cli_typed_inspect_accepts_positional_target(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_server,
+        "inspect",
+        lambda **kwargs: {"ok": True, **kwargs},
+    )
+
+    exit_code = mcp_server._run_cli(["inspect", "w2", "--include-properties"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "target": "w2",
+        "property": None,
+        "include_methods": False,
+        "include_properties": True,
+        "depth": 10,
+        "topmost_only": False,
+        "include_infrastructure": False,
     }
 
 

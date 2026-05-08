@@ -15,6 +15,7 @@ import contextlib
 import json
 import logging
 import re
+import shlex
 import shutil
 import sys
 import tempfile
@@ -56,6 +57,18 @@ _SCREENSHOT_TEMP_DIR = Path(tempfile.gettempdir()) / "qplaywright_screenshots" /
 _INFRASTRUCTURE_WIDGET_CLASSES = {
     "QAbstractScrollAreaScrollBarContainer",
 }
+
+
+def _qt_application_instance(*, required: bool) -> Any | None:
+    for package_name in ("PySide6", "PyQt6", "PySide2", "PyQt5"):
+        with contextlib.suppress(ImportError, AttributeError):
+            qt_widgets = __import__(f"{package_name}.QtWidgets", fromlist=["QApplication"])
+            application = qt_widgets.QApplication.instance()
+            if application is not None:
+                return application
+    if required:
+        raise RuntimeError("Qt application instance is not available")
+    return None
 
 SessionAction = Literal["attach", "launch", "close", "status"]
 WindowAction = Literal["list", "select", "resize", "close"]
@@ -556,7 +569,14 @@ _install_mcp_stdio_cancel_compat()
 def _list_windows_raw(connection: ManagedConnection, *, timeout: float | None = None) -> list[dict[str, Any]]:
     client = getattr(connection.app, "_conn", None)
     if client is not None:
-        return client.send(METHOD_LIST_WINDOWS, timeout=timeout)
+        response = client.send(METHOD_LIST_WINDOWS, timeout=timeout)
+        if isinstance(response, list):
+            return [window for window in response if isinstance(window, dict)]
+        if isinstance(response, dict):
+            windows = response.get("windows")
+            if isinstance(windows, list):
+                return [window for window in windows if isinstance(window, dict)]
+        return []
 
     windows = []
     for index, window in enumerate(connection.app.windows()):
@@ -652,16 +672,59 @@ def _window_summary(connection: ManagedConnection) -> list[dict[str, Any]]:
     return _summarize_windows(connection, _list_windows_raw(connection))
 
 
+def _effective_active_window_wid(
+    connection: ManagedConnection,
+    windows: list[dict[str, Any]],
+) -> int | None:
+    if not windows:
+        return None
+
+    explicit_active = next(
+        (
+            window.get("wid")
+            for window in windows
+            if window.get("is_active") is True and isinstance(window.get("wid"), int)
+        ),
+        None,
+    )
+    if isinstance(explicit_active, int):
+        return explicit_active
+
+    stored_window = next(
+        (window for window in windows if window.get("wid") == connection.active_window_wid),
+        None,
+    )
+    if stored_window is not None and not bool(stored_window.get("blocked_by_modal", False)):
+        return connection.active_window_wid
+
+    modal_candidate = next(
+        (
+            window.get("wid")
+            for window in windows
+            if bool(window.get("is_modal", False))
+            and not bool(window.get("blocked_by_modal", False))
+            and isinstance(window.get("wid"), int)
+        ),
+        None,
+    )
+    if isinstance(modal_candidate, int):
+        return modal_candidate
+
+    if stored_window is not None and isinstance(connection.active_window_wid, int):
+        return connection.active_window_wid
+
+    first_wid = windows[0].get("wid")
+    return first_wid if isinstance(first_wid, int) else None
+
+
 def _summarize_windows(
     connection: ManagedConnection,
     windows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    effective_active_wid = _effective_active_window_wid(connection, windows)
     summaries: list[dict[str, Any]] = []
     for index, window in enumerate(windows):
-        if connection.active_window_wid is None:
-            is_active = index == 0
-        else:
-            is_active = window["wid"] == connection.active_window_wid
+        is_active = window["wid"] == effective_active_wid
         summaries.append(
             {
                 "index": index,
@@ -686,8 +749,8 @@ def _active_window_summary(
     if not windows:
         return None
 
-    active_window = None
-    if connection.active_window_wid is not None:
+    active_window = next((window for window in windows if window.get("is_active") is True), None)
+    if active_window is None and connection.active_window_wid is not None:
         active_window = next(
             (window for window in windows if window["wid"] == connection.active_window_wid),
             None,
@@ -947,23 +1010,27 @@ def _inspect_locator(
     first = locator.first()
     properties = first.properties()
 
-    for key in (
-        "text",
-        "accessibleName",
-        "accessibleDescription",
-        "currentText",
-        "currentIndex",
-        "objectName",
-        "checked",
-        "value",
-        "windowTitle",
-        "placeholderText",
-        "toolTip",
-    ):
+    property_key_map = {
+        "accessibleName": "accessible_name",
+        "accessibleDescription": "accessible_description",
+        "currentText": "current_text",
+        "currentIndex": "current_index",
+        "objectName": "object_name",
+        "checked": "checked",
+        "value": "value",
+        "windowTitle": "window_title",
+        "placeholderText": "placeholder_text",
+        "toolTip": "tool_tip",
+    }
+    for key, output_key in property_key_map.items():
         value = properties.get(key)
         if value is None or value == "":
             continue
-        result[key] = value
+        result[output_key] = value
+
+    widget_class = properties.get("class")
+    if isinstance(widget_class, str) and widget_class:
+        result["class"] = widget_class
 
     geometry = properties.get("geometry")
     if isinstance(geometry, dict) and geometry:
@@ -979,14 +1046,14 @@ def _inspect_locator(
 
     bounding_box = first.bounding_box()
     if bounding_box:
-        result["globalBoundingBox"] = bounding_box
+        result["global_bounding_box"] = bounding_box
 
     result.update(
         {
             "all_text_contents": locator.all_text_contents(),
-            "is_visible": first.is_visible(),
-            "is_enabled": first.is_enabled(),
-            "is_checked": first.is_checked(),
+            "visible": first.is_visible(),
+            "enabled": first.is_enabled(),
+            "checked": first.is_checked(),
             "bounding_box": bounding_box,
         }
     )
@@ -1037,7 +1104,7 @@ def _inspect_item_locator(
         result["all_text_contents"] = [text_content]
 
     visible = locator.is_visible()
-    result["is_visible"] = visible
+    result["visible"] = visible
 
     try:
         bounding_box = locator.bounding_box()
@@ -1045,7 +1112,7 @@ def _inspect_item_locator(
         bounding_box = None
     if bounding_box:
         result["bounding_box"] = bounding_box
-        result["globalBoundingBox"] = bounding_box
+        result["global_bounding_box"] = bounding_box
 
     if property_name is not None:
         result["property_name"] = property_name
@@ -1068,11 +1135,11 @@ def _compact_action_state(locator: Any) -> dict[str, Any]:
     }
 
     for source_key, target_key in (
-        ("is_visible", "visible"),
-        ("is_enabled", "enabled"),
-        ("is_checked", "checked"),
+        ("visible", "visible"),
+        ("enabled", "enabled"),
+        ("checked", "checked"),
         ("text", "text"),
-        ("currentText", "currentText"),
+        ("current_text", "current_text"),
         ("value", "value"),
     ):
         value = inspected.get(source_key)
@@ -1091,7 +1158,7 @@ def _compact_item_state(locator: ItemLocator) -> dict[str, Any]:
     }
 
     for source_key, target_key in (
-        ("is_visible", "visible"),
+        ("visible", "visible"),
         ("text", "text"),
         ("expanded", "expanded"),
         ("selected", "selected"),
@@ -1454,17 +1521,16 @@ def _render_snapshot_tree(
 
 
 def _snapshot_window_payload(connection: ManagedConnection) -> dict[str, Any] | None:
-    window_wid = connection.active_window_wid
-    if window_wid is None:
+    active_window = _active_window_summary(connection)
+    if active_window is None:
         return None
 
-    window_payload: dict[str, Any] = {"handle": connection.handle_for_wid(window_wid)}
-    with contextlib.suppress(Exception):
-        window = _resolve_window(connection, window_wid=window_wid)
-        window_payload["title"] = window.title()
-        window_payload["class"] = ""
-        window_payload["geometry"] = {"x": None, "y": None, "width": None, "height": None}
-    return window_payload
+    return {
+        "handle": connection.handle_for_wid(active_window.get("wid")),
+        "title": active_window.get("title", ""),
+        "class": active_window.get("class", ""),
+        "geometry": dict(active_window.get("geometry") or {}),
+    }
 
 
 def _snapshot_payload(
@@ -1747,6 +1813,10 @@ def _action_result_with_snapshot(
     **payload: Any,
 ) -> dict[str, Any]:
     result = dict(payload)
+    with contextlib.suppress(Exception):
+        q_application = _qt_application_instance(required=False)
+        if q_application is not None:
+            q_application.processEvents()
     result.update(_snapshot_result(managed_connection, target=target, depth=depth, timeout=timeout))
     return result
 
@@ -2744,6 +2814,7 @@ _CLI_TOOL_NAMES = (
     "session",
     "window",
     "snapshot",
+    "find",
     "inspect",
     "inspect_items",
     "click",
@@ -3043,6 +3114,23 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("--include-infrastructure", action="store_true")
     snapshot_parser.add_argument("--save-to")
 
+    find_parser = subparsers.add_parser("find", help="Run server-side widget discovery under one scope.")
+    find_parser.add_argument("--root")
+    find_parser.add_argument("--role")
+    find_parser.add_argument("--text")
+    find_parser.add_argument("--has-text")
+    find_parser.add_argument("--class")
+    find_parser.add_argument("--object-name")
+    find_parser.add_argument("--accessible-name")
+    find_parser.add_argument("--visible", action="store_true")
+    find_parser.add_argument("--not-visible", action="store_true")
+    find_parser.add_argument("--enabled", action="store_true")
+    find_parser.add_argument("--disabled", action="store_true")
+    find_parser.add_argument("--interactable", action="store_true")
+    find_parser.add_argument("--not-interactable", action="store_true")
+    find_parser.add_argument("--include-infrastructure", action="store_true")
+    find_parser.add_argument("--limit", type=int, default=5)
+
     click_parser = subparsers.add_parser("click", help="Click a target or a window-relative coordinate.")
     click_parser.add_argument("target", nargs="?")
     click_parser.add_argument("--count", type=int, choices=(1, 2), default=1)
@@ -3061,6 +3149,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     input_parser.add_argument("--include-snapshot", action="store_true")
 
     inspect_parser = subparsers.add_parser("inspect", help="Inspect one target or return the current window tree.")
+    inspect_parser.add_argument("target_arg", nargs="?")
     inspect_parser.add_argument("--target")
     inspect_parser.add_argument("--property")
     inspect_parser.add_argument("--include-methods", action="store_true")
@@ -3136,9 +3225,35 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
 def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, Any]]:
     command = namespace.command
 
+    if command == "find":
+        arguments = {
+            "root": namespace.root,
+            "role": namespace.role,
+            "text": namespace.text,
+            "has_text": getattr(namespace, "has_text"),
+            "class_": getattr(namespace, "class"),
+            "object_name": getattr(namespace, "object_name"),
+            "accessible_name": getattr(namespace, "accessible_name"),
+            "include_infrastructure": namespace.include_infrastructure,
+            "limit": namespace.limit,
+        }
+        if namespace.visible:
+            arguments["visible"] = True
+        elif namespace.not_visible:
+            arguments["visible"] = False
+        if namespace.enabled:
+            arguments["enabled"] = True
+        elif namespace.disabled:
+            arguments["enabled"] = False
+        if namespace.interactable:
+            arguments["interactable"] = True
+        elif namespace.not_interactable:
+            arguments["interactable"] = False
+        return "find", arguments
+
     if command == "inspect":
         return "inspect", {
-            "target": namespace.target,
+            "target": namespace.target if namespace.target is not None else namespace.target_arg,
             "property": namespace.property,
             "include_methods": namespace.include_methods,
             "include_properties": namespace.include_properties,
@@ -3300,7 +3415,7 @@ def _try_run_typed_cli(argv: Sequence[str]) -> int | None:
     if not argv:
         return None
     if argv[0] not in {
-        "resource", "session", "window", "snapshot", "inspect", "click", "input", "invoke",
+        "resource", "session", "window", "snapshot", "find", "inspect", "click", "input", "invoke",
         "press_key", "set_checked", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         return None
@@ -3308,19 +3423,25 @@ def _try_run_typed_cli(argv: Sequence[str]) -> int | None:
         return None
 
     parser = _build_typed_cli_parser()
-    namespace = parser.parse_args(list(argv))
+    try:
+        namespace = parser.parse_args(list(argv))
+    except SystemExit:
+        return 2
     tool_name, arguments = _typed_cli_arguments(namespace)
     return _run_cli_invocation(tool_name, arguments)
 
 
 def _try_run_typed_cli_from_command_line(command_line: str) -> int | None:
     """Try to parse and run a command line as a typed CLI command."""
-    parts = command_line.strip().split()
+    try:
+        parts = shlex.split(command_line.strip(), posix=True)
+    except ValueError as exc:
+        raise ValueError(f"Invalid CLI command line: {exc}") from exc
     if not parts:
         return None
     # If the first part is a known tool and the rest looks like flags/args (not JSON)
     if parts[0] in {
-        "resource", "session", "window", "snapshot", "inspect", "click", "input", "invoke",
+        "resource", "session", "window", "snapshot", "find", "inspect", "click", "input", "invoke",
         "press_key", "set_checked", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         if len(parts) > 1 and parts[1].lstrip().startswith("{"):

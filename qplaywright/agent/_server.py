@@ -861,6 +861,10 @@ def _iter_tree_children(widget, *, topmost_only: bool = False):
     for child in _iter_widget_children(widget):
         if _is_automation_overlay_widget(child):
             continue
+        is_window = getattr(child, "isWindow", None)
+        is_visible = getattr(child, "isVisible", None)
+        if callable(is_window) and callable(is_visible) and is_window() and not is_visible():
+            continue
         if topmost_only and not _is_topmost_visible_widget(child):
             continue
         yield child
