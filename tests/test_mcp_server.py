@@ -1709,6 +1709,45 @@ def test_summarize_windows_uses_geometry_payload():
     ]
 
 
+def test_summarize_windows_prefers_explicit_active_window():
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    summaries = mcp_server._summarize_windows(
+        connection,
+        [
+            {
+                "wid": 11,
+                "title": "Main",
+                "class": "DemoWindow",
+                "geometry": {"x": 5, "y": 7, "width": 640, "height": 720},
+                "is_active": False,
+                "is_modal": False,
+                "blocked_by_modal": False,
+            },
+            {
+                "wid": 22,
+                "title": "Dialog",
+                "class": "QDialog",
+                "geometry": {"x": 40, "y": 50, "width": 480, "height": 320},
+                "is_active": True,
+                "is_modal": False,
+                "blocked_by_modal": False,
+            },
+        ],
+    )
+
+    assert summaries[0]["is_active"] is False
+    assert summaries[1]["is_active"] is True
+
+
 def test_summarize_windows_prefers_unblocked_modal_window():
     connection = mcp_server.ManagedConnection(
         name="demo",

@@ -2571,6 +2571,7 @@ private:
 
         // -- Window management --
         if (method == "list_windows") {
+            QWidget *activeWindow = currentActiveTopLevelWidget();
             QJsonArray arr;
             for (QWidget *w : topLevelWidgets()) {
                 if (!w->isVisible()) continue;
@@ -2585,6 +2586,7 @@ private:
                 geometry["width"] = w->width();
                 geometry["height"] = w->height();
                 r["geometry"] = geometry;
+                r["is_active"] = w == activeWindow;
                 r["is_modal"] = w->isModal();
                 r["blocked_by_modal"] = isWindowBlockedByModal(w);
                 arr.append(r);
@@ -2938,6 +2940,14 @@ private:
             return window->window();
         }
 
+        if (QWidget *window = currentActiveTopLevelWidget())
+            return window;
+
+        throw std::runtime_error("No visible window found for coordinate pointer action");
+    }
+
+    QWidget *currentActiveTopLevelWidget() const
+    {
         if (QWidget *activeModal = activeModalTopLevelWidget())
             return activeModal;
 
@@ -2958,7 +2968,7 @@ private:
                 return window;
         }
 
-        throw std::runtime_error("No visible window found for coordinate pointer action");
+        return nullptr;
     }
     
     struct ResolvedTableItem

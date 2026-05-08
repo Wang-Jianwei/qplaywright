@@ -3235,6 +3235,7 @@ def _handle_command(req: Request) -> Any:
     # -- Window management ---------------------------------------------------
     if method == METHOD_LIST_WINDOWS:
         windows = _get_top_level_widgets()
+        active_window = _current_active_top_level_widget()
         result = []
         for w in windows:
             if w.isVisible():
@@ -3249,6 +3250,7 @@ def _handle_command(req: Request) -> Any:
                         "width": w.width(),
                         "height": w.height(),
                     },
+                    "is_active": w is active_window,
                     "is_modal": bool(w.isModal()) if hasattr(w, "isModal") else False,
                     "blocked_by_modal": _is_window_blocked_by_modal(w),
                 })
@@ -3759,6 +3761,14 @@ def _resolve_pointer_action_window(params: dict):
             raise ValueError(f"No window found for window_wid={window_wid}")
         return window.window() if hasattr(window, "window") else window
 
+    active_window = _current_active_top_level_widget()
+    if active_window is not None:
+        return active_window
+
+    raise ValueError("No visible window found for coordinate pointer action")
+
+
+def _current_active_top_level_widget():
     modal_window = _active_modal_top_level_widget()
     if modal_window is not None:
         return modal_window
@@ -3785,7 +3795,7 @@ def _resolve_pointer_action_window(params: dict):
     if visible:
         return visible[0]
 
-    raise ValueError("No visible window found for coordinate pointer action")
+    return None
 
 
 # --------------------------------------------------------------------------- #
