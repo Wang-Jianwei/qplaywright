@@ -79,6 +79,7 @@
 #include <QVector>
 #include <QHash>
 
+#include <algorithm>
 #include <functional>
 
 // -------------------------------------------------------------------------- //
@@ -1044,22 +1045,40 @@ public:
     }
 
     int registerWidget(QWidget *w) {
+        if (!w)
+            return 0;
+
         quintptr key = reinterpret_cast<quintptr>(w);
-        if (m_w2id.contains(key))
-            return m_w2id[key];
+        auto existing = m_w2id.constFind(key);
+        if (existing != m_w2id.constEnd()) {
+            const int wid = existing.value();
+            auto current = m_id2w.constFind(wid);
+            if (current != m_id2w.constEnd() && !current.value().isNull())
+                return wid;
+            m_w2id.remove(key);
+            m_id2w.remove(wid);
+        }
+
         int wid = m_next++;
         m_w2id[key] = wid;
         m_id2w[wid] = w;
+        QObject::connect(w, &QObject::destroyed, [this, key, wid]() {
+            m_w2id.remove(key);
+            m_id2w.remove(wid);
+        });
         return wid;
     }
 
     QWidget *get(int wid) const {
-        return m_id2w.value(wid, nullptr);
+        auto it = m_id2w.constFind(wid);
+        if (it == m_id2w.constEnd() || it.value().isNull())
+            return nullptr;
+        return it.value().data();
     }
 
 private:
     QHash<quintptr, int> m_w2id;
-    QHash<int, QWidget *> m_id2w;
+    QHash<int, QPointer<QWidget>> m_id2w;
     int m_next = 1;
 };
 
@@ -2057,6 +2076,10 @@ private:
             return arr;
         }
 
+        if (method == "find_widgets") {
+            return findWidgetsPayload(params);
+        }
+
         if (method == "widget_tree") {
             int maxDepth = params["max_depth"].toInt(10);
             const bool topmostOnly = params["topmost_only"].toBool(false);
@@ -2648,6 +2671,237 @@ private:
             throw std::runtime_error(("No widget found for: " + sel).toStdString());
         }
         return widgets.first();
+    }
+
+    bool findLightlyVisible(QWidget *widget)
+    {
+        return widget && widget->isVisible() && widget->width() > 0 && widget->height() > 0;
+    }
+
+    bool findInteractable(QWidget *widget)
+    {
+        if (!widget)
+            return false;
+        try {
+            resolveClickTarget(widget);
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
+
+    bool isFindInfrastructureWidget(QWidget *widget)
+    {
+        if (!widget)
+            return false;
+        if (isAutomationOverlayWidget(widget))
+            return true;
+        if (widget->objectName().startsWith(QString::fromLatin1("qt_")))
+            return true;
+
+        static const QStringList infrastructureClasses = {
+            QString::fromLatin1("QAbstractScrollAreaScrollBarContainer"),
+        };
+        return infrastructureClasses.contains(QString::fromLatin1(widget->metaObject()->className()));
+    }
+
+    QWidget *resolveFindRootWidget(const QJsonObject &params)
+    {
+        auto &reg = QPlaywrightRegistry::instance();
+
+        if (params.contains("wid")) {
+            QWidget *root = reg.get(params["wid"].toInt());
+            if (!root)
+                throw std::runtime_error("Widget not found by wid");
+            return root;
+        }
+
+        const QString selector = params.value("selector").toString();
+        if (selector.isEmpty())
+            throw std::runtime_error("find_widgets requires wid or selector root");
+
+        QJsonObject lookup;
+        lookup["selector"] = selector;
+        lookup["visible_only"] = false;
+        auto matches = resolveWidgets(lookup);
+        if (matches.isEmpty())
+            throw std::runtime_error(("No widget found for find root: " + selector).toStdString());
+        if (matches.size() > 1)
+            throw std::runtime_error(("Find root is ambiguous for selector: " + selector).toStdString());
+        return matches.first();
+    }
+
+    QJsonArray findMatchReasons(const QJsonObject &params)
+    {
+        QJsonArray reasons;
+        if (params.contains("role"))
+            reasons.append(QString::fromLatin1("role=") + params.value("role").toString());
+        if (params.contains("text"))
+            reasons.append(QString::fromLatin1("text=") + params.value("text").toString());
+        if (params.contains("has_text"))
+            reasons.append(QString::fromLatin1("has_text~=") + params.value("has_text").toString());
+        if (params.contains("class"))
+            reasons.append(QString::fromLatin1("class=") + params.value("class").toString());
+        if (params.contains("object_name"))
+            reasons.append(QString::fromLatin1("object_name=") + params.value("object_name").toString());
+        if (params.contains("accessible_name"))
+            reasons.append(QString::fromLatin1("accessible_name=") + params.value("accessible_name").toString());
+        for (const char *name : {"visible", "enabled", "interactable"}) {
+            if (!params.contains(name))
+                continue;
+            reasons.append(QString::fromLatin1(name) + QString::fromLatin1("=") + (params.value(name).toBool() ? QString::fromLatin1("true") : QString::fromLatin1("false")));
+        }
+        return reasons;
+    }
+
+    bool findWidgetMatches(QWidget *widget, const QJsonObject &params, bool visible, bool enabled, bool interactable)
+    {
+        if (!widget)
+            return false;
+
+        if (params.contains("role") && !QPlaywrightRoles::matchesRole(widget, params.value("role").toString()))
+            return false;
+        if (params.contains("text") && QPlaywrightRoles::widgetText(widget) != params.value("text").toString())
+            return false;
+        if (params.contains("has_text") && !QPlaywrightRoles::widgetText(widget).contains(params.value("has_text").toString(), Qt::CaseInsensitive))
+            return false;
+
+        if (params.contains("class")) {
+            const QString className = params.value("class").toString();
+            bool classMatch = false;
+            const QMetaObject *mo = widget->metaObject();
+            while (mo) {
+                if (QString::fromLatin1(mo->className()) == className) {
+                    classMatch = true;
+                    break;
+                }
+                mo = mo->superClass();
+            }
+            if (!classMatch)
+                return false;
+        }
+
+        if (params.contains("object_name") && widget->objectName() != params.value("object_name").toString())
+            return false;
+        if (params.contains("accessible_name") && widget->accessibleName() != params.value("accessible_name").toString())
+            return false;
+        if (params.contains("visible") && visible != params.value("visible").toBool())
+            return false;
+        if (params.contains("enabled") && enabled != params.value("enabled").toBool())
+            return false;
+        if (params.contains("interactable") && interactable != params.value("interactable").toBool())
+            return false;
+
+        return true;
+    }
+
+    QJsonArray findAncestorSummary(const QList<QWidget *> &ancestors)
+    {
+        auto &reg = QPlaywrightRegistry::instance();
+
+        QJsonArray summary;
+        for (QWidget *ancestor : ancestors) {
+            if (!ancestor)
+                continue;
+            QJsonObject entry = serializeWidgetTree(ancestor, 0, 0, false);
+            entry["wid"] = reg.registerWidget(ancestor);
+            summary.append(entry);
+        }
+        return summary;
+    }
+
+    struct FindWidgetCandidate
+    {
+        int depth = 0;
+        bool interactable = false;
+        bool visible = false;
+        int preorder = 0;
+        int wid = 0;
+        QJsonObject entry;
+    };
+
+    QJsonObject findWidgetsPayload(const QJsonObject &params)
+    {
+        auto &reg = QPlaywrightRegistry::instance();
+
+        QWidget *root = resolveFindRootWidget(params);
+        const int rootWid = reg.registerWidget(root);
+        const bool includeInfrastructure = params.value("include_infrastructure").toBool(false);
+        const int limit = params.value("limit").toInt(5);
+        if (limit <= 0)
+            throw std::runtime_error("limit must be > 0");
+
+        const QJsonArray matchReason = findMatchReasons(params);
+        const bool explicitVisible = params.contains("visible");
+        const bool explicitInteractable = params.contains("interactable");
+        QList<FindWidgetCandidate> matches;
+        int preorder = 0;
+
+        std::function<void(QWidget *, const QList<QWidget *> &)> walk =
+            [&](QWidget *widget, const QList<QWidget *> &ancestors) {
+                if (!widget)
+                    return;
+
+                const int currentOrder = preorder++;
+                const bool visible = findLightlyVisible(widget);
+                const bool enabled = widget->isEnabled();
+                const bool interactable = findInteractable(widget);
+                const bool infrastructure = isFindInfrastructureWidget(widget);
+
+                if ((includeInfrastructure || !infrastructure) &&
+                    findWidgetMatches(widget, params, visible, enabled, interactable)) {
+                    QJsonObject entry = serializeWidgetTree(widget, 0, 0, false);
+                    const int wid = reg.registerWidget(widget);
+                    entry["wid"] = wid;
+                    entry["matchReason"] = matchReason;
+                    if (!ancestors.isEmpty())
+                        entry["ancestorSummary"] = findAncestorSummary(ancestors);
+
+                    FindWidgetCandidate candidate;
+                    candidate.depth = ancestors.size();
+                    candidate.interactable = interactable;
+                    candidate.visible = visible;
+                    candidate.preorder = currentOrder;
+                    candidate.wid = wid;
+                    candidate.entry = entry;
+                    matches.append(candidate);
+                }
+
+                QList<QWidget *> nextAncestors = ancestors;
+                nextAncestors.append(widget);
+                for (QObject *child : widget->children()) {
+                    QWidget *childWidget = qobject_cast<QWidget *>(child);
+                    if (childWidget)
+                        walk(childWidget, nextAncestors);
+                }
+            };
+
+        walk(root, {});
+
+        std::sort(matches.begin(), matches.end(),
+                  [&](const FindWidgetCandidate &left, const FindWidgetCandidate &right) {
+                      if (left.depth != right.depth)
+                          return left.depth < right.depth;
+                      if (!explicitInteractable && left.interactable != right.interactable)
+                          return left.interactable && !right.interactable;
+                      if (!explicitVisible && left.visible != right.visible)
+                          return left.visible && !right.visible;
+                      if (left.preorder != right.preorder)
+                          return left.preorder < right.preorder;
+                      return left.wid < right.wid;
+                  });
+
+        QJsonArray results;
+        const int count = std::min(limit, matches.size());
+        for (int index = 0; index < count; ++index)
+            results.append(matches[index].entry);
+
+        QJsonObject result;
+        result["rootWid"] = rootWid;
+        result["count"] = count;
+        result["truncated"] = matches.size() > limit;
+        result["results"] = results;
+        return result;
     }
 
     QWidget *resolvePressTarget(const QJsonObject &params)
