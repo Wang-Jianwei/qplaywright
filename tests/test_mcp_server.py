@@ -1589,6 +1589,10 @@ def test_mcp_tool_input_schema_describes_all_parameters():
     click_tool = next(tool for tool in dumped if tool["name"] == "click")
     assert "post-action snapshot" in click_tool["inputSchema"]["properties"]["include_snapshot"]["description"]
 
+    find_tool = next(tool for tool in dumped if tool["name"] == "find")
+    assert "class" in find_tool["inputSchema"]["properties"]
+    assert "class_" not in find_tool["inputSchema"]["properties"]
+
 
 def test_summarize_windows_uses_geometry_payload():
     connection = mcp_server.ManagedConnection(
@@ -2551,6 +2555,162 @@ def test_widget_tree_raw_includes_optional_window_wid():
     mcp_server._widget_tree_raw(connection, max_depth=4, window_wid=12, topmost_only=True)
 
     assert captured == {"method": mcp_server.METHOD_WIDGET_TREE, "params": {"max_depth": 4, "topmost_only": True, "wid": 12}}
+
+
+def test_find_widgets_raw_uses_protocol_method_and_root_wid():
+    captured = {}
+
+    class FakeConn:
+        def send(self, method, params, timeout=None):
+            captured["method"] = method
+            captured["params"] = params
+            captured["timeout"] = timeout
+            return {"rootWid": 12, "count": 0, "truncated": False, "results": []}
+
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+    connection.app._conn = FakeConn()
+
+    result = mcp_server._find_widgets_raw(
+        connection,
+        root_wid=12,
+        role="button",
+        has_text="Submit",
+        widget_class="QPushButton",
+        object_name="submit_btn",
+        accessible_name="Submit",
+        visible=True,
+        enabled=True,
+        interactable=True,
+        include_infrastructure=True,
+        limit=7,
+    )
+
+    assert result == {"rootWid": 12, "count": 0, "truncated": False, "results": []}
+    assert captured == {
+        "method": mcp_server.METHOD_FIND_WIDGETS,
+        "params": {
+            "wid": 12,
+            "include_infrastructure": True,
+            "limit": 7,
+            "role": "button",
+            "has_text": "Submit",
+            "class": "QPushButton",
+            "object_name": "submit_btn",
+            "accessible_name": "Submit",
+            "visible": True,
+            "enabled": True,
+            "interactable": True,
+        },
+        "timeout": 30.0,
+    }
+
+
+def test_find_result_returns_v2_handle_shape():
+    transport = FakeTransportConn(
+        responses={
+            mcp_server.METHOD_FIND_WIDGETS: {
+                "rootWid": 11,
+                "count": 1,
+                "truncated": False,
+                "results": [
+                    {
+                        "wid": 22,
+                        "class": "QPushButton",
+                        "objectName": "submit_btn",
+                        "text": "Submit",
+                        "geometry": {"x": 310, "y": 412, "width": 96, "height": 28},
+                        "matchReason": ["role=button", "has_text~=Submit", "visible=true"],
+                        "ancestorSummary": [
+                            {"wid": 11, "class": "QGroupBox", "text": "Payment"},
+                        ],
+                    }
+                ],
+            }
+        }
+    )
+    app = FakeApp([])
+    app._conn = transport
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        wid_to_handle={11: "w1"},
+        handle_to_wid={"w1": 11},
+        handle_counter=1,
+    )
+
+    result = mcp_server._find_result(connection, root="w1", role="button", has_text="Submit", visible=True, limit=5)
+
+    assert transport.calls == [
+        {
+            "method": "find_widgets",
+            "params": {"wid": 11, "include_infrastructure": False, "limit": 5, "role": "button", "has_text": "Submit", "visible": True},
+            "timeout": 30.0,
+        }
+    ]
+    assert result == {
+        "root_handle": "w1",
+        "count": 1,
+        "truncated": False,
+        "results": [
+            {
+                "handle": "w2",
+                "class": "QPushButton",
+                "object_name": "submit_btn",
+                "text": "Submit",
+                "label": "Submit",
+                "geometry": {"x": 310, "y": 412, "width": 96, "height": 28},
+                "match_reason": ["role=button", "has_text~=Submit", "visible=true"],
+                "ancestor_summary": [
+                    {"handle": "w1", "class": "QGroupBox", "label": "Payment"},
+                ],
+            }
+        ],
+    }
+
+
+def test_find_tool_returns_ok_payload(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", mcp_server.ServerState(connection=connection))
+    monkeypatch.setattr(
+        mcp_server,
+        "_find_result",
+        lambda managed_connection, **kwargs: {
+            "root_handle": "w1",
+            "count": 1,
+            "truncated": False,
+            "results": [{"handle": "w2", "class": "QPushButton", "label": "Submit"}],
+        },
+    )
+
+    result = mcp_server.find(root="#payment_panel", role="button", has_text="Submit", limit=3)
+
+    assert result == {
+        "ok": True,
+        "root_handle": "w1",
+        "count": 1,
+        "truncated": False,
+        "results": [{"handle": "w2", "class": "QPushButton", "label": "Submit"}],
+    }
 
 
 def test_snapshot_result_scopes_to_active_window(monkeypatch):

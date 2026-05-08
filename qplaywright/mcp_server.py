@@ -34,6 +34,7 @@ from qplaywright.protocol import (
     METHOD_CLICK,
     METHOD_DBLCLICK,
     METHOD_FIND,
+    METHOD_FIND_WIDGETS,
     METHOD_HOVER,
     METHOD_ITEM_VIEW_INSPECT,
     METHOD_LIST_WINDOWS,
@@ -46,7 +47,6 @@ from qplaywright.sync_api._locator import ItemLocator, Locator
 
 LOGGER = logging.getLogger(__name__)
 
-_SNAPSHOT_REF_PATTERN = re.compile(r"^e\d+$")
 _ACTION_POSTPROCESS_TIMEOUT = 2.0
 _TOPMOST_ONLY_WARNING = (
     "topmost_only is an approximate frontmost-visible filter and may omit widgets or content. "
@@ -127,15 +127,15 @@ WindowHeightArg = Annotated[
 
 WidgetTargetArg = Annotated[
     str,
-    Field(description="Widget selector or snapshot ref target, such as #objectName, role=button, text=Submit, or e1."),
+    Field(description="Widget selector or stable handle target, such as #objectName, role=button, text=Submit, or w12."),
 ]
 ItemTargetArg = Annotated[
     dict[str, Any],
-    Field(description="Structured item target object: {owner: <widget selector or snapshot ref>, item: <table_cell/tree_node/list_item descriptor>}"),
+    Field(description="Structured item target object: {owner: <widget selector or stable handle>, item: <table_cell/tree_node/list_item descriptor>}"),
 ]
 UnifiedTargetArg = Annotated[
     str | dict[str, Any],
-    Field(description="Widget selector or snapshot ref, or a structured item target object {owner, item}."),
+    Field(description="Widget selector or stable handle, or a structured item target object {owner, item}."),
 ]
 OptionalUnifiedTargetArg = Annotated[
     str | dict[str, Any] | None,
@@ -143,7 +143,56 @@ OptionalUnifiedTargetArg = Annotated[
 ]
 OptionalWidgetTargetArg = Annotated[
     str | None,
-    Field(description="Optional widget selector or snapshot ref target. Omit to use the active window or focused widget when supported."),
+    Field(description="Optional widget selector or stable handle target. Omit to use the active window or focused widget when supported."),
+]
+FindRootArg = Annotated[
+    str | None,
+    Field(description="Optional find scope root: widget selector or stable handle. Omit to search under the active window."),
+]
+FindRoleArg = Annotated[
+    str | None,
+    Field(description="Exact qplaywright role name to match, such as button, table, or tree."),
+]
+FindTextArg = Annotated[
+    str | None,
+    Field(description="Exact primary widget text to match, case-sensitive."),
+]
+FindHasTextArg = Annotated[
+    str | None,
+    Field(description="Case-insensitive primary-text substring to match."),
+]
+FindClassArg = Annotated[
+    str | None,
+    Field(
+        alias="class",
+        validation_alias="class",
+        serialization_alias="class",
+        description="Exact Qt class name to match against the widget class hierarchy.",
+    ),
+]
+FindObjectNameArg = Annotated[
+    str | None,
+    Field(description="Exact QObject::objectName() to match."),
+]
+FindAccessibleNameArg = Annotated[
+    str | None,
+    Field(description="Exact accessibleName to match, case-sensitive."),
+]
+FindVisibleArg = Annotated[
+    bool | None,
+    Field(description="When true, only return visible widgets with non-empty geometry; when false, only return widgets outside that visible condition."),
+]
+FindEnabledArg = Annotated[
+    bool | None,
+    Field(description="When true, only return enabled widgets; when false, only return disabled widgets."),
+]
+FindInteractableArg = Annotated[
+    bool | None,
+    Field(description="When true, only return currently interactable widgets; when false, only return non-interactable widgets."),
+]
+FindLimitArg = Annotated[
+    int,
+    Field(description="Maximum number of widget candidates to return. Must be a positive integer."),
 ]
 DepthArg = Annotated[
     int,
@@ -554,6 +603,49 @@ def _widget_tree_raw(
     if window_wid is not None:
         params["wid"] = window_wid
     return connection.app._conn.send(METHOD_WIDGET_TREE, params, timeout=timeout)
+
+
+def _find_widgets_raw(
+    connection: ManagedConnection,
+    *,
+    root_wid: int,
+    role: str | None = None,
+    text: str | None = None,
+    has_text: str | None = None,
+    widget_class: str | None = None,
+    object_name: str | None = None,
+    accessible_name: str | None = None,
+    visible: bool | None = None,
+    enabled: bool | None = None,
+    interactable: bool | None = None,
+    include_infrastructure: bool = False,
+    limit: int = 5,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "wid": root_wid,
+        "include_infrastructure": include_infrastructure,
+        "limit": limit,
+    }
+    optional_params = {
+        "role": role,
+        "text": text,
+        "has_text": has_text,
+        "class": widget_class,
+        "object_name": object_name,
+        "accessible_name": accessible_name,
+        "visible": visible,
+        "enabled": enabled,
+        "interactable": interactable,
+    }
+    for key, value in optional_params.items():
+        if value is not None:
+            params[key] = value
+    return connection.app._conn.send(
+        METHOD_FIND_WIDGETS,
+        params,
+        timeout=timeout if timeout is not None else connection.timeout,
+    )
 
 
 def _window_summary(connection: ManagedConnection) -> list[dict[str, Any]]:
@@ -1163,7 +1255,7 @@ def _selector_help_text() -> str:
         "Typical workflow:\n"
         "1. session attach or session launch\n"
         "2. window list and window select when multiple windows are visible\n"
-        "3. snapshot or inspect for widgets; inspect_items for table/tree/list/tab descendants\n"
+        "3. snapshot, find, or inspect for widgets; inspect_items for table/tree/list/tab descendants\n"
         "4. click, hover, wait, set_expanded, input, set_checked, press_key, choose, screenshot, or invoke\n"
         "5. session close when finished"
     )
@@ -1444,6 +1536,121 @@ def _target_params(connection: ManagedConnection, target: str, **extra: Any) -> 
         params = {"selector": target}
     params.update(extra)
     return params
+
+
+def _normalize_find_string(name: str, value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not value.strip():
+        raise ValueError(f"{name} must be a non-empty string when provided")
+    return value
+
+
+def _resolve_find_root_wid(connection: ManagedConnection, root: str | None) -> int:
+    if root is None:
+        return _resolve_window(connection).wid
+
+    candidate = root.strip()
+    if not candidate:
+        raise ValueError("root must be a non-empty selector or stable handle")
+
+    if _HANDLE_PATTERN.match(candidate):
+        return connection.wid_for_handle(candidate)
+
+    locator = _resolve_window(connection).locator(candidate)
+    count = locator.count()
+    if count == 0:
+        raise ValueError(f"No widget found for find root {candidate!r}. Run snapshot or inspect to discover the UI first.")
+    if count > 1:
+        raise ValueError(
+            f"Find root {candidate!r} is ambiguous ({count} matches). Use find to narrow candidates before using it as a root."
+        )
+
+    resolve_owner_wid = getattr(locator, "_resolve_owner_wid", None)
+    if not callable(resolve_owner_wid):
+        raise RuntimeError("Resolved find root locator does not expose owner widget resolution")
+    owner_wid = resolve_owner_wid()
+    if isinstance(owner_wid, bool) or not isinstance(owner_wid, int):
+        raise RuntimeError(f"Resolved find root wid must be an integer, got {type(owner_wid).__name__}")
+    return int(owner_wid)
+
+
+def _find_ancestor_summary_entry(connection: ManagedConnection, node: dict[str, Any]) -> dict[str, Any]:
+    entry = {
+        "handle": connection.handle_for_wid(node.get("wid")),
+        "class": node.get("class", ""),
+    }
+    label, _marker = _snapshot_display_label(node)
+    if label:
+        entry["label"] = label
+    return entry
+
+
+def _find_result_entry(connection: ManagedConnection, node: dict[str, Any]) -> dict[str, Any]:
+    entry = _snapshot_entry(node, connection.handle_for_wid(node.get("wid")))
+
+    match_reason = node.get("matchReason")
+    if isinstance(match_reason, list) and match_reason:
+        entry["match_reason"] = [str(reason) for reason in match_reason]
+
+    ancestor_summary = node.get("ancestorSummary")
+    if isinstance(ancestor_summary, list) and ancestor_summary:
+        entry["ancestor_summary"] = [
+            _find_ancestor_summary_entry(connection, ancestor)
+            for ancestor in ancestor_summary
+            if isinstance(ancestor, dict)
+        ]
+
+    return entry
+
+
+def _find_result(
+    connection: ManagedConnection,
+    *,
+    root: str | None = None,
+    role: str | None = None,
+    text: str | None = None,
+    has_text: str | None = None,
+    widget_class: str | None = None,
+    object_name: str | None = None,
+    accessible_name: str | None = None,
+    visible: bool | None = None,
+    enabled: bool | None = None,
+    interactable: bool | None = None,
+    include_infrastructure: bool = False,
+    limit: int = 5,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    root_wid = _resolve_find_root_wid(connection, root)
+    raw = _find_widgets_raw(
+        connection,
+        root_wid=root_wid,
+        role=_normalize_find_string("role", role),
+        text=_normalize_find_string("text", text),
+        has_text=_normalize_find_string("has_text", has_text),
+        widget_class=_normalize_find_string("class", widget_class),
+        object_name=_normalize_find_string("object_name", object_name),
+        accessible_name=_normalize_find_string("accessible_name", accessible_name),
+        visible=visible,
+        enabled=enabled,
+        interactable=interactable,
+        include_infrastructure=include_infrastructure,
+        limit=limit,
+        timeout=timeout,
+    )
+    results = raw.get("results") or []
+    raw_root_wid = raw.get("rootWid")
+    root_handle = connection.handle_for_wid(raw_root_wid if isinstance(raw_root_wid, int) else root_wid)
+    return {
+        "root_handle": root_handle,
+        "count": int(raw.get("count", len(results))),
+        "truncated": bool(raw.get("truncated", False)),
+        "results": [
+            _find_result_entry(connection, entry)
+            for entry in results
+            if isinstance(entry, dict)
+        ],
+    }
 
 
 def _snapshot_result(
@@ -2002,6 +2209,48 @@ if FastMCP is not None:
             "ok": True,
             "target": target,
             **result,
+        }
+
+
+    @mcp.tool()
+    def find(
+        root: FindRootArg = None,
+        role: FindRoleArg = None,
+        text: FindTextArg = None,
+        has_text: FindHasTextArg = None,
+        class_: FindClassArg = None,
+        object_name: FindObjectNameArg = None,
+        accessible_name: FindAccessibleNameArg = None,
+        visible: FindVisibleArg = None,
+        enabled: FindEnabledArg = None,
+        interactable: FindInteractableArg = None,
+        include_infrastructure: IncludeInfrastructureArg = False,
+        limit: FindLimitArg = 5,
+    ) -> dict[str, Any]:
+        """Return a small, deterministic set of widget candidates within one root scope."""
+
+        if limit <= 0:
+            raise ValueError("limit must be > 0")
+
+        connection_state = _get_connection(_SERVER_STATE)
+        payload = _find_result(
+            connection_state,
+            root=root,
+            role=role,
+            text=text,
+            has_text=has_text,
+            widget_class=class_,
+            object_name=object_name,
+            accessible_name=accessible_name,
+            visible=visible,
+            enabled=enabled,
+            interactable=interactable,
+            include_infrastructure=include_infrastructure,
+            limit=limit,
+        )
+        return {
+            "ok": True,
+            **payload,
         }
 
     @mcp.tool()

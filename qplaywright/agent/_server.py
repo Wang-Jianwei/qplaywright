@@ -33,6 +33,7 @@ from qplaywright.protocol import (
     decode_line,
     METHOD_FIND,
     METHOD_FIND_ALL,
+    METHOD_FIND_WIDGETS,
     METHOD_WIDGET_TREE,
     METHOD_GET_PROPERTY,
     METHOD_GET_PROPERTIES,
@@ -84,6 +85,12 @@ from qplaywright.agent._selector import (
     find_widgets,
     widget_to_dict,
     _iter_widget_children,
+    _matches_accessible_name,
+    _matches_class,
+    _matches_has_text,
+    _matches_object_name,
+    _matches_role,
+    _matches_text_exact,
     _widget_text,
     _widget_class_name,
     _widget_value,
@@ -122,6 +129,9 @@ _OVERLAY_CORNER_RADIUS = 6
 _OVERLAY_BADGE_RADIUS = 7
 _OVERLAY_MANAGER = None
 _OverlayManagerClass = None
+_FIND_INFRASTRUCTURE_WIDGET_CLASSES = {
+    "QAbstractScrollAreaScrollBarContainer",
+}
 _SESSION_AGENT_NAMES: dict[str, str] = {}
 _ACTIVE_SESSION_ID: str | None = None
 # Reentrancy guard: set to True while a CommandEvent is being handled on the Qt
@@ -1056,6 +1066,183 @@ def _resolve_one(params: dict):
         selector = params.get("selector", params.get("wid", "?"))
         raise ValueError(f"No widget found for: {selector}")
     return widgets[0]
+
+
+def _find_lightly_visible(widget) -> bool:
+    return _widget_is_visible(widget) and widget.width() > 0 and widget.height() > 0
+
+
+def _find_interactable(widget) -> bool:
+    try:
+        _resolve_click_target(widget)
+    except Exception:
+        return False
+    return True
+
+
+def _is_find_infrastructure_widget(widget) -> bool:
+    if _is_automation_overlay_widget(widget):
+        return True
+
+    object_name = widget.objectName() if hasattr(widget, "objectName") else ""
+    if isinstance(object_name, str) and object_name.startswith("qt_"):
+        return True
+
+    return _widget_class_name(widget) in _FIND_INFRASTRUCTURE_WIDGET_CLASSES
+
+
+def _resolve_find_root_widget(params: dict):
+    wid = params.get("wid")
+    if wid is not None:
+        root = _registry.get(wid)
+        if root is None:
+            raise ValueError(f"Widget id={wid} not found or was garbage collected")
+        return root
+
+    selector = params.get("selector")
+    if selector is None:
+        raise ValueError("find_widgets requires wid or selector root")
+
+    matches = _resolve_widgets({"selector": selector, "visible_only": False})
+    if not matches:
+        raise ValueError(f"No widget found for find root: {selector}")
+    if len(matches) > 1:
+        raise ValueError(f"Find root is ambiguous for selector: {selector}")
+    return matches[0]
+
+
+def _find_match_reasons(params: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    if params.get("role") is not None:
+        reasons.append(f"role={params['role']}")
+    if params.get("text") is not None:
+        reasons.append(f"text={params['text']}")
+    if params.get("has_text") is not None:
+        reasons.append(f"has_text~={params['has_text']}")
+    if params.get("class") is not None:
+        reasons.append(f"class={params['class']}")
+    if params.get("object_name") is not None:
+        reasons.append(f"object_name={params['object_name']}")
+    if params.get("accessible_name") is not None:
+        reasons.append(f"accessible_name={params['accessible_name']}")
+    for name in ("visible", "enabled", "interactable"):
+        value = params.get(name)
+        if value is not None:
+            reasons.append(f"{name}={'true' if value else 'false'}")
+    return reasons
+
+
+def _find_widget_matches(widget, params: dict[str, Any], *, visible: bool, enabled: bool, interactable: bool) -> bool:
+    role = params.get("role")
+    if role is not None and not _matches_role(widget, role):
+        return False
+
+    text = params.get("text")
+    if text is not None and not _matches_text_exact(widget, text):
+        return False
+
+    has_text = params.get("has_text")
+    if has_text is not None and not _matches_has_text(widget, has_text):
+        return False
+
+    widget_class = params.get("class")
+    if widget_class is not None and not _matches_class(widget, widget_class):
+        return False
+
+    object_name = params.get("object_name")
+    if object_name is not None and not _matches_object_name(widget, object_name):
+        return False
+
+    accessible_name = params.get("accessible_name")
+    if accessible_name is not None and not _matches_accessible_name(widget, accessible_name):
+        return False
+
+    if params.get("visible") is not None and visible is not bool(params["visible"]):
+        return False
+
+    if params.get("enabled") is not None and enabled is not bool(params["enabled"]):
+        return False
+
+    if params.get("interactable") is not None and interactable is not bool(params["interactable"]):
+        return False
+
+    return True
+
+
+def _find_ancestor_summary(ancestors: list) -> list[dict[str, Any]]:
+    summary: list[dict[str, Any]] = []
+    for ancestor in ancestors:
+        summary.append({"wid": _registry.register(ancestor), **widget_to_dict(ancestor, max_depth=0)})
+    return summary
+
+
+def _find_widgets_payload(params: dict[str, Any]) -> dict[str, Any]:
+    root = _resolve_find_root_widget(params)
+    root_wid = _registry.register(root)
+    include_infrastructure = bool(params.get("include_infrastructure", False))
+    limit = int(params.get("limit", 5))
+    if limit <= 0:
+        raise ValueError("limit must be > 0")
+
+    matches: list[dict[str, Any]] = []
+    preorder = 0
+    match_reason = _find_match_reasons(params)
+    explicit_visible = params.get("visible") is not None
+    explicit_interactable = params.get("interactable") is not None
+
+    def _walk(widget, ancestors: list) -> None:
+        nonlocal preorder
+
+        current_order = preorder
+        preorder += 1
+        visible = _find_lightly_visible(widget)
+        enabled = _widget_is_enabled(widget)
+        interactable = _find_interactable(widget)
+        is_infrastructure = _is_find_infrastructure_widget(widget)
+
+        if (include_infrastructure or not is_infrastructure) and _find_widget_matches(
+            widget,
+            params,
+            visible=visible,
+            enabled=enabled,
+            interactable=interactable,
+        ):
+            wid = _registry.register(widget)
+            entry = {"wid": wid, **widget_to_dict(widget, max_depth=0), "matchReason": list(match_reason)}
+            if ancestors:
+                entry["ancestorSummary"] = _find_ancestor_summary(ancestors)
+            matches.append(
+                {
+                    "depth": len(ancestors),
+                    "interactable": interactable,
+                    "visible": visible,
+                    "preorder": current_order,
+                    "wid": wid,
+                    "entry": entry,
+                }
+            )
+
+        for child in _iter_widget_children(widget):
+            _walk(child, [*ancestors, widget])
+
+    _walk(root, [])
+
+    matches.sort(
+        key=lambda item: (
+            item["depth"],
+            0 if explicit_interactable else (0 if item["interactable"] else 1),
+            0 if explicit_visible else (0 if item["visible"] else 1),
+            item["preorder"],
+            item["wid"],
+        )
+    )
+    truncated = len(matches) > limit
+    return {
+        "rootWid": root_wid,
+        "count": min(len(matches), limit),
+        "truncated": truncated,
+        "results": [item["entry"] for item in matches[:limit]],
+    }
 
 
 def _normalize_invoke_result(value):
@@ -2658,6 +2845,9 @@ def _handle_command(req: Request) -> Any:
             wid = _registry.register(w)
             result.append({"wid": wid, **widget_to_dict(w, max_depth=params.get("max_depth", 0))})
         return result
+
+    if method == METHOD_FIND_WIDGETS:
+        return _find_widgets_payload(params)
 
     if method == METHOD_WIDGET_TREE:
         wid = params.get("wid")

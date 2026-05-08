@@ -290,6 +290,83 @@ def test_find_widgets_skips_non_widget_children():
     assert results == [widget]
 
 
+def test_find_widgets_payload_returns_match_reason_and_ancestor_summary():
+    server._registry.clear()
+    submit = FakeTextWidget(class_name="QPushButton", object_name="submit_btn", properties={"text": "Submit"})
+    panel = FakeWidget(class_name="QGroupBox", object_name="payment_panel", children=[submit])
+    root = FakeWidget(class_name="DemoWindow", object_name="main_window", children=[panel])
+    root_wid = server._registry.register(root)
+
+    payload = server._find_widgets_payload(
+        {
+            "wid": root_wid,
+            "role": "button",
+            "has_text": "Submit",
+            "limit": 5,
+        }
+    )
+
+    assert payload["rootWid"] == root_wid
+    assert payload["count"] == 1
+    assert payload["truncated"] is False
+    assert payload["results"] == [
+        {
+            "wid": server._registry.register(submit),
+            "class": "QPushButton",
+            "objectName": "submit_btn",
+            "text": "Submit",
+            "visible": True,
+            "enabled": True,
+            "geometry": {"x": 0, "y": 0, "width": 100, "height": 30},
+            "matchReason": ["role=button", "has_text~=Submit"],
+            "ancestorSummary": [
+                {
+                    "wid": root_wid,
+                    "class": "DemoWindow",
+                    "visible": True,
+                    "enabled": True,
+                    "geometry": {"x": 0, "y": 0, "width": 100, "height": 30},
+                    "objectName": "main_window",
+                },
+                {
+                    "wid": server._registry.register(panel),
+                    "class": "QGroupBox",
+                    "visible": True,
+                    "enabled": True,
+                    "geometry": {"x": 0, "y": 0, "width": 100, "height": 30},
+                    "objectName": "payment_panel",
+                },
+            ],
+        }
+    ]
+
+
+def test_find_widgets_payload_applies_limit_and_truncated_flag():
+    server._registry.clear()
+    root = FakeWidget(
+        class_name="DemoWindow",
+        object_name="main_window",
+        children=[
+            FakeTextWidget(class_name="QPushButton", object_name="submit_btn", properties={"text": "Submit"}),
+            FakeTextWidget(class_name="QPushButton", object_name="confirm_btn", properties={"text": "Submit"}),
+        ],
+    )
+    root_wid = server._registry.register(root)
+
+    payload = server._find_widgets_payload(
+        {
+            "wid": root_wid,
+            "role": "button",
+            "has_text": "Submit",
+            "limit": 1,
+        }
+    )
+
+    assert payload["count"] == 1
+    assert payload["truncated"] is True
+    assert len(payload["results"]) == 1
+
+
 def test_widget_to_dict_skips_non_widget_children():
     child = FakeTextWidget(object_name="child", properties={"text": "Save"})
     widget = FakeWidget(object_name="root", children=[child, FakeActionLike()])
