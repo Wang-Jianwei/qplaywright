@@ -1690,6 +1690,11 @@ def _find_ancestor_summary_entry(connection: ManagedConnection, node: dict[str, 
 def _find_result_entry(connection: ManagedConnection, node: dict[str, Any]) -> dict[str, Any]:
     entry = _snapshot_entry(node, connection.handle_for_wid(node.get("wid")))
 
+    for key in ("visible", "enabled", "interactable"):
+        value = node.get(key)
+        if isinstance(value, bool):
+            entry[key] = value
+
     match_reason = node.get("matchReason")
     if isinstance(match_reason, list) and match_reason:
         entry["match_reason"] = [str(reason) for reason in match_reason]

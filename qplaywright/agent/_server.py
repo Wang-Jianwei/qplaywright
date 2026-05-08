@@ -1213,6 +1213,7 @@ def _find_widgets_payload(params: dict[str, Any]) -> dict[str, Any]:
         ):
             wid = _registry.register(widget)
             entry = {"wid": wid, **widget_to_dict(widget, max_depth=0), "matchReason": list(match_reason)}
+            entry["interactable"] = interactable
             if ancestors:
                 entry["ancestorSummary"] = _find_ancestor_summary(ancestors)
             matches.append(

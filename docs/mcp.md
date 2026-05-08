@@ -187,8 +187,13 @@ When `include_snapshot=true`, the response also includes:
 
 Action tools also support `include_state=false` by default.
 When `include_state=true`, the response includes a compact target-level `state`
-payload such as `exists`, `count`, `visible`, `enabled`, `checked`, `text`,
-`currentText`, `value`, `expanded`, and `selected` when those fields are available.
+payload.
+
+- widget targets may return compact widget fields such as `exists`, `count`, `visible`, `enabled`, `checked`, `text`, `current_text`, `value`, `object_name`, `class`, `accessible_name`, `accessible_description`, `bounding_box`, and `global_bounding_box`
+- item targets may return compact item fields such as `exists`, `count`, `kind`, `row`, `column`, `path`, `visible`, `text`, `edit_value`, `selected`, `expanded`, `bounding_box`, and `global_bounding_box`
+
+`include_state` is intentionally compact. It is not a replacement for full `snapshot`
+or the richer widget/item payloads returned by `inspect` and `inspect_items`.
 
 `include_state` and `include_snapshot` are independent and may both be `true`
 in the same request.
@@ -341,7 +346,20 @@ small deterministic candidate set. Response fields include:
 - `count`
 - `truncated`
 - `results`, where each entry includes `handle`, `class`, optional semantic fields,
-  `match_reason`, and optional `ancestor_summary`
+  compact decision fields, `match_reason`, and optional `ancestor_summary`
+
+Current `results[]` entries are intentionally small, but they carry enough context
+for the next decision step without forcing an immediate `inspect` on every candidate.
+Typical fields include:
+
+- `object_name`, `label`, `text`, `accessible_name`, `current_text`
+- `visible`, `enabled`, `interactable`
+- `geometry`
+- `match_reason`
+- `ancestor_summary`
+
+`find` is still a discovery tool, not a full inspect payload. If you need methods,
+properties, or exact target-level state, follow up with `inspect` on the chosen handle.
 
 ### inspect
 
@@ -361,7 +379,7 @@ When `target` is provided, `inspect` returns widget or item-target state.
 If multiple widgets match the target, scalar fields describe the first match and `count` reports the total number of matches.
 When `target` is omitted, `inspect` filters common Qt infrastructure widgets by default.
 Set `include_infrastructure=true` to inspect the unfiltered raw widget tree.
-For structured item targets, `inspect` returns item metadata such as `kind`, `row`, `column`, `path`, `selected`, and `expanded` when those fields apply.
+For structured item targets, `inspect` returns item metadata such as `kind`, `row`, `column`, `path`, `selected`, `expanded`, and `edit_value` when those fields apply.
 
 Targeted `inspect` may include:
 
@@ -387,6 +405,11 @@ Use those returned `target` objects directly with `inspect`, `click`, `hover`, `
 Stable widget handles remain widget-only; item discovery is handled by `inspect_items`.
 When `snapshot` or widget-tree `inspect` encounters a table, tree, or list owner widget, it may include an `itemView`
 hint so the next discovery step is explicit instead of implying that per-cell delegates are normal widget descendants.
+
+For table, tree, and list items, `text` remains the display-facing model value.
+When an item is actively being edited and the live editor value differs, the same
+entry may also include `edit_value`. This lets an agent distinguish committed model
+state from an in-flight editor state such as `text="Active"` with `edit_value="Pending"`.
 
 When `target` is omitted and `topmost_only=true`, the returned tree is an
 approximate frontmost-visible view and may be incomplete.

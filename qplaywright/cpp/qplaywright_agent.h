@@ -2855,6 +2855,7 @@ private:
                     QJsonObject entry = serializeWidgetTree(widget, 0, 0, false);
                     const int wid = reg.registerWidget(widget);
                     entry["wid"] = wid;
+                    entry["interactable"] = interactable;
                     entry["matchReason"] = matchReason;
                     if (!ancestors.isEmpty())
                         entry["ancestorSummary"] = findAncestorSummary(ancestors);
