@@ -1141,11 +1141,12 @@ def _selector_help_text() -> str:
         "Structured item targets use the form {owner, item}, for example:\n"
         "- {\"owner\": \"#orders_table\", \"item\": {\"kind\": \"table_cell\", \"row\": 3, \"column\": 1}}\n"
         "- {\"owner\": \"#settings_tree\", \"item\": {\"kind\": \"tree_node\", \"path\": [0, 1]}}\n"
-        "- {\"owner\": \"#task_list\", \"item\": {\"kind\": \"list_item\", \"row\": 2}}\n\n"
+        "- {\"owner\": \"#task_list\", \"item\": {\"kind\": \"list_item\", \"row\": 2}}\n"
+        "- {\"owner\": \"#main_tabs\", \"item\": {\"kind\": \"tab_item\", \"index\": 1}}\n\n"
         "Typical workflow:\n"
         "1. session attach or session launch\n"
         "2. window list and window select when multiple windows are visible\n"
-        "3. snapshot or inspect for widgets; inspect_items for table/tree/list descendants\n"
+        "3. snapshot or inspect for widgets; inspect_items for table/tree/list/tab descendants\n"
         "4. click, hover, wait, set_expanded, input, set_checked, press_key, choose, screenshot, or invoke\n"
         "5. session close when finished"
     )
@@ -1984,7 +1985,7 @@ if FastMCP is not None:
         max_items: InspectItemsMaxItemsArg = 200,
         include_hidden: IncludeHiddenItemsArg = False,
     ) -> dict[str, Any]:
-        """Enumerate structured item-view descendants for one table, tree, or list widget."""
+        """Enumerate structured descendants for one table, tree, list, or tab widget."""
 
         if max_rows < 0:
             raise ValueError("max_rows must be >= 0")

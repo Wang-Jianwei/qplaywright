@@ -42,10 +42,12 @@ from qplaywright.protocol import (
     METHOD_ITEM_TEXT,
     METHOD_ITEM_PROPERTIES,
     METHOD_ITEM_VISIBLE,
+    METHOD_ITEM_SELECTED,
     METHOD_ITEM_BOUNDING_BOX,
     METHOD_ITEM_CLICK,
     METHOD_ITEM_DBLCLICK,
     METHOD_ITEM_HOVER,
+    METHOD_ITEM_SELECT,
     METHOD_ITEM_EXPAND,
     METHOD_ITEM_COLLAPSE,
     METHOD_ITEM_VIEW_INSPECT,
@@ -1154,6 +1156,157 @@ def _list_view(owner_widget):
     return owner_widget
 
 
+def _tab_widget(owner_widget):
+    _import_qt()
+    tab_widget_type = getattr(_QtWidgets, "QTabWidget", None) if _QtWidgets is not None else None
+    if tab_widget_type is not None and isinstance(owner_widget, tab_widget_type):
+        return owner_widget
+
+    class_name = _widget_class_name(owner_widget)
+    if class_name != "QTabWidget":
+        raise ValueError(f"Item owner is not a supported tab widget: {class_name}")
+    return owner_widget
+
+
+def _tab_bar(owner_widget):
+    _import_qt()
+    tab_bar_type = getattr(_QtWidgets, "QTabBar", None) if _QtWidgets is not None else None
+    if tab_bar_type is not None and isinstance(owner_widget, tab_bar_type):
+        return owner_widget
+
+    class_name = _widget_class_name(owner_widget)
+    if class_name != "QTabBar":
+        raise ValueError(f"Item owner is not a supported tab bar: {class_name}")
+    return owner_widget
+
+
+def _tab_bar_from_owner(owner_widget):
+    try:
+        return _tab_bar(owner_widget)
+    except ValueError:
+        pass
+
+    widget = _tab_widget(owner_widget)
+    tab_bar_fn = getattr(widget, "tabBar", None)
+    if not callable(tab_bar_fn):
+        raise ValueError("Tab widget does not expose tabBar()")
+    tab_bar = tab_bar_fn()
+    if tab_bar is None:
+        raise ValueError("Tab widget tabBar() returned None")
+    return tab_bar
+
+
+def _tab_count(tab_bar) -> int:
+    count_fn = getattr(tab_bar, "count", None)
+    if not callable(count_fn):
+        raise ValueError("Tab owner does not expose count()")
+    value = count_fn()
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"Tab count must be an int, got {type(value).__name__}")
+    return value
+
+
+def _tab_text(tab_bar, index: int) -> str:
+    tab_text_fn = getattr(tab_bar, "tabText", None)
+    if not callable(tab_text_fn):
+        raise ValueError("Tab owner does not expose tabText()")
+    return str(tab_text_fn(index))
+
+
+def _tab_current_index(owner_widget) -> int:
+    current_index_fn = getattr(owner_widget, "currentIndex", None)
+    if callable(current_index_fn):
+        value = current_index_fn()
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"Tab currentIndex() must return an int, got {type(value).__name__}")
+        return value
+    tab_bar = _tab_bar_from_owner(owner_widget)
+    current_index_fn = getattr(tab_bar, "currentIndex", None)
+    if callable(current_index_fn):
+        value = current_index_fn()
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"Tab currentIndex() must return an int, got {type(value).__name__}")
+        return value
+    raise ValueError("Tab owner does not expose currentIndex()")
+
+
+def _rect_top_left(rect):
+    top_left_fn = getattr(rect, "topLeft", None)
+    if not callable(top_left_fn):
+        raise ValueError("Rect does not expose topLeft()")
+    return top_left_fn()
+
+
+def _rect_center(rect):
+    center_fn = getattr(rect, "center", None)
+    if not callable(center_fn):
+        raise ValueError("Rect does not expose center()")
+    return center_fn()
+
+
+def _rect_dimension(rect, name: str) -> int:
+    accessor = getattr(rect, name, None)
+    value = accessor() if callable(accessor) else accessor
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"Rect {name} must be an int, got {type(value).__name__}")
+    return value
+
+
+def _point_coordinate(point, name: str) -> int:
+    accessor = getattr(point, name, None)
+    value = accessor() if callable(accessor) else accessor
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"Point {name} must be an int, got {type(value).__name__}")
+    return value
+
+
+def _tab_rect(tab_bar, index: int):
+    tab_rect_fn = getattr(tab_bar, "tabRect", None)
+    if not callable(tab_rect_fn):
+        raise ValueError("Tab owner does not expose tabRect()")
+    rect = tab_rect_fn(index)
+    if _rect_is_empty(rect):
+        raise ValueError(f"Tab {index} does not have a visible rect")
+    return rect
+
+
+def _tab_visible(tab_bar, index: int) -> bool:
+    is_tab_visible = getattr(tab_bar, "isTabVisible", None)
+    if callable(is_tab_visible):
+        return bool(is_tab_visible(index))
+
+    tab_rect_fn = getattr(tab_bar, "tabRect", None)
+    if not callable(tab_rect_fn):
+        raise ValueError("Tab owner does not expose tabRect()")
+    return not _rect_is_empty(tab_rect_fn(index))
+
+
+def _tab_enabled(tab_bar, index: int) -> bool:
+    is_tab_enabled = getattr(tab_bar, "isTabEnabled", None)
+    if callable(is_tab_enabled):
+        return bool(is_tab_enabled(index))
+    return True
+
+
+def _tab_page_object_name(owner_widget, index: int) -> str:
+    try:
+        tab_widget = _tab_widget(owner_widget)
+    except ValueError:
+        return ""
+
+    widget_fn = getattr(tab_widget, "widget", None)
+    if not callable(widget_fn):
+        return ""
+    page = widget_fn(index)
+    if page is None:
+        return ""
+    object_name_fn = getattr(page, "objectName", None)
+    if not callable(object_name_fn):
+        return ""
+    name = object_name_fn()
+    return "" if name is None else str(name)
+
+
 def _table_model(owner_widget):
     view = _table_view(owner_widget)
     model_fn = getattr(view, "model", None)
@@ -1503,6 +1656,49 @@ def _resolve_list_item(owner_widget, descriptor: dict):
     }
 
 
+def _resolve_tab_item(owner_widget, descriptor: dict):
+    if not isinstance(descriptor, dict):
+        raise ValueError("Item descriptor must be an object")
+    if descriptor.get("kind") != "tab_item":
+        raise ValueError(f"Unsupported item kind: {descriptor.get('kind')}")
+
+    has_index = "index" in descriptor
+    has_label = "label" in descriptor
+    if has_index == has_label:
+        raise ValueError("Tab item descriptor requires exactly one of index or label")
+
+    tab_bar = _tab_bar_from_owner(owner_widget)
+    count = _tab_count(tab_bar)
+
+    if has_index:
+        index = descriptor.get("index")
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ValueError("Tab item index must be an int")
+        if index < 0 or index >= count:
+            raise ValueError(f"Tab index out of range: {index}")
+        return {
+            "kind": "tab_item",
+            "index": index,
+            "tabBar": tab_bar,
+        }
+
+    label = descriptor.get("label")
+    if not isinstance(label, str) or not label:
+        raise ValueError("Tab item label must be a non-empty string")
+
+    matches = [index for index in range(count) if _tab_text(tab_bar, index) == label]
+    if not matches:
+        raise ValueError(f"Tab label not found: {label}")
+    if len(matches) > 1:
+        raise ValueError(f"Ambiguous tab label: {label}")
+
+    return {
+        "kind": "tab_item",
+        "index": matches[0],
+        "tabBar": tab_bar,
+    }
+
+
 def _resolve_item_target(owner_widget, descriptor: dict):
     if not isinstance(descriptor, dict):
         raise ValueError("Item descriptor must be an object")
@@ -1514,7 +1710,50 @@ def _resolve_item_target(owner_widget, descriptor: dict):
         return _resolve_list_item(owner_widget, descriptor)
     if kind == "tree_node":
         return _resolve_tree_item(owner_widget, descriptor)
+    if kind == "tab_item":
+        return _resolve_tab_item(owner_widget, descriptor)
     raise ValueError(f"Unsupported item kind: {kind}")
+
+
+def _tab_item_text(owner_widget, resolved_target) -> str:
+    tab_bar = resolved_target.get("tabBar") or _tab_bar_from_owner(owner_widget)
+    return _tab_text(tab_bar, int(resolved_target["index"]))
+
+
+def _tab_item_selected(owner_widget, resolved_target) -> bool:
+    return int(resolved_target["index"]) == _tab_current_index(owner_widget)
+
+
+def _tab_item_properties(owner_widget, resolved_target) -> dict[str, Any]:
+    tab_bar = resolved_target.get("tabBar") or _tab_bar_from_owner(owner_widget)
+    index = int(resolved_target["index"])
+    props = {
+        "kind": "tab_item",
+        "index": index,
+        "text": _tab_text(tab_bar, index),
+        "visible": _tab_visible(tab_bar, index),
+        "selected": _tab_item_selected(owner_widget, resolved_target),
+        "enabled": _tab_enabled(tab_bar, index),
+    }
+    page_object_name = _tab_page_object_name(owner_widget, index)
+    if page_object_name:
+        props["pageObjectName"] = page_object_name
+    return props
+
+
+def _tab_item_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
+    tab_bar = resolved_target.get("tabBar") or _tab_bar_from_owner(owner_widget)
+    rect = _tab_rect(tab_bar, int(resolved_target["index"]))
+    map_to_global = getattr(tab_bar, "mapToGlobal", None)
+    if not callable(map_to_global):
+        raise ValueError("Tab owner does not expose mapToGlobal()")
+    global_pos = map_to_global(_rect_top_left(rect))
+    return {
+        "x": _point_coordinate(global_pos, "x"),
+        "y": _point_coordinate(global_pos, "y"),
+        "width": _rect_dimension(rect, "width"),
+        "height": _rect_dimension(rect, "height"),
+    }
 
 
 def _rect_is_empty(rect) -> bool:
@@ -1776,6 +2015,8 @@ def _item_text(owner_widget, resolved_target) -> str:
         return _list_index_text(owner_widget, resolved_target)
     if resolved_target["kind"] == "tree_node":
         return _tree_index_text(owner_widget, resolved_target)
+    if resolved_target["kind"] == "tab_item":
+        return _tab_item_text(owner_widget, resolved_target)
     raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
 
 
@@ -1786,6 +2027,8 @@ def _item_properties(owner_widget, resolved_target) -> dict[str, Any]:
         return _list_index_properties(owner_widget, resolved_target)
     if resolved_target["kind"] == "tree_node":
         return _tree_index_properties(owner_widget, resolved_target)
+    if resolved_target["kind"] == "tab_item":
+        return _tab_item_properties(owner_widget, resolved_target)
     raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
 
 
@@ -1796,7 +2039,15 @@ def _item_visible(owner_widget, resolved_target) -> bool:
         return _list_index_visible(owner_widget, resolved_target)
     if resolved_target["kind"] == "tree_node":
         return _tree_index_visible(owner_widget, resolved_target)
+    if resolved_target["kind"] == "tab_item":
+        tab_bar = resolved_target.get("tabBar") or _tab_bar_from_owner(owner_widget)
+        return _tab_visible(tab_bar, int(resolved_target["index"]))
     raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
+
+
+def _item_selected(owner_widget, resolved_target) -> bool:
+    selected = _item_properties(owner_widget, resolved_target).get("selected")
+    return bool(selected)
 
 
 def _item_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
@@ -1806,6 +2057,8 @@ def _item_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
         return _list_index_bounding_box(owner_widget, resolved_target)
     if resolved_target["kind"] == "tree_node":
         return _tree_index_bounding_box(owner_widget, resolved_target)
+    if resolved_target["kind"] == "tab_item":
+        return _tab_item_bounding_box(owner_widget, resolved_target)
     raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
 
 
@@ -1898,6 +2151,38 @@ def _hover_list_index(owner_widget, resolved_target):
     _hover_widget(viewport, local_pos)
 
 
+def _click_tab_item(owner_widget, resolved_target, *, double: bool = False):
+    tab_bar = resolved_target.get("tabBar") or _tab_bar_from_owner(owner_widget)
+    rect = _tab_rect(tab_bar, int(resolved_target["index"]))
+    _click_widget_at(tab_bar, _rect_center(rect), double=double)
+
+
+def _hover_tab_item(owner_widget, resolved_target):
+    tab_bar = resolved_target.get("tabBar") or _tab_bar_from_owner(owner_widget)
+    rect = _tab_rect(tab_bar, int(resolved_target["index"]))
+    local_pos = _rect_center(rect)
+    _move_visual_cursor(tab_bar, local_pos)
+    _hover_widget(tab_bar, local_pos)
+
+
+def _select_tab_item(owner_widget, resolved_target):
+    index = int(resolved_target["index"])
+    set_current_index = getattr(owner_widget, "setCurrentIndex", None)
+    if callable(set_current_index):
+        set_current_index(index)
+        _process_events()
+        return
+
+    tab_bar = resolved_target.get("tabBar") or _tab_bar_from_owner(owner_widget)
+    set_current_index = getattr(tab_bar, "setCurrentIndex", None)
+    if callable(set_current_index):
+        set_current_index(index)
+        _process_events()
+        return
+
+    raise ValueError("Tab owner does not expose setCurrentIndex()")
+
+
 def _click_item(owner_widget, resolved_target, *, double: bool = False):
     if resolved_target["kind"] == "table_cell":
         _click_table_index(owner_widget, resolved_target, double=double)
@@ -1907,6 +2192,9 @@ def _click_item(owner_widget, resolved_target, *, double: bool = False):
         return
     if resolved_target["kind"] == "tree_node":
         _click_tree_index(owner_widget, resolved_target, double=double)
+        return
+    if resolved_target["kind"] == "tab_item":
+        _click_tab_item(owner_widget, resolved_target, double=double)
         return
     raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
 
@@ -1920,6 +2208,9 @@ def _hover_item(owner_widget, resolved_target):
         return
     if resolved_target["kind"] == "tree_node":
         _hover_tree_index(owner_widget, resolved_target)
+        return
+    if resolved_target["kind"] == "tab_item":
+        _hover_tab_item(owner_widget, resolved_target)
         return
     raise ValueError(f"Unsupported item kind: {resolved_target['kind']}")
 
@@ -2154,8 +2445,40 @@ def _inspect_item_view(
     except ValueError:
         pass
 
+    try:
+        return _tab_item_inspection(owner_widget, max_items=max_items, include_hidden=include_hidden)
+    except ValueError:
+        pass
+
     class_name = _widget_class_name(owner_widget)
     raise ValueError(f"Widget does not expose supported item-view descendants: {class_name}")
+
+
+def _tab_item_inspection(owner_widget, *, max_items: int, include_hidden: bool) -> dict[str, Any]:
+    tab_bar = _tab_bar_from_owner(owner_widget)
+    indices = [index for index in range(_tab_count(tab_bar)) if include_hidden or _tab_visible(tab_bar, index)]
+    truncated = len(indices) > max_items
+    items = []
+    for index in indices[:max_items]:
+        entry = {
+            "item": {"kind": "tab_item", "index": index},
+            "index": index,
+            "text": _tab_text(tab_bar, index),
+            "visible": _tab_visible(tab_bar, index),
+            "selected": index == _tab_current_index(owner_widget),
+            "enabled": _tab_enabled(tab_bar, index),
+        }
+        page_object_name = _tab_page_object_name(owner_widget, index)
+        if page_object_name:
+            entry["pageObjectName"] = page_object_name
+        items.append(entry)
+
+    return {
+        "kind": "tab",
+        "maxItems": max_items,
+        "items": items,
+        "truncated": truncated,
+    }
 
 
 def _key_to_qt(key_str: str):
@@ -2304,6 +2627,11 @@ def _handle_command(req: Request) -> Any:
         target = _resolve_item_target(owner, params.get("item") or {})
         return _item_visible(owner, target)
 
+    if method == METHOD_ITEM_SELECTED:
+        owner = _resolve_item_owner(params)
+        target = _resolve_item_target(owner, params.get("item") or {})
+        return _item_selected(owner, target)
+
     if method == METHOD_ITEM_BOUNDING_BOX:
         owner = _resolve_item_owner(params)
         target = _resolve_item_target(owner, params.get("item") or {})
@@ -2409,6 +2737,12 @@ def _handle_command(req: Request) -> Any:
         owner = _resolve_item_owner(params)
         target = _resolve_item_target(owner, params.get("item") or {})
         _hover_item(owner, target)
+        return True
+
+    if method == METHOD_ITEM_SELECT:
+        owner = _resolve_item_owner(params)
+        target = _resolve_item_target(owner, params.get("item") or {})
+        _select_tab_item(owner, target)
         return True
 
     if method == METHOD_ITEM_EXPAND:

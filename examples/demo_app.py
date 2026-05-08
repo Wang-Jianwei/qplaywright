@@ -736,13 +736,6 @@ class DemoWindow(QMainWindow):
         self.refresh_btn.clicked.connect(self._on_refresh)
         toolbar.addWidget(self.refresh_btn)
 
-        toolbar.addSeparator()
-
-        self.toolbar_show_status_editor_btn = QPushButton("Status Editor Demo")
-        self.toolbar_show_status_editor_btn.setObjectName("toolbar_show_status_editor")
-        self.toolbar_show_status_editor_btn.clicked.connect(self._open_status_editor_demo)
-        toolbar.addWidget(self.toolbar_show_status_editor_btn)
-
     def _create_status_bar(self):
         self.statusbar = QStatusBar()
         self.statusbar.setObjectName("statusbar")
@@ -1243,10 +1236,6 @@ class DemoWindow(QMainWindow):
             self._log(f"[INFO] Deleted entry: {name}")
         else:
             self._log("[WARN] No entry selected for deletion")
-
-    def _open_status_editor_demo(self):
-        self.tabs.setCurrentWidget(self.tabs.findChild(QWidget, "tab_data") or self.tabs.currentWidget())
-        self._show_selected_status_editor()
 
     def _show_selected_status_editor(self):
         current_row = self.data_table.currentRow()

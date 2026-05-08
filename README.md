@@ -94,7 +94,7 @@ with sync_qplaywright() as qp:
     window.get_by_role("button", name="Submit").click()
 ```
 
-Item-view descendants use explicit item locators instead of pretending model items are widgets:
+Structured descendants use explicit item locators instead of pretending model items are widgets:
 
 ```python
 table = window.locator("#data_table")
@@ -105,6 +105,9 @@ tree.node(["Settings", "Advanced"]).expand()
 
 list_view = window.locator("#scroll_list")
 list_view.list_item("Scrollable item 010").click()
+
+tabs = window.locator("#main_tabs")
+tabs.tab("Data").select()
 ```
 
 When `visual_feedback` is enabled in the Qt agent and the client provides `agent_name`, the target window shows the current shared-agent overlay marker.

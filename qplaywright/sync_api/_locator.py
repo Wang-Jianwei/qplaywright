@@ -36,10 +36,12 @@ from qplaywright.protocol import (
     METHOD_ITEM_TEXT,
     METHOD_ITEM_PROPERTIES,
     METHOD_ITEM_VISIBLE,
+    METHOD_ITEM_SELECTED,
     METHOD_ITEM_BOUNDING_BOX,
     METHOD_ITEM_CLICK,
     METHOD_ITEM_DBLCLICK,
     METHOD_ITEM_HOVER,
+    METHOD_ITEM_SELECT,
     METHOD_ITEM_EXPAND,
     METHOD_ITEM_COLLAPSE,
 )
@@ -73,7 +75,7 @@ def _normalize_tree_path(path: list[str | int]) -> list[str | int]:
 
 
 class ItemLocator:
-    """Locator for non-widget descendants owned by a table/tree widget."""
+    """Locator for non-widget descendants owned by a table/tree/list/tab widget."""
 
     def __init__(self, conn: Connection, owner_wid: int, item: dict[str, Any], *, timeout: float = 30.0):
         self._conn = conn
@@ -115,6 +117,9 @@ class ItemLocator:
         except RuntimeError:
             return False
 
+    def is_selected(self) -> bool:
+        return bool(self._send(METHOD_ITEM_SELECTED))
+
     def bounding_box(self) -> dict[str, int]:
         return self._send(METHOD_ITEM_BOUNDING_BOX)
 
@@ -126,6 +131,10 @@ class ItemLocator:
 
     def hover(self) -> None:
         self._send(METHOD_ITEM_HOVER)
+
+    def select(self) -> None:
+        self._require_kind("tab_item", action="select")
+        self._send(METHOD_ITEM_SELECT)
 
     def expand(self) -> None:
         self._require_kind("tree_node", action="expand")
@@ -276,6 +285,23 @@ class Locator:
         if index < 0:
             raise ValueError("index must be >= 0")
         return self.node([index])
+
+    def tab(self, tab: int | str) -> ItemLocator:
+        descriptor: dict[str, Any] = {"kind": "tab_item"}
+        if isinstance(tab, bool):
+            raise TypeError("tab must be an int or str")
+        if isinstance(tab, int):
+            if tab < 0:
+                raise ValueError("tab index must be >= 0")
+            descriptor["index"] = tab
+        elif isinstance(tab, str):
+            if not tab:
+                raise ValueError("tab label must not be empty")
+            descriptor["label"] = tab
+        else:
+            raise TypeError("tab must be an int or str")
+
+        return ItemLocator(self._conn, self._resolve_owner_wid(), descriptor, timeout=self._timeout)
 
     def nth(self, index: int) -> Locator:
         """Select the nth matching widget (0-based)."""

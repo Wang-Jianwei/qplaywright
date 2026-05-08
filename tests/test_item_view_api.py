@@ -278,6 +278,60 @@ def test_locator_list_item_builds_numeric_descriptor_for_properties():
     ]
 
 
+def test_locator_tab_resolves_owner_widget_before_select():
+    conn = SequencedConnection({"find": {"wid": 52}, "item_select": True})
+    locator = Locator(cast(Any, conn), "#main_tabs", timeout=6.0)
+
+    locator.tab("Data").select()
+
+    assert conn.calls == [
+        ("find", {"selector": "#main_tabs"}, 6.0),
+        (
+            "item_select",
+            {
+                "wid": 52,
+                "item": {
+                    "kind": "tab_item",
+                    "label": "Data",
+                },
+            },
+            6.0,
+        ),
+    ]
+
+
+def test_item_locator_is_selected_sends_item_selected_request():
+    conn = FakeConnection()
+    item = ItemLocator(cast(Any, conn), 21, {"kind": "tab_item", "index": 1}, timeout=4.0)
+
+    result = item.is_selected()
+
+    assert result is True
+    assert conn.calls == [
+        (
+            "item_selected",
+            {
+                "wid": 21,
+                "item": {
+                    "kind": "tab_item",
+                    "index": 1,
+                },
+            },
+            4.0,
+        )
+    ]
+
+
+def test_list_item_select_is_rejected_locally():
+    conn = FakeConnection()
+    item = ItemLocator(cast(Any, conn), 9, {"kind": "list_item", "row": 1}, timeout=2.5)
+
+    with pytest.raises(ValueError, match=r"select\(\) is only supported for tab_item items"):
+        item.select()
+
+    assert conn.calls == []
+
+
 @dataclass(eq=True)
 class FakePoint:
     x_value: int
@@ -498,6 +552,113 @@ class FakeListSelectionModel:
         return index.row() in self._selected_rows
 
 
+class FakeTabPage:
+    def __init__(self, object_name: str):
+        self._object_name = object_name
+
+    def objectName(self) -> str:
+        return self._object_name
+
+
+class FakeTabBar:
+    def __init__(
+        self,
+        labels: list[str],
+        *,
+        rects: dict[int, FakeRect] | None = None,
+        current_index: int = 0,
+        hidden_indices: set[int] | None = None,
+        enabled_indices: set[int] | None = None,
+        class_name: str = "QTabBar",
+        global_origin: FakePoint = FakePoint(400, 120),
+    ):
+        self._meta = FakeMetaObject(class_name)
+        self._labels = list(labels)
+        self._rects = dict(rects or {})
+        self._current_index = current_index
+        self._hidden_indices = set(hidden_indices or set())
+        self._enabled_indices = set(enabled_indices or range(len(labels)))
+        self._global_origin = global_origin
+        self.focus_calls: list[tuple[object, ...]] = []
+
+    def metaObject(self):
+        return self._meta
+
+    def isVisible(self) -> bool:
+        return True
+
+    def isEnabled(self) -> bool:
+        return True
+
+    def setFocus(self, *args):
+        self.focus_calls.append(args)
+
+    def mapToGlobal(self, point: FakePoint) -> FakePoint:
+        return FakePoint(self._global_origin.x_value + point.x_value, self._global_origin.y_value + point.y_value)
+
+    def count(self) -> int:
+        return len(self._labels)
+
+    def tabText(self, index: int) -> str:
+        return self._labels[index]
+
+    def currentIndex(self) -> int:
+        return self._current_index
+
+    def setCurrentIndex(self, index: int):
+        self._current_index = index
+
+    def tabRect(self, index: int):
+        if index in self._hidden_indices:
+            return FakeRect(0, 0, 0, 0)
+        return self._rects.get(index, FakeRect(index * 90, 0, 80, 24))
+
+    def isTabVisible(self, index: int) -> bool:
+        return index not in self._hidden_indices
+
+    def isTabEnabled(self, index: int) -> bool:
+        return index in self._enabled_indices
+
+
+class FakeTabWidget:
+    def __init__(
+        self,
+        labels: list[str],
+        *,
+        rects: dict[int, FakeRect] | None = None,
+        current_index: int = 0,
+        hidden_indices: set[int] | None = None,
+        enabled_indices: set[int] | None = None,
+        page_object_names: list[str] | None = None,
+        class_name: str = "QTabWidget",
+    ):
+        self._meta = FakeMetaObject(class_name)
+        self._tab_bar = FakeTabBar(
+            labels,
+            rects=rects,
+            current_index=current_index,
+            hidden_indices=hidden_indices,
+            enabled_indices=enabled_indices,
+        )
+        default_names = page_object_names or [f"tab_page_{index}" for index in range(len(labels))]
+        self._pages = [FakeTabPage(name) for name in default_names]
+
+    def metaObject(self):
+        return self._meta
+
+    def tabBar(self):
+        return self._tab_bar
+
+    def currentIndex(self) -> int:
+        return self._tab_bar.currentIndex()
+
+    def setCurrentIndex(self, index: int):
+        self._tab_bar.setCurrentIndex(index)
+
+    def widget(self, index: int):
+        return self._pages[index]
+
+
 class FakeViewport:
     def __init__(self, *, global_origin: FakePoint = FakePoint(100, 200)):
         self._global_origin = global_origin
@@ -698,6 +859,14 @@ class FakeQtListViewBase:
     pass
 
 
+class FakeQtTabWidgetBase:
+    pass
+
+
+class FakeQtTabBarBase:
+    pass
+
+
 class FakeDerivedTableView(FakeQtTableViewBase, FakeTableView):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, class_name="FancyOrdersTable", **kwargs)
@@ -711,6 +880,11 @@ class FakeDerivedTreeView(FakeQtTreeViewBase, FakeTreeView):
 class FakeDerivedListView(FakeQtListViewBase, FakeListView):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, class_name="FancyTaskList", **kwargs)
+
+
+class FakeDerivedTabWidget(FakeQtTabWidgetBase, FakeTabWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, class_name="FancyMainTabs", **kwargs)
 
 
 def _install_fake_item_view_qt(monkeypatch):
@@ -743,6 +917,8 @@ def _install_fake_item_view_qt(monkeypatch):
             QTableView=FakeQtTableViewBase,
             QTreeView=FakeQtTreeViewBase,
             QListView=FakeQtListViewBase,
+            QTabWidget=FakeQtTabWidgetBase,
+            QTabBar=FakeQtTabBarBase,
         ),
     )
     monkeypatch.setattr(server, "_update_visual_feedback", lambda *args, **kwargs: None)
@@ -1020,6 +1196,123 @@ def test_handle_command_item_view_inspect_accepts_qtableview_subclass(monkeypatc
 
     assert result["kind"] == "table"
     assert result["items"][0]["text"] == "001"
+
+
+def test_handle_command_item_text_reads_tab_item(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tabs = FakeTabWidget(["Login", "Data", "Settings"], page_object_names=["tab_login", "tab_data", "tab_settings"])
+    wid = server._registry.register(tabs)
+
+    result = server._handle_command(
+        Request(method="item_text", params={"wid": wid, "item": {"kind": "tab_item", "label": "Data"}})
+    )
+
+    assert result == "Data"
+
+
+def test_handle_command_item_properties_and_select_support_tab_item(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tabs = FakeTabWidget(["Login", "Data", "Settings"], current_index=0, page_object_names=["tab_login", "tab_data", "tab_settings"])
+    wid = server._registry.register(tabs)
+
+    properties_before = server._handle_command(
+        Request(method="item_properties", params={"wid": wid, "item": {"kind": "tab_item", "index": 1}})
+    )
+    selected_before = server._handle_command(
+        Request(method="item_selected", params={"wid": wid, "item": {"kind": "tab_item", "index": 1}})
+    )
+    select_result = server._handle_command(
+        Request(method="item_select", params={"wid": wid, "item": {"kind": "tab_item", "label": "Data"}})
+    )
+    selected_after = server._handle_command(
+        Request(method="item_selected", params={"wid": wid, "item": {"kind": "tab_item", "index": 1}})
+    )
+
+    assert properties_before == {
+        "kind": "tab_item",
+        "index": 1,
+        "text": "Data",
+        "visible": True,
+        "selected": False,
+        "enabled": True,
+        "pageObjectName": "tab_data",
+    }
+    assert selected_before is False
+    assert select_result is True
+    assert selected_after is True
+    assert tabs.currentIndex() == 1
+
+
+def test_handle_command_item_click_clicks_tab_item(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tabs = FakeTabWidget(["Login", "Data"], rects={1: FakeRect(90, 0, 80, 24)})
+    wid = server._registry.register(tabs)
+
+    result = server._handle_command(
+        Request(method="item_click", params={"wid": wid, "item": {"kind": "tab_item", "index": 1}})
+    )
+
+    assert result is True
+    assert FakeQTest.calls == [("click", tabs.tabBar(), "left", "none", FakePoint(130, 12))]
+
+
+def test_handle_command_item_view_inspect_summarizes_tabs(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tabs = FakeTabWidget(
+        ["Login", "Data", "Settings"],
+        current_index=1,
+        hidden_indices={2},
+        page_object_names=["tab_login", "tab_data", "tab_settings"],
+    )
+    wid = server._registry.register(tabs)
+
+    result = server._handle_command(
+        Request(method="item_view_inspect", params={"wid": wid, "max_items": 10, "include_hidden": False})
+    )
+
+    assert result == {
+        "kind": "tab",
+        "maxItems": 10,
+        "items": [
+            {
+                "item": {"kind": "tab_item", "index": 0},
+                "index": 0,
+                "text": "Login",
+                "visible": True,
+                "selected": False,
+                "enabled": True,
+                "pageObjectName": "tab_login",
+            },
+            {
+                "item": {"kind": "tab_item", "index": 1},
+                "index": 1,
+                "text": "Data",
+                "visible": True,
+                "selected": True,
+                "enabled": True,
+                "pageObjectName": "tab_data",
+            },
+        ],
+        "truncated": False,
+    }
+
+
+def test_handle_command_item_view_inspect_accepts_qtabwidget_subclass(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tabs = FakeDerivedTabWidget(["Login", "Data"], page_object_names=["tab_login", "tab_data"])
+    wid = server._registry.register(tabs)
+
+    result = server._handle_command(
+        Request(method="item_view_inspect", params={"wid": wid, "max_items": 10})
+    )
+
+    assert result["kind"] == "tab"
+    assert result["items"][1]["text"] == "Data"
 
 
 def test_handle_command_item_view_inspect_summarizes_tree(monkeypatch):

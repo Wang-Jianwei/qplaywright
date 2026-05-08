@@ -493,6 +493,55 @@ def test_inspect_items_wraps_entries_with_reusable_targets(monkeypatch):
     assert app._conn.calls[-1]["method"] == "item_view_inspect"
 
 
+def test_inspect_items_wraps_tab_entries_with_reusable_targets(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(
+        responses={
+            "item_view_inspect": {
+                "kind": "tab",
+                "items": [
+                    {
+                        "item": {"kind": "tab_item", "index": 1},
+                        "text": "Data",
+                        "selected": False,
+                    }
+                ],
+                "truncated": False,
+            }
+        }
+    )
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    result = mcp_server.inspect_items(owner="#main_tabs", max_items=10)
+
+    assert result == {
+        "ok": True,
+        "owner": "#main_tabs",
+        "kind": "tab",
+        "items": [
+            {
+                "item": {"kind": "tab_item", "index": 1},
+                "text": "Data",
+                "selected": False,
+                "target": {"owner": "#main_tabs", "item": {"kind": "tab_item", "index": 1}},
+            }
+        ],
+        "truncated": False,
+    }
+
+
 def test_click_accepts_item_target(monkeypatch):
     window = FakeWindow(11, "Main")
     app = FakeApp([window])

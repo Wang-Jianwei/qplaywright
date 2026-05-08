@@ -118,7 +118,7 @@ The server can be exposed through:
 | `window` | List, select, resize, or close one top-level Qt window |
 | `snapshot` | Return a text snapshot and stable refs for the active window or one target |
 | `inspect` | Inspect one widget or item target, or return the active window widget tree in debug mode |
-| `inspect_items` | Enumerate structured table/tree/list descendants for one owner widget |
+| `inspect_items` | Enumerate structured table/tree/list/tab descendants for one owner widget |
 | `click` | Click or double-click the first matched widget or one item target |
 | `input` | Replace or append text, optionally submitting with Enter |
 | `invoke` | Invoke one exposed custom widget method by exact name |
@@ -162,6 +162,7 @@ That value may be either:
 - a structured item target object such as `{"owner": "#orders_table", "item": {"kind": "table_cell", "row": 3, "column": 1}}`
 - a structured item target object such as `{"owner": "#settings_tree", "item": {"kind": "tree_node", "path": [0, 1]}}`
 - a structured item target object such as `{"owner": "#task_list", "item": {"kind": "list_item", "row": 2}}`
+- a structured item target object such as `{"owner": "#main_tabs", "item": {"kind": "tab_item", "index": 1}}`
 
 The selector side of `target` keeps the existing atomic qplaywright forms.
 This contract does not define inline composite syntax such as `role=button >> has-text=Submit`.
@@ -355,7 +356,7 @@ Request:
 }
 ```
 
-`inspect_items` enumerates structured descendants for one table, tree, or list owner widget.
+`inspect_items` enumerates structured descendants for one table, tree, list, or tab owner widget.
 Each returned entry includes an `item` descriptor plus a reusable `target` object in the form `{owner, item}`.
 Use those returned `target` objects directly with `inspect`, `click`, `hover`, `wait`, and `set_expanded`.
 Snapshot refs remain widget-only; item discovery is handled by `inspect_items`.
