@@ -2132,6 +2132,10 @@ private:
                 ResolvedTreeItem target = resolveTreeItem(owner, item);
                 return treeIndexText(owner, target);
             }
+            if (kind == "tab_item") {
+                ResolvedTabItem target = resolveTabItem(owner, item);
+                return tabItemText(owner, target);
+            }
             throw std::runtime_error(("Unsupported item kind: " + kind).toStdString());
         }
 
@@ -2150,6 +2154,33 @@ private:
             if (kind == "tree_node") {
                 ResolvedTreeItem target = resolveTreeItem(owner, item);
                 return treeIndexProperties(owner, target);
+            }
+            if (kind == "tab_item") {
+                ResolvedTabItem target = resolveTabItem(owner, item);
+                return tabItemProperties(owner, target);
+            }
+            throw std::runtime_error(("Unsupported item kind: " + kind).toStdString());
+        }
+
+        if (method == "item_selected") {
+            QWidget *owner = resolveItemOwner(params);
+            const QJsonObject item = params.value("item").toObject();
+            const QString kind = item.value("kind").toString();
+            if (kind == "table_cell") {
+                ResolvedTableItem target = resolveTableItem(owner, item);
+                return tableIndexProperties(owner, target).value("selected").toBool(false);
+            }
+            if (kind == "list_item") {
+                ResolvedListItem target = resolveListItem(owner, item);
+                return listIndexProperties(owner, target).value("selected").toBool(false);
+            }
+            if (kind == "tree_node") {
+                ResolvedTreeItem target = resolveTreeItem(owner, item);
+                return treeIndexProperties(owner, target).value("selected").toBool(false);
+            }
+            if (kind == "tab_item") {
+                ResolvedTabItem target = resolveTabItem(owner, item);
+                return tabItemSelected(owner, target);
             }
             throw std::runtime_error(("Unsupported item kind: " + kind).toStdString());
         }
@@ -2170,6 +2201,10 @@ private:
                 ResolvedTreeItem target = resolveTreeItem(owner, item);
                 return treeIndexVisible(owner, target);
             }
+            if (kind == "tab_item") {
+                ResolvedTabItem target = resolveTabItem(owner, item);
+                return tabItemVisible(owner, target);
+            }
             throw std::runtime_error(("Unsupported item kind: " + kind).toStdString());
         }
 
@@ -2188,6 +2223,10 @@ private:
             if (kind == "tree_node") {
                 ResolvedTreeItem target = resolveTreeItem(owner, item);
                 return treeIndexBoundingBox(owner, target);
+            }
+            if (kind == "tab_item") {
+                ResolvedTabItem target = resolveTabItem(owner, item);
+                return tabItemBoundingBox(owner, target);
             }
             throw std::runtime_error(("Unsupported item kind: " + kind).toStdString());
         }
@@ -2290,6 +2329,11 @@ private:
                 clickTreeIndex(owner, target, false);
                 return true;
             }
+            if (kind == "tab_item") {
+                ResolvedTabItem target = resolveTabItem(owner, item);
+                clickTabItem(owner, target, false);
+                return true;
+            }
             throw std::runtime_error(("Unsupported item kind: " + kind).toStdString());
         }
 
@@ -2310,6 +2354,11 @@ private:
             if (kind == "tree_node") {
                 ResolvedTreeItem target = resolveTreeItem(owner, item);
                 clickTreeIndex(owner, target, true);
+                return true;
+            }
+            if (kind == "tab_item") {
+                ResolvedTabItem target = resolveTabItem(owner, item);
+                clickTabItem(owner, target, true);
                 return true;
             }
             throw std::runtime_error(("Unsupported item kind: " + kind).toStdString());
@@ -2334,7 +2383,24 @@ private:
                 hoverTreeIndex(owner, target);
                 return true;
             }
+            if (kind == "tab_item") {
+                ResolvedTabItem target = resolveTabItem(owner, item);
+                hoverTabItem(owner, target);
+                return true;
+            }
             throw std::runtime_error(("Unsupported item kind: " + kind).toStdString());
+        }
+
+        if (method == "item_select") {
+            QWidget *owner = resolveItemOwner(params);
+            const QJsonObject item = params.value("item").toObject();
+            const QString kind = item.value("kind").toString();
+            if (kind != "tab_item")
+                throw std::runtime_error("select() is only supported for tab_item items");
+
+            ResolvedTabItem target = resolveTabItem(owner, item);
+            selectTabItem(owner, target);
+            return true;
         }
 
         if (method == "item_expand") {
@@ -2591,6 +2657,12 @@ private:
     {
         QModelIndex index;
     };
+
+    struct ResolvedTabItem
+    {
+        int index;
+        QTabBar *tabBar;
+    };
     
     QWidget *resolveItemOwner(const QJsonObject &params)
     {
@@ -2635,6 +2707,68 @@ private:
             );
         }
         return view;
+    }
+
+    QTabWidget *tabWidget(QWidget *owner)
+    {
+        QTabWidget *widget = qobject_cast<QTabWidget *>(owner);
+        if (!widget) {
+            throw std::runtime_error(
+                ("Item owner is not a supported tab widget: " + QString::fromLatin1(owner->metaObject()->className())).toStdString()
+            );
+        }
+        return widget;
+    }
+
+    QTabBar *tabBarFromOwner(QWidget *owner)
+    {
+        if (auto *bar = qobject_cast<QTabBar *>(owner))
+            return bar;
+
+        QTabWidget *widget = tabWidget(owner);
+        QTabBar *bar = widget->tabBar();
+        if (!bar)
+            throw std::runtime_error("Tab widget tabBar() returned null");
+        return bar;
+    }
+
+    int tabCount(QTabBar *bar)
+    {
+        return bar->count();
+    }
+
+    QString tabText(QTabBar *bar, int index)
+    {
+        return bar->tabText(index);
+    }
+
+    int tabCurrentIndex(QWidget *owner)
+    {
+        if (auto *widget = qobject_cast<QTabWidget *>(owner))
+            return widget->currentIndex();
+        return tabBarFromOwner(owner)->currentIndex();
+    }
+
+    bool tabVisible(QTabBar *bar, int index)
+    {
+        return !bar->tabRect(index).isEmpty();
+    }
+
+    bool tabEnabled(QTabBar *bar, int index)
+    {
+        return bar->isTabEnabled(index);
+    }
+
+    QString tabPageObjectName(QWidget *owner, int index)
+    {
+        auto *widget = qobject_cast<QTabWidget *>(owner);
+        if (!widget)
+            return QString();
+
+        QWidget *page = widget->widget(index);
+        if (!page)
+            return QString();
+        return page->objectName();
     }
     
     int resolveTableColumn(QWidget *owner, const QJsonValue &columnValue)
@@ -2808,6 +2942,46 @@ private:
 
         return {currentIndex};
     }
+
+    ResolvedTabItem resolveTabItem(QWidget *owner, const QJsonObject &descriptor)
+    {
+        if (descriptor.value("kind").toString() != "tab_item")
+            throw std::runtime_error(("Unsupported item kind: " + descriptor.value("kind").toString()).toStdString());
+
+        const bool hasIndex = descriptor.contains("index");
+        const bool hasLabel = descriptor.contains("label");
+        if (hasIndex == hasLabel)
+            throw std::runtime_error("Tab item descriptor requires exactly one of index or label");
+
+        QTabBar *bar = tabBarFromOwner(owner);
+        const int count = tabCount(bar);
+
+        if (hasIndex) {
+            if (!descriptor.value("index").isDouble())
+                throw std::runtime_error("Tab item index must be an int");
+
+            const int index = descriptor.value("index").toInt();
+            if (index < 0 || index >= count)
+                throw std::runtime_error(("Tab index out of range: " + QString::number(index)).toStdString());
+            return {index, bar};
+        }
+
+        const QString label = descriptor.value("label").toString();
+        if (label.isEmpty())
+            throw std::runtime_error("Tab item label must be a non-empty string");
+
+        QVector<int> matches;
+        for (int index = 0; index < count; ++index) {
+            if (tabText(bar, index) == label)
+                matches.append(index);
+        }
+
+        if (matches.isEmpty())
+            throw std::runtime_error(("Tab label not found: " + label).toStdString());
+        if (matches.size() > 1)
+            throw std::runtime_error(("Ambiguous tab label: " + label).toStdString());
+        return {matches.first(), bar};
+    }
     
     QString tableIndexText(QWidget *owner, const ResolvedTableItem &target)
     {
@@ -2865,6 +3039,14 @@ private:
             throw std::runtime_error("Tree widget model is not available");
         return model->data(target.index, Qt::DisplayRole).toString();
     }
+
+    QString tabItemText(QWidget *owner, const ResolvedTabItem &target)
+    {
+        Q_UNUSED(owner);
+        if (!target.tabBar)
+            throw std::runtime_error("Tab item is missing tab bar context");
+        return tabText(target.tabBar, target.index);
+    }
     
     bool tableIndexVisible(QWidget *owner, const ResolvedTableItem &target)
     {
@@ -2904,6 +3086,19 @@ private:
             return false;
         const QRect rect = view->visualRect(target.index);
         return !rect.isEmpty();
+    }
+
+    bool tabItemVisible(QWidget *owner, const ResolvedTabItem &target)
+    {
+        Q_UNUSED(owner);
+        if (!target.tabBar)
+            throw std::runtime_error("Tab item is missing tab bar context");
+        return tabVisible(target.tabBar, target.index);
+    }
+
+    bool tabItemSelected(QWidget *owner, const ResolvedTabItem &target)
+    {
+        return target.index == tabCurrentIndex(owner);
     }
     
     QRect tableIndexRect(QWidget *owner, const ResolvedTableItem &target)
@@ -2948,6 +3143,18 @@ private:
             throw std::runtime_error("Tree node does not have a usable visible rectangle");
         return rect;
     }
+
+    QRect tabItemRect(QWidget *owner, const ResolvedTabItem &target)
+    {
+        Q_UNUSED(owner);
+        if (!target.tabBar)
+            throw std::runtime_error("Tab item is missing tab bar context");
+
+        const QRect rect = target.tabBar->tabRect(target.index);
+        if (rect.isEmpty())
+            throw std::runtime_error(("Tab does not have a usable visible rectangle: " + QString::number(target.index)).toStdString());
+        return rect;
+    }
     
     QJsonObject tableIndexProperties(QWidget *owner, const ResolvedTableItem &target)
     {
@@ -2987,6 +3194,25 @@ private:
         payload["selected"] = view->selectionModel() && view->selectionModel()->isSelected(target.index);
         return payload;
     }
+
+    QJsonObject tabItemProperties(QWidget *owner, const ResolvedTabItem &target)
+    {
+        if (!target.tabBar)
+            throw std::runtime_error("Tab item is missing tab bar context");
+
+        QJsonObject payload;
+        payload["kind"] = "tab_item";
+        payload["index"] = target.index;
+        payload["text"] = tabItemText(owner, target);
+        payload["visible"] = tabItemVisible(owner, target);
+        payload["selected"] = tabItemSelected(owner, target);
+        payload["enabled"] = tabEnabled(target.tabBar, target.index);
+
+        const QString pageObjectName = tabPageObjectName(owner, target.index);
+        if (!pageObjectName.isEmpty())
+            payload["pageObjectName"] = pageObjectName;
+        return payload;
+    }
     
     QJsonObject tableIndexBoundingBox(QWidget *owner, const ResolvedTableItem &target)
     {
@@ -3022,6 +3248,22 @@ private:
         QWidget *targetWidget = primaryEventTarget(view);
         const QRect rect = treeIndexRect(owner, target);
         const QPoint global = targetWidget->mapToGlobal(rect.topLeft());
+        QJsonObject payload;
+        payload["x"] = global.x();
+        payload["y"] = global.y();
+        payload["width"] = rect.width();
+        payload["height"] = rect.height();
+        return payload;
+    }
+
+    QJsonObject tabItemBoundingBox(QWidget *owner, const ResolvedTabItem &target)
+    {
+        Q_UNUSED(owner);
+        if (!target.tabBar)
+            throw std::runtime_error("Tab item is missing tab bar context");
+
+        const QRect rect = tabItemRect(owner, target);
+        const QPoint global = target.tabBar->mapToGlobal(rect.topLeft());
         QJsonObject payload;
         payload["x"] = global.x();
         payload["y"] = global.y();
@@ -3237,6 +3479,16 @@ private:
         clickWidgetAt(targetWidget, rect.center(), doubleClick);
     }
 
+    void clickTabItem(QWidget *owner, const ResolvedTabItem &target, bool doubleClick)
+    {
+        Q_UNUSED(owner);
+        if (!target.tabBar)
+            throw std::runtime_error("Tab item is missing tab bar context");
+
+        const QRect rect = tabItemRect(owner, target);
+        clickWidgetAt(target.tabBar, rect.center(), doubleClick);
+    }
+
     void moveVisualCursorToWidget(QWidget *w, int pulseCount = 0)
     {
         QWidget *target = primaryEventTarget(w);
@@ -3424,6 +3676,52 @@ private:
         );
 #endif
         QApplication::sendEvent(targetWidget, &event);
+        QApplication::processEvents();
+    }
+
+    void hoverTabItem(QWidget *owner, const ResolvedTabItem &target)
+    {
+        Q_UNUSED(owner);
+        if (!target.tabBar)
+            throw std::runtime_error("Tab item is missing tab bar context");
+
+        const QRect rect = tabItemRect(owner, target);
+        const QPoint center = rect.center();
+        updateVisualFeedback(target.tabBar, center, 0);
+        const QPoint globalPos = target.tabBar->mapToGlobal(center);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QMouseEvent event(
+            QEvent::MouseMove,
+            QPointF(center),
+            QPointF(globalPos),
+            Qt::NoButton,
+            Qt::NoButton,
+            Qt::NoModifier
+        );
+#else
+        QMouseEvent event(
+            QEvent::MouseMove,
+            center,
+            globalPos,
+            Qt::NoButton,
+            Qt::NoButton,
+            Qt::NoModifier
+        );
+#endif
+        QApplication::sendEvent(target.tabBar, &event);
+        QApplication::processEvents();
+    }
+
+    void selectTabItem(QWidget *owner, const ResolvedTabItem &target)
+    {
+        if (auto *widget = qobject_cast<QTabWidget *>(owner)) {
+            widget->setCurrentIndex(target.index);
+            QApplication::processEvents();
+            return;
+        }
+
+        QTabBar *bar = target.tabBar ? target.tabBar : tabBarFromOwner(owner);
+        bar->setCurrentIndex(target.index);
         QApplication::processEvents();
     }
 
@@ -3637,6 +3935,48 @@ private:
         return payload;
     }
 
+    QJsonObject inspectTabItems(QWidget *owner, int maxItems, bool includeHidden)
+    {
+        QTabBar *bar = tabBarFromOwner(owner);
+        QVector<int> indices;
+        const int count = tabCount(bar);
+        for (int index = 0; index < count; ++index) {
+            if (includeHidden || tabVisible(bar, index))
+                indices.append(index);
+        }
+
+        const bool truncated = indices.size() > maxItems;
+        QJsonArray items;
+        const int inspected = qMin(indices.size(), maxItems);
+        for (int offset = 0; offset < inspected; ++offset) {
+            const int index = indices.at(offset);
+
+            QJsonObject descriptor;
+            descriptor["kind"] = "tab_item";
+            descriptor["index"] = index;
+
+            QJsonObject entry;
+            entry["item"] = descriptor;
+            entry["index"] = index;
+            entry["text"] = tabText(bar, index);
+            entry["visible"] = tabVisible(bar, index);
+            entry["selected"] = index == tabCurrentIndex(owner);
+            entry["enabled"] = tabEnabled(bar, index);
+
+            const QString pageObjectName = tabPageObjectName(owner, index);
+            if (!pageObjectName.isEmpty())
+                entry["pageObjectName"] = pageObjectName;
+            items.append(entry);
+        }
+
+        QJsonObject payload;
+        payload["kind"] = "tab";
+        payload["maxItems"] = maxItems;
+        payload["items"] = items;
+        payload["truncated"] = truncated;
+        return payload;
+    }
+
     QJsonObject inspectItemView(QWidget *owner, int maxRows, int maxDepth, int maxItems, bool includeHidden)
     {
         if (qobject_cast<QTableView *>(owner))
@@ -3645,6 +3985,8 @@ private:
             return inspectListItems(owner, maxRows, maxItems, includeHidden);
         if (qobject_cast<QTreeView *>(owner))
             return inspectTreeItems(owner, maxDepth, maxItems, includeHidden);
+        if (qobject_cast<QTabWidget *>(owner) || qobject_cast<QTabBar *>(owner))
+            return inspectTabItems(owner, maxItems, includeHidden);
 
         throw std::runtime_error(
             ("Widget does not expose supported item-view descendants: " + QString::fromLatin1(owner->metaObject()->className())).toStdString()
