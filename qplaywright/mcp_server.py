@@ -23,6 +23,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from uuid import uuid4
@@ -381,6 +382,35 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
     _MCP_IMPORT_ERROR: ImportError | None = exc
 else:
     _MCP_IMPORT_ERROR = None
+
+
+_MCP_MINIMUM_VERSION = (1, 27, 0)
+_MCP_MINIMUM_VERSION_TEXT = ".".join(str(part) for part in _MCP_MINIMUM_VERSION)
+
+
+def _parse_version_tuple(raw_version: str) -> tuple[int, int, int]:
+    parts = [int(part) for part in re.findall(r"\d+", raw_version)[:3]]
+    while len(parts) < 3:
+        parts.append(0)
+    return (parts[0], parts[1], parts[2])
+
+
+_MCP_VERSION_ERROR: str | None = None
+if _MCP_IMPORT_ERROR is None:
+    try:
+        _installed_mcp_version = package_version("mcp")
+    except PackageNotFoundError:
+        _MCP_VERSION_ERROR = (
+            "The qplaywright MCP server requires the optional 'mcp' dependency. "
+            "Install it with: pip install -e .[mcp]"
+        )
+    else:
+        if _parse_version_tuple(_installed_mcp_version) < _MCP_MINIMUM_VERSION:
+            _MCP_VERSION_ERROR = (
+                "The qplaywright MCP server requires mcp "
+                f">={_MCP_MINIMUM_VERSION_TEXT}, but found {_installed_mcp_version}. "
+                "Upgrade it with: pip install -U \"mcp[cli]>=1.27.0\""
+            )
 
 
 _MCP_CANCEL_NOTIFICATION_METHOD = "notifications/cancelled"
@@ -3604,6 +3634,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             "The qplaywright MCP server requires the optional 'mcp' dependency. "
             "Install it with: pip install -e .[mcp]"
         )
+    if _MCP_VERSION_ERROR is not None:
+        raise SystemExit(_MCP_VERSION_ERROR)
 
     argv_list = list(argv if argv is not None else sys.argv[1:])
     mode = "serve"

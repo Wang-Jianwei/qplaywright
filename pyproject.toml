@@ -30,8 +30,8 @@ classifiers = [
 qplaywright-mcp = "qplaywright.mcp_server:main"
 
 [project.optional-dependencies]
-mcp = ["mcp[cli]>=1.2.0"]
-dev = ["pytest", "PySide6", "mcp[cli]>=1.2.0"]
+mcp = ["mcp[cli]>=1.27.0"]
+dev = ["pytest", "PySide6", "mcp[cli]>=1.27.0"]
 
 [tool.setuptools.packages.find]
 include = ["qplaywright*"]

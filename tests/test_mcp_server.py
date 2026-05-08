@@ -2670,6 +2670,7 @@ def test_main_cli_dispatches_to_cli_runner(monkeypatch):
         called["argv"] = list(argv)
         return 0
 
+    monkeypatch.setattr(mcp_server, "_MCP_VERSION_ERROR", None)
     monkeypatch.setattr(mcp_server, "_run_cli", fake_run_cli)
 
     with pytest.raises(SystemExit) as exc_info:
@@ -2686,6 +2687,7 @@ def test_main_serve_mode_keeps_existing_transport_flow(monkeypatch):
         calls["run_transport"] = transport
         return 0
 
+    monkeypatch.setattr(mcp_server, "_MCP_VERSION_ERROR", None)
     monkeypatch.setattr(mcp_server, "_configure_stdio_for_mcp", lambda transport: calls.setdefault("transport", transport))
     monkeypatch.setattr(mcp_server, "_run_mcp_transport", fake_run_transport)
 
@@ -2694,6 +2696,15 @@ def test_main_serve_mode_keeps_existing_transport_flow(monkeypatch):
 
     assert exc_info.value.code == 0
     assert calls == {"transport": "streamable-http", "run_transport": "streamable-http"}
+
+
+def test_main_rejects_too_old_mcp_dependency(monkeypatch):
+    monkeypatch.setattr(mcp_server, "_MCP_VERSION_ERROR", "mcp is too old")
+
+    with pytest.raises(SystemExit) as exc_info:
+        mcp_server.main([])
+
+    assert exc_info.value.code == "mcp is too old"
 
 
 def test_run_mcp_transport_returns_nonzero_on_unexpected_exception(monkeypatch):
