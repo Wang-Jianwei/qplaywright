@@ -71,6 +71,50 @@ def _qt_application_instance(*, required: bool) -> Any | None:
         raise RuntimeError("Qt application instance is not available")
     return None
 
+
+def _strip_null_schema_type(schema: dict[str, Any]) -> None:
+    any_of = schema.get("anyOf")
+    if not isinstance(any_of, list):
+        return
+    schema["anyOf"] = [entry for entry in any_of if entry.get("type") != "null"]
+
+
+def _tighten_pointer_tool_schema(tool: Any | None, *, verb: str) -> None:
+    if tool is None:
+        return
+
+    parameters = tool.parameters
+    properties = parameters.get("properties", {})
+    target_schema = properties.get("target")
+    x_schema = properties.get("x")
+    y_schema = properties.get("y")
+    if not isinstance(target_schema, dict) or not isinstance(x_schema, dict) or not isinstance(y_schema, dict):
+        return
+
+    _strip_null_schema_type(target_schema)
+    target_schema.pop("default", None)
+    target_schema["description"] = (
+        f"Widget selector or stable handle, or a structured item target object {{owner, item}}. "
+        f"Provide target to {verb} a widget or item. Omit target only when using both x and y to {verb} "
+        "a window-relative coordinate in the active window."
+    )
+
+    for axis, axis_schema in (("x", x_schema), ("y", y_schema)):
+        axis_schema.pop("default", None)
+        axis_schema["description"] = (
+            f"Window-relative {axis} coordinate in pixels. Provide together with the other axis to {verb} "
+            "the active window when target is omitted."
+        )
+
+    parameters["oneOf"] = [
+        {"required": ["target"]},
+        {"required": ["x", "y"]},
+    ]
+    parameters["allOf"] = [
+        {"not": {"required": ["target", "x"]}},
+        {"not": {"required": ["target", "y"]}},
+    ]
+
 SessionAction = Literal["attach", "launch", "close", "status"]
 WindowAction = Literal["list", "select", "resize", "close"]
 
@@ -2874,6 +2918,10 @@ if FastMCP is not None:
             delta_x=delta_x,
             delta_y=delta_y,
         )
+
+
+    _tighten_pointer_tool_schema(mcp._tool_manager.get_tool("click"), verb="click")
+    _tighten_pointer_tool_schema(mcp._tool_manager.get_tool("hover"), verb="hover over")
 
 
 else:  # pragma: no cover - exercised only without the extra installed

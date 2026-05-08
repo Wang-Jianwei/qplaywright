@@ -1674,6 +1674,34 @@ def test_mcp_tool_input_schema_describes_all_parameters():
 
     click_tool = next(tool for tool in dumped if tool["name"] == "click")
     assert "post-action snapshot" in click_tool["inputSchema"]["properties"]["include_snapshot"]["description"]
+    click_schema = click_tool["inputSchema"]
+    click_target_any_of = click_schema["properties"]["target"]["anyOf"]
+    assert {entry["type"] for entry in click_target_any_of} == {"string", "object"}
+    assert click_schema["oneOf"] == [
+        {"required": ["target"]},
+        {"required": ["x", "y"]},
+    ]
+    assert click_schema["allOf"] == [
+        {"not": {"required": ["target", "x"]}},
+        {"not": {"required": ["target", "y"]}},
+    ]
+    assert "Omit target only when using both x and y" in click_schema["properties"]["target"]["description"]
+    assert "Window-relative x coordinate" in click_schema["properties"]["x"]["description"]
+    assert "Window-relative y coordinate" in click_schema["properties"]["y"]["description"]
+
+    hover_tool = next(tool for tool in dumped if tool["name"] == "hover")
+    hover_schema = hover_tool["inputSchema"]
+    hover_target_any_of = hover_schema["properties"]["target"]["anyOf"]
+    assert {entry["type"] for entry in hover_target_any_of} == {"string", "object"}
+    assert hover_schema["oneOf"] == [
+        {"required": ["target"]},
+        {"required": ["x", "y"]},
+    ]
+    assert hover_schema["allOf"] == [
+        {"not": {"required": ["target", "x"]}},
+        {"not": {"required": ["target", "y"]}},
+    ]
+    assert "Omit target only when using both x and y" in hover_schema["properties"]["target"]["description"]
 
     find_tool = next(tool for tool in dumped if tool["name"] == "find")
     assert "class" in find_tool["inputSchema"]["properties"]
