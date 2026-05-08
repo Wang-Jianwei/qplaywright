@@ -1,6 +1,6 @@
 """QPlaywright - Playwright-compatible automation for Qt QWidget applications."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from qplaywright.sync_api import sync_qplaywright
 from qplaywright.agent import start_agent
