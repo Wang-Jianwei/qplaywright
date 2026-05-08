@@ -12,6 +12,8 @@
 - 成功响应统一包含 `ok: true`
 - 除非特别说明，目标工具在 `target` 匹配多个控件时不报错，而是返回第一个匹配项的标量字段，同时用 `count` 暴露总匹配数
 - `target` 的 selector 语法保持原子匹配，不在终态契约中定义内联布尔组合语法；需要组合条件时，先用 `snapshot`、`find` 或 `inspect` 缩小范围，再使用 stable handle
+- `target`、`root`、`owner` 表示请求里的可解析目标 spec；`handle`、`root_handle`、`owner_handle` 表示响应里的已解析 stable widget identity
+- 布尔状态字段统一使用 `visible`、`enabled`、`checked`、`selected`、`interactable` 这类形容词形式，不再并行维护 `is_visible`、`is_enabled` 一类别名
 
 ## Request Model
 
@@ -20,7 +22,7 @@
 终态工具分为三类：
 
 1. 资源工具：`session`、`window`
-2. 观察工具：`snapshot`、`inspect`、`screenshot`
+2. 观察工具：`snapshot`、`find`、`inspect`、`inspect_items`、`screenshot`
 3. 动作工具：`click`、`input`、`choose`、`set_checked`、`press_key`、`hover`、`scroll`、`invoke`、`wait`
 
 ## Value Types
@@ -48,6 +50,15 @@
 - 终态契约中的 selector 仍沿用 qplaywright 的单表达式语法，例如 `role=button`、`text=保存`、`has-text=partial`
 - 终态契约当前不定义 `role=button >> has-text=Submit` 或 `role=button[has-text=Submit]` 这类复合语法
 - 当需要“角色 + 文本”等复合定位时，推荐流程是先 `snapshot`、`find` 或 `inspect` 观察并拿到更稳定的 target，再使用 stable handle 继续动作
+
+### Root / Owner
+
+`root` 和 `owner` 与 `target` 一样，都是字符串形态的可解析目标 spec。
+
+- `root` 用于 widget discovery 或局部观察 scope
+- `owner` 用于 table/tree/list/tab 这类 item-view owner widget
+
+它们的解析规则与 `target` 一致：优先解析 stable handle，否则按 selector 解析。
 
 ### Include Snapshot
 
@@ -97,13 +108,13 @@
   "handle": "w12",
   "class": "FancyAmountEdit",
   "object_name": "amount_editor",
+  "label": "123.45",
   "geometry": {
     "x": 12,
     "y": 48,
     "width": 220,
     "height": 80
-  },
-  "text": "123.45"
+  }
 }
 ```
 
@@ -182,7 +193,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 - invalid state
 - timeout
 - window changed
-- ref expired
+- stale handle
 - invoke failed
 - agent disconnected
 
@@ -390,6 +401,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "target": "w12",
   "depth": 8,
   "topmost_only": false,
+  "include_infrastructure": false,
   "save_to": "snapshot.txt"
 }
 ```
@@ -399,6 +411,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 - `target` 可选，缺省表示当前 active window
 - `depth` 默认为 `10`
 - `topmost_only` 默认为 `false`，仅对 window-wide snapshot 有意义
+- `include_infrastructure` 默认为 `false`，用于控制是否保留 qplaywright overlay/debug/support widgets
 - `save_to` 可选，表示把文本快照写入文件，而不是保存图片
 
 ### Snapshot Response
@@ -437,6 +450,67 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 其中 `widgets` 的元素类型为 `SnapshotWidgetEntry[]`。
 当 `topmost_only=true` 且 `target=null` 时，`warnings` 应明确指出结果可能不完整。
 
+## Find
+
+工具名：`find`
+
+职责：在给定 scope 下做结构化 widget discovery。
+
+### Find Request
+
+```json
+{
+  "root": "w12",
+  "role": "button",
+  "text": null,
+  "has_text": "Submit",
+  "class": null,
+  "object_name": null,
+  "accessible_name": null,
+  "visible": true,
+  "enabled": true,
+  "interactable": true,
+  "include_infrastructure": false,
+  "limit": 5
+}
+```
+
+字段约束：
+
+- `root` 可选，缺省表示当前 active window
+- 所有显式启用的谓词按 AND 关系求交
+- `include_infrastructure` 默认为 `false`
+- `limit` 为正整数，服务端不得返回超额候选
+
+### Find Response
+
+```json
+{
+  "ok": true,
+  "root_handle": "w12",
+  "count": 1,
+  "truncated": false,
+  "results": [
+    {
+      "handle": "w48",
+      "class": "QPushButton",
+      "object_name": "submit_btn",
+      "label": "Submit",
+      "geometry": {
+        "x": 310,
+        "y": 412,
+        "width": 96,
+        "height": 28
+      },
+      "match_reason": ["role=button", "has_text~=Submit", "visible=true", "enabled=true", "interactable=true"],
+      "ancestor_summary": [
+        {"handle": "w12", "class": "QGroupBox", "label": "Payment"}
+      ]
+    }
+  ]
+}
+```
+
 ## Inspect
 
 工具名：`inspect`
@@ -447,12 +521,13 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 ```json
 {
-  "target": "#amount_editor",
+  "target": "w12",
   "property": "placeholderText",
   "include_methods": true,
   "include_properties": true,
   "depth": 6,
-  "topmost_only": false
+  "topmost_only": false,
+  "include_infrastructure": false
 }
 ```
 
@@ -464,28 +539,32 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 - `include_properties` 默认为 `false`，用于返回目标当前全部 Qt properties
 - `depth` 只在 `target=null` 时有意义
 - `topmost_only` 只在 `target=null` 时有意义
-- 当 `target` 匹配多个控件时，`text`、`value`、`is_visible`、`is_enabled`、`is_checked`、`geometry`、`globalBoundingBox`、`bounding_box`、`property_value`、`methods`、`properties` 都取第一个匹配项；`count` 反映总匹配数
+- `include_infrastructure` 只在 `target=null` 时有意义
+- 当 `target` 匹配多个控件时，`text`、`value`、`visible`、`enabled`、`checked`、`interactable`、`geometry`、`global_bounding_box`、`bounding_box`、`property_value`、`methods`、`properties` 都取第一个匹配项；`count` 反映总匹配数
 
 ### Inspect Response: Target Mode
 
 ```json
 {
   "ok": true,
-  "target": "#amount_editor",
+  "handle": "w12",
   "exists": true,
   "count": 1,
+  "class": "FancyAmountEdit",
+  "object_name": "amount_editor",
   "text": "123.45",
   "value": "123.45",
-  "is_visible": true,
-  "is_enabled": true,
-  "is_checked": false,
+  "visible": true,
+  "enabled": true,
+  "checked": false,
+  "interactable": true,
   "geometry": {
     "x": 12,
     "y": 48,
     "width": 220,
     "height": 80
   },
-  "globalBoundingBox": {
+  "global_bounding_box": {
     "x": 300,
     "y": 220,
     "width": 220,
@@ -537,6 +616,45 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
+## Inspect Items
+
+工具名：`inspect_items`
+
+职责：返回 item-view owner widget 的结构化后代。
+
+### Inspect Items Request
+
+```json
+{
+  "owner": "w77",
+  "max_rows": 50,
+  "max_depth": 4,
+  "max_items": 200,
+  "include_hidden": false
+}
+```
+
+### Inspect Items Response
+
+```json
+{
+  "ok": true,
+  "owner_handle": "w77",
+  "kind": "table",
+  "items": [
+    {
+      "item_target": {
+        "owner": "w77",
+        "item": {"kind": "table_cell", "row": 3, "column": 1}
+      },
+      "text": "Approved",
+      "visible": true,
+      "selected": false
+    }
+  ]
+}
+```
+
 ## Click
 
 工具名：`click`
@@ -584,7 +702,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
-当 `include_snapshot=true` 时，附加 `snapshot` 和 `refs`。
+当 `include_snapshot=true` 时，附加 `ActionObservation` 中的 `snapshot`、`root_handle` 和 `widgets`。
 
 ## Input
 
@@ -794,7 +912,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 ```json
 {
-  "target": "e21",
+  "target": "w21",
   "include_snapshot": true
 }
 ```
@@ -804,7 +922,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 ```json
 {
   "ok": true,
-  "target": "e21",
+  "target": "w21",
   "window_changed": false,
   "active_window": {
     "wid": 1,
@@ -821,7 +939,8 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     }
   },
   "snapshot": "...",
-  "refs": []
+  "root_handle": "w1",
+  "widgets": []
 }
 ```
 
@@ -873,7 +992,8 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     }
   },
   "snapshot": "...",
-  "refs": []
+  "root_handle": "w1",
+  "widgets": []
 }
 ```
 
@@ -1012,7 +1132,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
-当 `include_snapshot=true` 时，附加 `snapshot` 和 `refs`。
+当 `include_snapshot=true` 时，附加 `ActionObservation` 中的 `snapshot`、`root_handle` 和 `widgets`。
 
 ## Screenshot
 

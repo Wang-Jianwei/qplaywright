@@ -154,10 +154,11 @@ use qplaywright
 
 1. `session {"action": "attach", ...}`
 2. `window {"action": "list"}` 或 `window {"action": "select", ...}`
-3. `snapshot`
-4. 使用 snapshot 返回的 `ref` 继续调用 `input`、`click`、`choose`、`set_checked`
-5. 使用 `inspect` 或附带 `include_snapshot=true` 的动作结果做断言
-6. `session {"action": "close"}`
+3. `snapshot` 先拿结构概览
+4. 必要时用 `find` 缩小候选范围
+5. 使用 `snapshot` 或 `find` 返回的 stable handle 继续调用 `input`、`click`、`choose`、`set_checked`
+6. 使用 `inspect` 或附带 `include_snapshot=true` 的动作结果做断言
+7. `session {"action": "close"}`
 
 补充说明：
 
