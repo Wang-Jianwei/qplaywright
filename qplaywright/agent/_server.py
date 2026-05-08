@@ -2100,6 +2100,46 @@ def _click_widget_at(widget, pos, *, double: bool = False):
     _process_events()
 
 
+def _coerce_non_negative_int(value, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an int, got {type(value).__name__}")
+    if value < 0:
+        raise ValueError(f"{name} must be >= 0")
+    return value
+
+
+def _resolve_pointer_action_target(params: dict):
+    _import_qt()
+
+    if ("x" in params) != ("y" in params):
+        raise ValueError("Coordinate pointer actions require x and y together")
+
+    x = _coerce_non_negative_int(params.get("x"), "x")
+    y = _coerce_non_negative_int(params.get("y"), "y")
+
+    window = _resolve_pointer_action_window(params)
+    width = int(window.width()) if callable(getattr(window, "width", None)) else 0
+    height = int(window.height()) if callable(getattr(window, "height", None)) else 0
+    if x >= width or y >= height:
+        raise ValueError("Coordinate pointer action is outside the target window bounds")
+
+    local_pos = _QtCore.QPoint(x, y)
+    if not _point_within_widget_mask(window, local_pos):
+        raise ValueError("Coordinate pointer action resolves to a masked-out point")
+
+    global_pos = window.mapToGlobal(local_pos)
+    hit = _topmost_hit_at_point(window, local_pos)
+    if hit is None:
+        raise ValueError("Coordinate pointer action does not resolve to an event target")
+    if not _is_same_or_descendant_widget(hit, window):
+        raise ValueError(f"Coordinate pointer action is covered by {_widget_class_name(hit)}")
+    if hasattr(hit, "isVisible") and not hit.isVisible():
+        raise ValueError(f"Cannot click widget of type {_widget_class_name(hit)}: event target is not visible")
+    if hasattr(hit, "isEnabled") and not hit.isEnabled():
+        raise ValueError(f"Cannot click widget of type {_widget_class_name(hit)}: event target is disabled")
+    return hit, hit.mapFromGlobal(global_pos)
+
+
 def _click_table_index(owner_widget, resolved_target, *, double: bool = False):
     view = _table_view(owner_widget)
     viewport = _primary_event_target(view)
@@ -2649,13 +2689,21 @@ def _handle_command(req: Request) -> Any:
 
     # -- Actions -------------------------------------------------------------
     if method == METHOD_CLICK:
-        w = _resolve_one(params)
-        _click_widget(w, double=False)
+        if "wid" in params or "selector" in params:
+            w = _resolve_one(params)
+            _click_widget(w, double=False)
+        else:
+            target, local_pos = _resolve_pointer_action_target(params)
+            _click_widget_at(target, local_pos, double=False)
         return True
 
     if method == METHOD_DBLCLICK:
-        w = _resolve_one(params)
-        _click_widget(w, double=True)
+        if "wid" in params or "selector" in params:
+            w = _resolve_one(params)
+            _click_widget(w, double=True)
+        else:
+            target, local_pos = _resolve_pointer_action_target(params)
+            _click_widget_at(target, local_pos, double=True)
         return True
 
     if method == METHOD_FILL:
@@ -2714,9 +2762,12 @@ def _handle_command(req: Request) -> Any:
         return True
 
     if method == METHOD_HOVER:
-        w = _resolve_one(params)
-        target = _primary_event_target(w)
-        local_pos = target.rect().center()
+        if "wid" in params or "selector" in params:
+            w = _resolve_one(params)
+            target = _primary_event_target(w)
+            local_pos = target.rect().center()
+        else:
+            target, local_pos = _resolve_pointer_action_target(params)
         _move_visual_cursor(target, local_pos)
         _hover_widget(target, local_pos)
         return True
@@ -3348,6 +3399,43 @@ def _resolve_press_target(params: dict):
         return visible[0]
 
     raise ValueError("No visible window found for targetless key press")
+
+
+def _resolve_pointer_action_window(params: dict):
+    window_wid = params.get("window_wid")
+    if window_wid is not None:
+        window = _registry.get(window_wid)
+        if window is None:
+            raise ValueError(f"No window found for window_wid={window_wid}")
+        return window.window() if hasattr(window, "window") else window
+
+    modal_window = _active_modal_top_level_widget()
+    if modal_window is not None:
+        return modal_window
+
+    app = _QApplication.instance() if _QApplication is not None and hasattr(_QApplication, "instance") else None
+    active_window = None
+    if app is not None and hasattr(app, "activeWindow"):
+        active_window = app.activeWindow()
+    elif _QApplication is not None and hasattr(_QApplication, "activeWindow"):
+        active_window = _QApplication.activeWindow()
+    if active_window is not None:
+        active_window = active_window.window() if hasattr(active_window, "window") else active_window
+        if _is_overlay_target_window_visible(active_window) and not _is_window_blocked_by_modal(active_window):
+            return active_window
+
+    if app is not None and hasattr(app, "focusWidget"):
+        focused = app.focusWidget()
+        if focused is not None:
+            focused_window = focused.window() if hasattr(focused, "window") else focused
+            if _is_overlay_target_window_visible(focused_window) and not _is_window_blocked_by_modal(focused_window):
+                return focused_window
+
+    visible = [window for window in _get_interactable_top_level_widgets() if window.isVisible()]
+    if visible:
+        return visible[0]
+
+    raise ValueError("No visible window found for coordinate pointer action")
 
 
 # --------------------------------------------------------------------------- #

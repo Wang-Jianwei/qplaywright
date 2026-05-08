@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from qplaywright.agent import _server as server
+from qplaywright.protocol import Request
 
 
 @dataclass(eq=True)
@@ -150,6 +151,11 @@ class FakeQTest:
         FakeQTest.calls.append(("dblclick", widget, button, modifier, pos))
 
 
+class FakeQMouseEvent:
+    def __init__(self, *_args):
+        self.args = _args
+
+
 def _install_fake_qt(monkeypatch, *, widget_at=None):
     FakeApplication.widget_at_result = widget_at
     FakeApplication.process_events_calls = 0
@@ -157,17 +163,21 @@ def _install_fake_qt(monkeypatch, *, widget_at=None):
 
     monkeypatch.setattr(server, "_import_qt", lambda: None)
     monkeypatch.setattr(server, "_QApplication", FakeApplication)
+    monkeypatch.setattr(server, "_QtGui", SimpleNamespace(QCursor=object, QMouseEvent=FakeQMouseEvent))
     monkeypatch.setattr(server, "_QtTest", SimpleNamespace(QTest=FakeQTest))
     monkeypatch.setattr(
         server,
         "_QtCore",
         SimpleNamespace(
+            QEvent=SimpleNamespace(Type=SimpleNamespace(MouseMove="mousemove")),
             Qt=SimpleNamespace(
                 LeftButton="left",
+                NoButton="none",
                 NoModifier="none",
                 MouseFocusReason="mouse",
                 WA_TransparentForMouseEvents="transparent",
-            )
+            ),
+            QPoint=FakePoint,
         ),
     )
 
@@ -209,6 +219,51 @@ def test_click_widget_uses_hit_target_and_local_position(monkeypatch):
     assert FakeQTest.calls == [("click", hit, "left", "none", FakePoint(2, 7))]
     assert hit.focus_calls == [("mouse",)]
     assert FakeApplication.process_events_calls >= 2
+
+
+def test_handle_command_click_accepts_window_relative_coordinates(monkeypatch):
+    window = FakeClickWidget("QMainWindow", global_origin=FakePoint(100, 200), size=(80, 60))
+    hit = FakeClickWidget("InnerButton", parent=window, global_origin=FakePoint(120, 230))
+    window.setChildAt(hit)
+
+    _install_fake_qt(monkeypatch, widget_at=hit)
+    monkeypatch.setattr(server, "_registry", SimpleNamespace(get=lambda wid: window if wid == 7 else None))
+
+    result = server._handle_command(Request(method="click", params={"window_wid": 7, "x": 25, "y": 35}))
+
+    assert result is True
+    assert FakeQTest.calls == [("click", hit, "left", "none", FakePoint(5, 5))]
+
+
+def test_resolve_pointer_action_target_rejects_out_of_bounds_coordinates(monkeypatch):
+    window = FakeClickWidget("QMainWindow", global_origin=FakePoint(100, 200), size=(40, 30))
+
+    _install_fake_qt(monkeypatch, widget_at=window)
+    monkeypatch.setattr(server, "_registry", SimpleNamespace(get=lambda wid: window if wid == 7 else None))
+
+    with pytest.raises(ValueError, match="outside the target window bounds"):
+        server._resolve_pointer_action_target({"window_wid": 7, "x": 40, "y": 12})
+
+
+def test_handle_command_hover_accepts_window_relative_coordinates(monkeypatch):
+    window = FakeClickWidget("QMainWindow", global_origin=FakePoint(100, 200), size=(80, 60))
+    hit = FakeClickWidget("InnerButton", parent=window, global_origin=FakePoint(120, 230))
+    window.setChildAt(hit)
+
+    posted_events = []
+
+    def post_event(widget, event):
+        posted_events.append((widget, event))
+
+    _install_fake_qt(monkeypatch, widget_at=hit)
+    monkeypatch.setattr(server, "_registry", SimpleNamespace(get=lambda wid: window if wid == 7 else None))
+    monkeypatch.setattr(server, "_QApplication", SimpleNamespace(widgetAt=FakeApplication.widgetAt, processEvents=FakeApplication.processEvents, postEvent=post_event))
+
+    result = server._handle_command(Request(method="hover", params={"window_wid": 7, "x": 25, "y": 35}))
+
+    assert result is True
+    assert posted_events
+    assert posted_events[-1][0] is hit
 
 
 def test_is_topmost_visible_widget_accepts_descendant_hit(monkeypatch):

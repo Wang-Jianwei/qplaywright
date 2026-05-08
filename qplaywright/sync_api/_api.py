@@ -21,6 +21,9 @@ from typing import Any, Generator
 from qplaywright.protocol import (
     DEFAULT_HOST,
     DEFAULT_PORT,
+    METHOD_CLICK,
+    METHOD_DBLCLICK,
+    METHOD_HOVER,
     METHOD_PING,
     METHOD_SET_SESSION_INFO,
     METHOD_LIST_WINDOWS,
@@ -138,6 +141,18 @@ class Window:
     def close(self) -> None:
         """Close the window."""
         self._conn.send(METHOD_WINDOW_CLOSE, {"wid": self._wid})
+
+    def click_at(self, x: int, y: int, *, count: int = 1) -> None:
+        """Click or double-click a window-relative coordinate."""
+        if count not in (1, 2):
+            raise ValueError("count must be 1 or 2")
+
+        method = METHOD_DBLCLICK if count == 2 else METHOD_CLICK
+        self._conn.send(method, {"window_wid": self._wid, "x": int(x), "y": int(y)})
+
+    def hover_at(self, x: int, y: int) -> None:
+        """Hover a window-relative coordinate."""
+        self._conn.send(METHOD_HOVER, {"window_wid": self._wid, "x": int(x), "y": int(y)})
 
     # -- Screenshots ---------------------------------------------------------
 

@@ -31,7 +31,10 @@ from pydantic import Field, ValidationError
 from qplaywright.protocol import (
     DEFAULT_HOST,
     DEFAULT_PORT,
+    METHOD_CLICK,
+    METHOD_DBLCLICK,
     METHOD_FIND,
+    METHOD_HOVER,
     METHOD_ITEM_VIEW_INSPECT,
     METHOD_LIST_WINDOWS,
     METHOD_PING,
@@ -1469,6 +1472,30 @@ def _press_key_without_target(connection: ManagedConnection, *, key: str) -> Non
     client.send(METHOD_PRESS, params, timeout=connection.timeout)
 
 
+def _pointer_action_coords(*, x: int | None, y: int | None) -> dict[str, int]:
+    if (x is None) != (y is None):
+        raise ValueError("Coordinate pointer actions require x and y together")
+    if x is None:
+        return {}
+
+    point_x = int(x)
+    point_y = int(y)
+    if point_x < 0 or point_y < 0:
+        raise ValueError("Coordinate pointer actions require non-negative x and y")
+    return {"x": point_x, "y": point_y}
+
+
+def _pointer_action_without_target(connection: ManagedConnection, *, method: str, x: int, y: int) -> None:
+    client = getattr(connection.app, "_conn", None)
+    if client is None:
+        raise RuntimeError("Active session does not expose the raw transport required for targetless pointer actions")
+
+    params: dict[str, Any] = {"x": x, "y": y}
+    if connection.active_window_wid is not None:
+        params["window_wid"] = connection.active_window_wid
+    client.send(method, params, timeout=connection.timeout)
+
+
 def _action_result_with_snapshot(
     managed_connection: ManagedConnection,
     *,
@@ -1942,29 +1969,40 @@ if FastMCP is not None:
             **result,
         }
 
-
     @mcp.tool()
     def click(
-        target: UnifiedTargetArg,
+        target: OptionalUnifiedTargetArg = None,
         count: ClickCountArg = 1,
+        x: ClipXArg = None,
+        y: ClipYArg = None,
         include_state: IncludeStateArg = False,
         include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
-        """Click or double-click the first widget, or one structured item target."""
+        """Click or double-click a target, or a window-relative coordinate in the active window."""
 
         if count not in (1, 2):
             raise ValueError("count must be 1 or 2")
 
         connection_state = _get_connection(_SERVER_STATE)
-        snapshot_target = _target_owner_target(target)
-        if isinstance(target, str):
-            locator = _resolve_locator(connection_state, target=target)
+        coords = _pointer_action_coords(x=x, y=y)
+        if target is None:
+            if not coords:
+                raise ValueError("click requires either a target or x/y coordinates")
+            method = METHOD_DBLCLICK if count == 2 else METHOD_CLICK
+            _pointer_action_without_target(connection_state, method=method, x=coords["x"], y=coords["y"])
         else:
-            locator = _resolve_item_locator(connection_state, target=target)
-        if count == 2:
-            locator.dblclick()
-        else:
-            locator.click()
+            if coords:
+                raise ValueError("click does not accept x/y together with target")
+            if isinstance(target, str):
+                locator = _resolve_locator(connection_state, target=target)
+            else:
+                locator = _resolve_item_locator(connection_state, target=target)
+            if count == 2:
+                locator.dblclick()
+            else:
+                locator.click()
+
+        snapshot_target = _target_owner_target(target) if target is not None else None
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
@@ -1974,6 +2012,7 @@ if FastMCP is not None:
             ok=True,
             count=count,
             target=target,
+            **coords,
         )
 
 
@@ -2320,19 +2359,30 @@ if FastMCP is not None:
 
     @mcp.tool()
     def hover(
-        target: UnifiedTargetArg,
+        target: OptionalUnifiedTargetArg = None,
+        x: ClipXArg = None,
+        y: ClipYArg = None,
         include_state: IncludeStateArg = False,
         include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
-        """Hover over the first widget, or one structured item target."""
+        """Hover a target, or a window-relative coordinate in the active window."""
 
         connection_state = _get_connection(_SERVER_STATE)
-        snapshot_target = _target_owner_target(target)
-        if isinstance(target, str):
-            locator = _resolve_locator(connection_state, target=target)
+        coords = _pointer_action_coords(x=x, y=y)
+        if target is None:
+            if not coords:
+                raise ValueError("hover requires either a target or x/y coordinates")
+            _pointer_action_without_target(connection_state, method=METHOD_HOVER, x=coords["x"], y=coords["y"])
         else:
-            locator = _resolve_item_locator(connection_state, target=target)
-        locator.hover()
+            if coords:
+                raise ValueError("hover does not accept x/y together with target")
+            if isinstance(target, str):
+                locator = _resolve_locator(connection_state, target=target)
+            else:
+                locator = _resolve_item_locator(connection_state, target=target)
+            locator.hover()
+
+        snapshot_target = _target_owner_target(target) if target is not None else None
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
@@ -2341,6 +2391,7 @@ if FastMCP is not None:
             snapshot_target=snapshot_target,
             ok=True,
             target=target,
+            **coords,
         )
 
 
@@ -2707,9 +2758,11 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("--include-infrastructure", action="store_true")
     snapshot_parser.add_argument("--save-to")
 
-    click_parser = subparsers.add_parser("click", help="Click the first widget matched by a target.")
-    click_parser.add_argument("target")
+    click_parser = subparsers.add_parser("click", help="Click a target or a window-relative coordinate.")
+    click_parser.add_argument("target", nargs="?")
     click_parser.add_argument("--count", type=int, choices=(1, 2), default=1)
+    click_parser.add_argument("--x", type=int)
+    click_parser.add_argument("--y", type=int)
     click_parser.add_argument("--include-state", action="store_true")
     click_parser.add_argument("--include-snapshot", action="store_true")
 
@@ -2778,8 +2831,10 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     screenshot_parser.add_argument("--width", type=int)
     screenshot_parser.add_argument("--height", type=int)
 
-    hover_parser = subparsers.add_parser("hover", help="Hover over the first matched widget.")
-    hover_parser.add_argument("target")
+    hover_parser = subparsers.add_parser("hover", help="Hover a target or a window-relative coordinate.")
+    hover_parser.add_argument("target", nargs="?")
+    hover_parser.add_argument("--x", type=int)
+    hover_parser.add_argument("--y", type=int)
     hover_parser.add_argument("--include-state", action="store_true")
     hover_parser.add_argument("--include-snapshot", action="store_true")
 
@@ -2873,11 +2928,16 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         return "screenshot", arguments
 
     if command == "hover":
-        return "hover", {
+        arguments = {
             "target": namespace.target,
             "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
+        if namespace.x is not None:
+            arguments["x"] = namespace.x
+        if namespace.y is not None:
+            arguments["y"] = namespace.y
+        return "hover", arguments
 
     if command == "scroll":
         return "scroll", {
@@ -2925,12 +2985,17 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         return "snapshot", arguments
 
     if command == "click":
-        return "click", {
+        arguments = {
             "target": namespace.target,
             "count": namespace.count,
             "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
+        if namespace.x is not None:
+            arguments["x"] = namespace.x
+        if namespace.y is not None:
+            arguments["y"] = namespace.y
+        return "click", arguments
 
     if command == "input":
         return "input", {

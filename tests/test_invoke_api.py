@@ -413,6 +413,51 @@ def test_window_screenshot_passes_clip_region():
     ]
 
 
+def test_window_click_at_sends_window_relative_request():
+    conn = FakeConnection()
+    window = Window(conn, wid=7, timeout=6.0)
+
+    window.click_at(10, 20)
+
+    assert conn.calls == [
+        (
+            "click",
+            {"window_wid": 7, "x": 10, "y": 20},
+            None,
+        )
+    ]
+
+
+def test_window_click_at_count_2_uses_dblclick():
+    conn = FakeConnection()
+    window = Window(conn, wid=7, timeout=6.0)
+
+    window.click_at(3, 4, count=2)
+
+    assert conn.calls == [
+        (
+            "dblclick",
+            {"window_wid": 7, "x": 3, "y": 4},
+            None,
+        )
+    ]
+
+
+def test_window_hover_at_sends_window_relative_request():
+    conn = FakeConnection()
+    window = Window(conn, wid=7, timeout=6.0)
+
+    window.hover_at(11, 12)
+
+    assert conn.calls == [
+        (
+            "hover",
+            {"window_wid": 7, "x": 11, "y": 12},
+            None,
+        )
+    ]
+
+
 def test_locator_screenshot_passes_clip_region():
     conn = FakeConnection()
     locator = Locator(conn, "#amount", timeout=8.0)

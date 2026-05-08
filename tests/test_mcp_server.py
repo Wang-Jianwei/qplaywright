@@ -568,6 +568,87 @@ def test_click_accepts_item_target(monkeypatch):
     assert result["snapshot_target"] == "#tree"
 
 
+def test_click_without_target_uses_active_window_transport(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(responses={"click": True})
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
+
+    result = mcp_server.click(x=12, y=34, include_snapshot=True)
+
+    assert app._conn.calls[-1] == {
+        "method": "click",
+        "params": {"x": 12, "y": 34, "window_wid": 11},
+        "timeout": 30.0,
+    }
+    assert result["target"] is None
+    assert result["x"] == 12
+    assert result["y"] == 34
+    assert result["snapshot_target"] is None
+
+
+def test_click_rejects_mixed_target_and_coordinates(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    with pytest.raises(ValueError, match="does not accept x/y together with target"):
+        mcp_server.click(target="#submit", x=1, y=2)
+
+
+def test_hover_without_target_uses_active_window_transport(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(responses={"hover": True})
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
+
+    result = mcp_server.hover(x=7, y=9)
+
+    assert app._conn.calls[-1] == {
+        "method": "hover",
+        "params": {"x": 7, "y": 9, "window_wid": 11},
+        "timeout": 30.0,
+    }
+    assert result["target"] is None
+    assert result["x"] == 7
+    assert result["y"] == 9
+
+
 def test_wait_accepts_item_target_visible_state(monkeypatch):
     window = FakeWindow(11, "Main")
     app = FakeApp([window])
@@ -2234,6 +2315,38 @@ def test_run_cli_typed_click_supports_include_state(monkeypatch, capsys):
         "target": "text=Start",
         "count": 1,
         "include_state": True,
+        "include_snapshot": False,
+    }
+
+
+def test_run_cli_typed_click_accepts_window_coordinates(monkeypatch, capsys):
+    captured = {}
+
+    def fake_click(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True, **kwargs}
+
+    monkeypatch.setattr(mcp_server, "click", fake_click)
+
+    exit_code = mcp_server._run_cli(["click", "--x", "12", "--y", "34"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "target": None,
+        "count": 1,
+        "x": 12,
+        "y": 34,
+        "include_state": False,
+        "include_snapshot": False,
+    }
+    assert captured == {
+        "target": None,
+        "count": 1,
+        "x": 12,
+        "y": 34,
+        "include_state": False,
         "include_snapshot": False,
     }
 

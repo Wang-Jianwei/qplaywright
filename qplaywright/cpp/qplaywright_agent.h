@@ -2260,13 +2260,21 @@ private:
 
         // -- Actions --
         if (method == "click") {
-            QWidget *w = resolveOne(params);
-            clickWidget(w, false);
+            if (params.contains("wid") || params.contains("selector")) {
+                QWidget *w = resolveOne(params);
+                clickWidget(w, false);
+            } else {
+                clickPointerActionTarget(params, false);
+            }
             return true;
         }
         if (method == "dblclick") {
-            QWidget *w = resolveOne(params);
-            clickWidget(w, true);
+            if (params.contains("wid") || params.contains("selector")) {
+                QWidget *w = resolveOne(params);
+                clickWidget(w, true);
+            } else {
+                clickPointerActionTarget(params, true);
+            }
             return true;
         }
 
@@ -2323,8 +2331,12 @@ private:
         }
 
         if (method == "hover") {
-            QWidget *w = resolveOne(params);
-            hoverWidget(w);
+            if (params.contains("wid") || params.contains("selector")) {
+                QWidget *w = resolveOne(params);
+                hoverWidget(w);
+            } else {
+                hoverPointerActionTarget(params);
+            }
             return true;
         }
 
@@ -2656,6 +2668,40 @@ private:
         }
 
         throw std::runtime_error("No visible window found for targetless key press");
+    }
+
+    QWidget *resolvePointerActionWindow(const QJsonObject &params)
+    {
+        auto &reg = QPlaywrightRegistry::instance();
+
+        if (params.contains("window_wid")) {
+            QWidget *window = reg.get(params["window_wid"].toInt());
+            if (!window)
+                throw std::runtime_error("No window found for the requested window_wid");
+            return window->window();
+        }
+
+        if (QWidget *activeModal = activeModalTopLevelWidget())
+            return activeModal;
+
+        if (QWidget *activeWindow = QApplication::activeWindow()) {
+            QWidget *window = activeWindow->window();
+            if (window && isOverlayTargetWindowVisible(window) && !isWindowBlockedByModal(window))
+                return window;
+        }
+
+        if (QWidget *focused = QApplication::focusWidget()) {
+            QWidget *window = focused->window();
+            if (window && isOverlayTargetWindowVisible(window) && !isWindowBlockedByModal(window))
+                return window;
+        }
+
+        for (QWidget *window : interactableTopLevelWidgets()) {
+            if (window->isVisible())
+                return window;
+        }
+
+        throw std::runtime_error("No visible window found for coordinate pointer action");
     }
     
     struct ResolvedTableItem
@@ -3386,6 +3432,45 @@ private:
         QPoint localPos;
     };
 
+    ClickTarget resolvePointerActionTarget(const QJsonObject &params)
+    {
+        if (params.contains("x") != params.contains("y"))
+            throw std::runtime_error("Coordinate pointer actions require x and y together");
+
+        const QJsonValue xValue = params.value("x");
+        const QJsonValue yValue = params.value("y");
+        if (!xValue.isDouble() || !yValue.isDouble())
+            throw std::runtime_error("Coordinate pointer actions require integer x and y values");
+
+        const int x = xValue.toInt();
+        const int y = yValue.toInt();
+        if (x < 0 || y < 0)
+            throw std::runtime_error("Coordinate pointer actions require non-negative x and y");
+
+        QWidget *window = resolvePointerActionWindow(params);
+        if (x >= window->width() || y >= window->height())
+            throw std::runtime_error("Coordinate pointer action is outside the target window bounds");
+
+        const QPoint windowPos(x, y);
+        if (!pointWithinWidgetMask(window, windowPos))
+            throw std::runtime_error("Coordinate pointer action resolves to a masked-out point");
+
+        const QPoint globalPos = window->mapToGlobal(windowPos);
+        QWidget *hit = topmostHitAtPoint(window, windowPos);
+        if (!hit)
+            throw std::runtime_error("Coordinate pointer action does not resolve to an event target");
+        if (!isSameOrDescendantWidget(hit, window)) {
+            throw std::runtime_error(
+                std::string("Coordinate pointer action is covered by ") + std::string(hit->metaObject()->className())
+            );
+        }
+        if (!hit->isVisible())
+            throw std::runtime_error("Coordinate pointer action resolved to a non-visible widget");
+        if (!hit->isEnabled())
+            throw std::runtime_error("Coordinate pointer action resolved to a disabled widget");
+        return {hit, hit->mapFromGlobal(globalPos)};
+    }
+
     ClickTarget resolveClickTarget(QWidget *w)
     {
         QWidget *target = primaryEventTarget(w);
@@ -3454,6 +3539,12 @@ private:
         else
             QTest::mouseClick(target, Qt::LeftButton, Qt::NoModifier, clickTarget.localPos);
         QApplication::processEvents();
+    }
+
+    void clickPointerActionTarget(const QJsonObject &params, bool doubleClick)
+    {
+        auto clickTarget = resolvePointerActionTarget(params);
+        clickWidgetAt(clickTarget.widget, clickTarget.localPos, doubleClick);
     }
     
     void clickWidgetAt(QWidget *target, const QPoint &localPos, bool doubleClick)
@@ -3594,6 +3685,36 @@ private:
         QMouseEvent event(
             QEvent::MouseMove,
             center,
+            globalPos,
+            Qt::NoButton,
+            Qt::NoButton,
+            Qt::NoModifier
+        );
+#endif
+        QApplication::sendEvent(target, &event);
+        QApplication::processEvents();
+    }
+
+    void hoverPointerActionTarget(const QJsonObject &params)
+    {
+        auto hoverTarget = resolvePointerActionTarget(params);
+        QWidget *target = hoverTarget.widget;
+        const QPoint localPos = hoverTarget.localPos;
+        updateVisualFeedback(target, localPos, 0);
+        const QPoint globalPos = target->mapToGlobal(localPos);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QMouseEvent event(
+            QEvent::MouseMove,
+            QPointF(localPos),
+            QPointF(globalPos),
+            Qt::NoButton,
+            Qt::NoButton,
+            Qt::NoModifier
+        );
+#else
+        QMouseEvent event(
+            QEvent::MouseMove,
+            localPos,
             globalPos,
             Qt::NoButton,
             Qt::NoButton,
