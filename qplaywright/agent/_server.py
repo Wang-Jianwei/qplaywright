@@ -214,6 +214,41 @@ def _import_qt():
     raise ImportError("No Qt binding found. Install PySide6, PyQt6, PySide2, or PyQt5.")
 
 
+def _qt_core_module() -> Any:
+    _import_qt()
+    if _QtCore is None:
+        raise RuntimeError("QtCore is not available")
+    return _QtCore
+
+
+def _qt_gui_module() -> Any:
+    _import_qt()
+    if _QtGui is None:
+        raise RuntimeError("QtGui is not available")
+    return _QtGui
+
+
+def _qt_application_class() -> Any:
+    _import_qt()
+    if _QApplication is None:
+        raise RuntimeError("QApplication is not available")
+    return _QApplication
+
+
+def _to_qpointf(point):
+    _import_qt()
+    qpointf_type = _QPointF
+    if qpointf_type is None:
+        return point
+    return qpointf_type(point)
+
+
+def _coerce_runtime_int(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an int, got {type(value).__name__}")
+    return value
+
+
 def _is_automation_overlay_widget(widget) -> bool:
     if widget is None:
         return False
@@ -741,7 +776,7 @@ def _move_visual_cursor(widget, pos, *, pulse_count: int = 0) -> None:
 
 def _move_visual_cursor_to_widget(widget, *, pulse_count: int = 0) -> None:
     target = _primary_event_target(widget)
-    _move_visual_cursor(target, target.rect().center(), pulse_count=pulse_count)
+    _move_visual_cursor(target, _widget_center_point(target), pulse_count=pulse_count)
 
 
 # --------------------------------------------------------------------------- #
@@ -856,9 +891,10 @@ class _Dispatcher(_QtCore.QObject if False else object):
 
 
 def _create_dispatcher():
-    _import_qt()
-    QEvent = _QtCore.QEvent
-    QObject = _QtCore.QObject
+    qt_core = _qt_core_module()
+    q_application = _qt_application_class()
+    QEvent = qt_core.QEvent
+    QObject = qt_core.QObject
 
     _CMD_EVENT_TYPE = QEvent.Type(QEvent.registerEventType())
     _CALL_EVENT_TYPE = QEvent.Type(QEvent.registerEventType())
@@ -894,7 +930,7 @@ def _create_dispatcher():
                         "Re-entrant CommandEvent detected (method=%r); deferring until current command completes.",
                         req.method,
                     )
-                    _QApplication.postEvent(self, CommandEvent(req, fut))
+                    q_application.postEvent(self, CommandEvent(req, fut))
                     return
                 _executing_command = True
                 try:
@@ -920,7 +956,8 @@ def _create_dispatcher():
 # --------------------------------------------------------------------------- #
 
 def _get_top_level_widgets():
-    return [widget for widget in _QApplication.topLevelWidgets() if not _is_automation_overlay_widget(widget)]
+    q_application = _qt_application_class()
+    return [widget for widget in q_application.topLevelWidgets() if not _is_automation_overlay_widget(widget)]
 
 
 def _active_modal_top_level_widget():
@@ -1247,17 +1284,82 @@ def _rect_center(rect):
 def _rect_dimension(rect, name: str) -> int:
     accessor = getattr(rect, name, None)
     value = accessor() if callable(accessor) else accessor
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"Rect {name} must be an int, got {type(value).__name__}")
-    return value
+    return _coerce_runtime_int(value, f"Rect {name}")
 
 
 def _point_coordinate(point, name: str) -> int:
     accessor = getattr(point, name, None)
     value = accessor() if callable(accessor) else accessor
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"Point {name} must be an int, got {type(value).__name__}")
-    return value
+    return _coerce_runtime_int(value, f"Point {name}")
+
+
+def _widget_rect(widget):
+    rect_fn = getattr(widget, "rect", None)
+    if not callable(rect_fn):
+        raise ValueError(f"Widget does not expose rect(): {_widget_class_name(widget)}")
+    return rect_fn()
+
+
+def _widget_center_point(widget):
+    return _rect_center(_widget_rect(widget))
+
+
+def _widget_dimension(widget, name: str) -> int:
+    accessor = getattr(widget, name, None)
+    value = accessor() if callable(accessor) else accessor
+    return _coerce_runtime_int(value, f"Widget {name}")
+
+
+def _widget_map_to_global(widget, point):
+    map_to_global = getattr(widget, "mapToGlobal", None)
+    if not callable(map_to_global):
+        raise ValueError(f"Widget does not expose mapToGlobal(): {_widget_class_name(widget)}")
+    return map_to_global(point)
+
+
+def _widget_map_from_global(widget, point):
+    map_from_global = getattr(widget, "mapFromGlobal", None)
+    if not callable(map_from_global):
+        raise ValueError(f"Widget does not expose mapFromGlobal(): {_widget_class_name(widget)}")
+    return map_from_global(point)
+
+
+def _widget_is_visible(widget) -> bool:
+    is_visible = getattr(widget, "isVisible", None)
+    if not callable(is_visible):
+        raise ValueError(f"Widget does not expose isVisible(): {_widget_class_name(widget)}")
+    return bool(is_visible())
+
+
+def _widget_is_enabled(widget) -> bool:
+    is_enabled = getattr(widget, "isEnabled", None)
+    if not callable(is_enabled):
+        raise ValueError(f"Widget does not expose isEnabled(): {_widget_class_name(widget)}")
+    return bool(is_enabled())
+
+
+def _widget_set_focus(widget, reason=None) -> None:
+    set_focus = getattr(widget, "setFocus", None)
+    if not callable(set_focus):
+        raise ValueError(f"Widget does not expose setFocus(): {_widget_class_name(widget)}")
+    if reason is None:
+        set_focus()
+        return
+    try:
+        set_focus(reason)
+    except Exception:
+        set_focus()
+
+
+def _rect_bounding_box(viewport, rect) -> dict[str, int]:
+    top_left = _rect_top_left(rect)
+    global_pos = _widget_map_to_global(viewport, top_left)
+    return {
+        "x": _point_coordinate(global_pos, "x"),
+        "y": _point_coordinate(global_pos, "y"),
+        "width": _rect_dimension(rect, "width"),
+        "height": _rect_dimension(rect, "height"),
+    }
 
 
 def _tab_rect(tab_bar, index: int):
@@ -1375,7 +1477,7 @@ def _resolve_table_column(owner_widget, column_or_name):
     column_count_fn = getattr(model, "columnCount", None)
     if not callable(column_count_fn):
         raise ValueError("Table model does not expose columnCount()")
-    column_count = int(column_count_fn())
+    column_count = _coerce_runtime_int(column_count_fn(), "Table columnCount()")
 
     if isinstance(column_or_name, bool):
         raise ValueError("Table column must be an int or str")
@@ -1418,7 +1520,7 @@ def _resolve_table_item(owner_widget, descriptor: dict):
     row_count_fn = getattr(model, "rowCount", None)
     if not callable(row_count_fn):
         raise ValueError("Table model does not expose rowCount()")
-    row_count = int(row_count_fn())
+    row_count = _coerce_runtime_int(row_count_fn(), "Table rowCount()")
     if row < 0 or row >= row_count:
         raise ValueError(f"Table row out of range: {row}")
 
@@ -1471,7 +1573,7 @@ def _model_row_count(model, parent_index):
     row_count_fn = getattr(model, "rowCount", None)
     if not callable(row_count_fn):
         raise ValueError("Tree model does not expose rowCount()")
-    return int(_call_with_optional_parent(row_count_fn, parent_index))
+    return _coerce_runtime_int(_call_with_optional_parent(row_count_fn, parent_index), "Tree rowCount()")
 
 
 def _model_index(model, row: int, column: int, parent_index):
@@ -1526,15 +1628,16 @@ def _tree_index_hidden(view, index) -> bool:
     row = row_fn() if callable(row_fn) else None
     if row is None:
         return False
+    row_value = _coerce_runtime_int(row, "Tree row()")
 
     parent_index = _tree_index_parent(index)
     if parent_index is not None:
         try:
-            return bool(is_row_hidden(int(row), parent_index))
+            return bool(is_row_hidden(row_value, parent_index))
         except TypeError:
             pass
     try:
-        return bool(is_row_hidden(int(row)))
+        return bool(is_row_hidden(row_value))
     except TypeError:
         return False
 
@@ -1762,10 +1865,8 @@ def _rect_is_empty(rect) -> bool:
     is_empty = getattr(rect, "isEmpty", None)
     if callable(is_empty):
         return bool(is_empty())
-    width = getattr(rect, "width", None)
-    height = getattr(rect, "height", None)
-    width_value = int(width()) if callable(width) else int(width or 0)
-    height_value = int(height()) if callable(height) else int(height or 0)
+    width_value = _rect_dimension(rect, "width")
+    height_value = _rect_dimension(rect, "height")
     return width_value <= 0 or height_value <= 0
 
 
@@ -1837,17 +1938,7 @@ def _table_index_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
     view = _table_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _table_index_rect(view, resolved_target)
-    top_left = rect.topLeft()
-    global_pos = viewport.mapToGlobal(top_left)
-
-    width = rect.width() if callable(getattr(rect, "width", None)) else getattr(rect, "width")
-    height = rect.height() if callable(getattr(rect, "height", None)) else getattr(rect, "height")
-    return {
-        "x": int(global_pos.x() if callable(getattr(global_pos, "x", None)) else global_pos.x),
-        "y": int(global_pos.y() if callable(getattr(global_pos, "y", None)) else global_pos.y),
-        "width": int(width),
-        "height": int(height),
-    }
+    return _rect_bounding_box(viewport, rect)
 
 
 def _tree_index_visible(owner_widget, resolved_target) -> bool:
@@ -1927,17 +2018,7 @@ def _tree_index_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
     view = _tree_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _tree_index_rect(view, resolved_target)
-    top_left = rect.topLeft()
-    global_pos = viewport.mapToGlobal(top_left)
-
-    width = rect.width() if callable(getattr(rect, "width", None)) else getattr(rect, "width")
-    height = rect.height() if callable(getattr(rect, "height", None)) else getattr(rect, "height")
-    return {
-        "x": int(global_pos.x() if callable(getattr(global_pos, "x", None)) else global_pos.x),
-        "y": int(global_pos.y() if callable(getattr(global_pos, "y", None)) else global_pos.y),
-        "width": int(width),
-        "height": int(height),
-    }
+    return _rect_bounding_box(viewport, rect)
 
 
 def _list_index_visible(owner_widget, resolved_target) -> bool:
@@ -1995,17 +2076,7 @@ def _list_index_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
     view = _list_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _list_index_rect(owner_widget, resolved_target)
-    top_left = rect.topLeft()
-    global_pos = viewport.mapToGlobal(top_left)
-
-    width = rect.width() if callable(getattr(rect, "width", None)) else getattr(rect, "width")
-    height = rect.height() if callable(getattr(rect, "height", None)) else getattr(rect, "height")
-    return {
-        "x": int(global_pos.x() if callable(getattr(global_pos, "x", None)) else global_pos.x),
-        "y": int(global_pos.y() if callable(getattr(global_pos, "y", None)) else global_pos.y),
-        "width": int(width),
-        "height": int(height),
-    }
+    return _rect_bounding_box(viewport, rect)
 
 
 def _item_text(owner_widget, resolved_target) -> str:
@@ -2065,11 +2136,12 @@ def _item_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
 def _click_widget_at(widget, pos, *, double: bool = False):
     _import_qt()
     QTest = _QtTest
-    Qt = _QtCore.Qt
+    qt_core = _qt_core_module()
+    Qt = qt_core.Qt
 
-    if not widget.isVisible():
+    if not _widget_is_visible(widget):
         raise ValueError(f"Cannot click widget of type {_widget_class_name(widget)}: event target is not visible")
-    if not widget.isEnabled():
+    if not _widget_is_enabled(widget):
         raise ValueError(f"Cannot click widget of type {_widget_class_name(widget)}: event target is disabled")
 
     if QTest and hasattr(QTest, "QTest"):
@@ -2109,7 +2181,7 @@ def _coerce_non_negative_int(value, name: str) -> int:
 
 
 def _resolve_pointer_action_target(params: dict):
-    _import_qt()
+    qt_core = _qt_core_module()
 
     if ("x" in params) != ("y" in params):
         raise ValueError("Coordinate pointer actions require x and y together")
@@ -2118,33 +2190,33 @@ def _resolve_pointer_action_target(params: dict):
     y = _coerce_non_negative_int(params.get("y"), "y")
 
     window = _resolve_pointer_action_window(params)
-    width = int(window.width()) if callable(getattr(window, "width", None)) else 0
-    height = int(window.height()) if callable(getattr(window, "height", None)) else 0
+    width = _widget_dimension(window, "width")
+    height = _widget_dimension(window, "height")
     if x >= width or y >= height:
         raise ValueError("Coordinate pointer action is outside the target window bounds")
 
-    local_pos = _QtCore.QPoint(x, y)
+    local_pos = qt_core.QPoint(x, y)
     if not _point_within_widget_mask(window, local_pos):
         raise ValueError("Coordinate pointer action resolves to a masked-out point")
 
-    global_pos = window.mapToGlobal(local_pos)
+    global_pos = _widget_map_to_global(window, local_pos)
     hit = _topmost_hit_at_point(window, local_pos)
     if hit is None:
         raise ValueError("Coordinate pointer action does not resolve to an event target")
     if not _is_same_or_descendant_widget(hit, window):
         raise ValueError(f"Coordinate pointer action is covered by {_widget_class_name(hit)}")
-    if hasattr(hit, "isVisible") and not hit.isVisible():
+    if not _widget_is_visible(hit):
         raise ValueError(f"Cannot click widget of type {_widget_class_name(hit)}: event target is not visible")
-    if hasattr(hit, "isEnabled") and not hit.isEnabled():
+    if not _widget_is_enabled(hit):
         raise ValueError(f"Cannot click widget of type {_widget_class_name(hit)}: event target is disabled")
-    return hit, hit.mapFromGlobal(global_pos)
+    return hit, _widget_map_from_global(hit, global_pos)
 
 
 def _click_table_index(owner_widget, resolved_target, *, double: bool = False):
     view = _table_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _table_index_rect(view, resolved_target)
-    local_pos = rect.center()
+    local_pos = _rect_center(rect)
     _click_widget_at(viewport, local_pos, double=double)
 
 
@@ -2152,7 +2224,7 @@ def _hover_table_index(owner_widget, resolved_target):
     view = _table_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _table_index_rect(view, resolved_target)
-    local_pos = rect.center()
+    local_pos = _rect_center(rect)
     _move_visual_cursor(viewport, local_pos)
     _hover_widget(viewport, local_pos)
 
@@ -2161,7 +2233,7 @@ def _click_tree_index(owner_widget, resolved_target, *, double: bool = False):
     view = _tree_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _tree_index_rect(view, resolved_target)
-    local_pos = rect.center()
+    local_pos = _rect_center(rect)
     _click_widget_at(viewport, local_pos, double=double)
 
 
@@ -2169,7 +2241,7 @@ def _hover_tree_index(owner_widget, resolved_target):
     view = _tree_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _tree_index_rect(view, resolved_target)
-    local_pos = rect.center()
+    local_pos = _rect_center(rect)
     _move_visual_cursor(viewport, local_pos)
     _hover_widget(viewport, local_pos)
 
@@ -2178,7 +2250,7 @@ def _click_list_index(owner_widget, resolved_target, *, double: bool = False):
     view = _list_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _list_index_rect(owner_widget, resolved_target)
-    local_pos = rect.center()
+    local_pos = _rect_center(rect)
     _click_widget_at(viewport, local_pos, double=double)
 
 
@@ -2186,7 +2258,7 @@ def _hover_list_index(owner_widget, resolved_target):
     view = _list_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _list_index_rect(owner_widget, resolved_target)
-    local_pos = rect.center()
+    local_pos = _rect_center(rect)
     _move_visual_cursor(viewport, local_pos)
     _hover_widget(viewport, local_pos)
 
@@ -2297,7 +2369,7 @@ def _table_item_inspection(owner_widget, *, max_rows: int, max_items: int, inclu
     column_count_fn = getattr(model, "columnCount", None)
     if not callable(column_count_fn):
         raise ValueError("Table model does not expose columnCount()")
-    column_count = int(column_count_fn())
+    column_count = _coerce_runtime_int(column_count_fn(), "Table columnCount()")
     rows_inspected = min(row_count, max_rows)
     view = _table_view(owner_widget)
 
@@ -2523,8 +2595,7 @@ def _tab_item_inspection(owner_widget, *, max_items: int, include_hidden: bool) 
 
 def _key_to_qt(key_str: str):
     """Convert a Playwright-style key name to Qt key enum."""
-    _import_qt()
-    Qt = _QtCore.Qt
+    Qt = _qt_core_module().Qt
     KEY_MAP = {
         "Enter": Qt.Key_Return,
         "Return": Qt.Key_Return,
@@ -2560,8 +2631,9 @@ def _handle_command(req: Request) -> Any:
     session_id = params.pop("_sessionId", "")
     if session_id:
         _mark_session_active(session_id)
-    Qt = _QtCore.Qt
-    QCursor = _QtGui.QCursor
+    qt_core = _qt_core_module()
+    q_application = _qt_application_class()
+    Qt = qt_core.Qt
 
     # -- Ping ----------------------------------------------------------------
     if method == METHOD_PING:
@@ -2765,7 +2837,7 @@ def _handle_command(req: Request) -> Any:
         if "wid" in params or "selector" in params:
             w = _resolve_one(params)
             target = _primary_event_target(w)
-            local_pos = target.rect().center()
+            local_pos = _widget_center_point(target)
         else:
             target, local_pos = _resolve_pointer_action_target(params)
         _move_visual_cursor(target, local_pos)
@@ -2815,15 +2887,15 @@ def _handle_command(req: Request) -> Any:
     if method == METHOD_FOCUS:
         w = _resolve_one(params)
         target = _primary_event_target(w)
-        _move_visual_cursor(target, target.rect().center())
-        w.setFocus()
+        _move_visual_cursor(target, _widget_center_point(target))
+        _widget_set_focus(w)
         _process_events()
         return True
 
     if method == METHOD_SCROLL:
         w = _resolve_one(params)
         target = _primary_event_target(w)
-        _move_visual_cursor(target, target.rect().center(), pulse_count=1)
+        _move_visual_cursor(target, _widget_center_point(target), pulse_count=1)
         _scroll_widget(w, params.get("delta_x", 0), params.get("delta_y", 0))
         return True
 
@@ -2846,8 +2918,9 @@ def _handle_command(req: Request) -> Any:
             and overlay.isVisible()
         )
         if hide_overlay_for_capture:
-            overlay.hide()
-            _QApplication.processEvents()
+            hidden_overlay: Any = overlay
+            hidden_overlay.hide()
+            q_application.processEvents()
 
         clip_keys = ("x", "y", "width", "height")
         has_clip = any(params.get(key) is not None for key in clip_keys)
@@ -2861,15 +2934,17 @@ def _handle_command(req: Request) -> Any:
                 clip_height = int(params["height"])
                 if clip_x < 0 or clip_y < 0 or clip_width <= 0 or clip_height <= 0:
                     raise ValueError("Screenshot clipping requires non-negative x/y and positive width/height")
-                pixmap = w.grab(_QtCore.QRect(clip_x, clip_y, clip_width, clip_height))
+                pixmap = w.grab(qt_core.QRect(clip_x, clip_y, clip_width, clip_height))
             else:
                 pixmap = w.grab()
         finally:
             if hide_overlay_for_capture:
-                overlay.sync_to_window()
-                _QApplication.processEvents()
-        buf = _QtCore.QBuffer()
-        buf.open(_QtCore.QIODevice.WriteOnly if hasattr(_QtCore.QIODevice, 'WriteOnly') else _QtCore.QIODevice.OpenModeFlag.WriteOnly)
+                shown_overlay: Any = overlay
+                shown_overlay.sync_to_window()
+                q_application.processEvents()
+        buf = qt_core.QBuffer()
+        io_device = qt_core.QIODevice
+        buf.open(io_device.WriteOnly if hasattr(io_device, "WriteOnly") else io_device.OpenModeFlag.WriteOnly)
         pixmap.save(buf, "PNG")
         data = bytes(buf.data())
         buf.close()
@@ -2940,7 +3015,7 @@ def _handle_command(req: Request) -> Any:
 
 def _process_events():
     """Process pending Qt events."""
-    _QApplication.processEvents()
+    _qt_application_class().processEvents()
 
 
 def _primary_event_target(widget):
@@ -2963,11 +3038,7 @@ def _is_same_or_descendant_widget(candidate, ancestor) -> bool:
 
 
 def _point_xy(point) -> tuple[int, int]:
-    x_attr = getattr(point, "x", None)
-    y_attr = getattr(point, "y", None)
-    x_value = x_attr() if callable(x_attr) else x_attr
-    y_value = y_attr() if callable(y_attr) else y_attr
-    return int(x_value), int(y_value)
+    return _point_coordinate(point, "x"), _point_coordinate(point, "y")
 
 
 def _offset_point(point, dx: int, dy: int):
@@ -2996,12 +3067,9 @@ def _point_within_widget_mask(widget, local_point) -> bool:
 
 
 def _sample_local_points(widget) -> list:
-    center = widget.rect().center()
-
-    width_fn = getattr(widget, "width", None)
-    height_fn = getattr(widget, "height", None)
-    width = int(width_fn()) if callable(width_fn) else 0
-    height = int(height_fn()) if callable(height_fn) else 0
+    center = _widget_center_point(widget)
+    width = _widget_dimension(widget, "width")
+    height = _widget_dimension(widget, "height")
 
     offset_x = max(1, width // 4) if width > 1 else 0
     offset_y = max(1, height // 4) if height > 1 else 0
@@ -3023,10 +3091,10 @@ def _topmost_hit_at_point(target, local_point):
     if not _point_within_widget_mask(target, local_point):
         return None
 
-    global_pos = target.mapToGlobal(local_point)
+    global_pos = _widget_map_to_global(target, local_point)
 
     hit = None
-    widget_at = getattr(_QApplication, "widgetAt", None)
+    widget_at = getattr(_qt_application_class(), "widgetAt", None)
     if callable(widget_at):
         hit = widget_at(global_pos)
     if _is_automation_overlay_widget(hit) or _is_mouse_transparent_widget(hit):
@@ -3045,14 +3113,14 @@ def _is_topmost_visible_widget(widget) -> bool:
     _import_qt()
 
     target = _primary_event_target(widget)
-    if not hasattr(target, "isVisible") or not target.isVisible():
+    if not _widget_is_visible(target):
         return False
 
     for sample_point in _sample_local_points(target):
         hit = _topmost_hit_at_point(target, sample_point)
         if hit is None:
             continue
-        if hasattr(hit, "isVisible") and not hit.isVisible():
+        if not _widget_is_visible(hit):
             continue
         if _is_same_or_descendant_widget(hit, target):
             return True
@@ -3064,21 +3132,21 @@ def _resolve_click_target(widget):
     _import_qt()
 
     target = _primary_event_target(widget)
-    if not target.isVisible():
+    if not _widget_is_visible(target):
         raise ValueError(
             f"Cannot click widget of type {_widget_class_name(widget)}: event target is not visible"
         )
-    if not target.isEnabled():
+    if not _widget_is_enabled(target):
         raise ValueError(
             f"Cannot click widget of type {_widget_class_name(widget)}: event target is disabled"
         )
 
-    center = target.rect().center()
+    center = _widget_center_point(target)
     if not _point_within_widget_mask(target, center):
         raise ValueError(
             f"Cannot click widget of type {_widget_class_name(widget)}: center point is masked out"
         )
-    global_pos = target.mapToGlobal(center)
+    global_pos = _widget_map_to_global(target, center)
 
     hit = _topmost_hit_at_point(target, center)
     if hit is None:
@@ -3090,16 +3158,16 @@ def _resolve_click_target(widget):
         raise ValueError(
             f"Cannot click widget of type {_widget_class_name(widget)}: center point is covered by {_widget_class_name(hit)}"
         )
-    if hasattr(hit, "isVisible") and not hit.isVisible():
+    if not _widget_is_visible(hit):
         raise ValueError(
             f"Cannot click widget of type {_widget_class_name(widget)}: resolved click target is not visible"
         )
-    if hasattr(hit, "isEnabled") and not hit.isEnabled():
+    if not _widget_is_enabled(hit):
         raise ValueError(
             f"Cannot click widget of type {_widget_class_name(widget)}: resolved click target is disabled"
         )
 
-    local_pos = hit.mapFromGlobal(global_pos) if hasattr(hit, "mapFromGlobal") else center
+    local_pos = _widget_map_from_global(hit, global_pos)
     return hit, local_pos
 
 
@@ -3107,17 +3175,15 @@ def _click_widget(widget, *, double: bool = False):
     """Simulate a mouse click on the concrete event target under the widget center."""
     _import_qt()
     QTest = _QtTest
-    Qt = _QtCore.Qt
+    qt_core = _qt_core_module()
+    Qt = qt_core.Qt
 
     if QTest and hasattr(QTest, "QTest"):
         QTest = QTest.QTest
 
     event_target, local_pos = _resolve_click_target(widget)
 
-    try:
-        event_target.setFocus(Qt.MouseFocusReason)
-    except Exception:
-        event_target.setFocus()
+    _widget_set_focus(event_target, Qt.MouseFocusReason)
     _process_events()
 
     _update_visual_feedback(event_target, local_pos, double=double)
@@ -3142,11 +3208,13 @@ def _click_widget(widget, *, double: bool = False):
 
 def _post_mouse_event(widget, pos, *, double: bool = False):
     """Post mouse press/release events directly."""
-    QMouseEvent = _QtGui.QMouseEvent
-    QEvent = _QtCore.QEvent
-    Qt = _QtCore.Qt
-
-    global_pos = widget.mapToGlobal(pos)
+    qt_gui = _qt_gui_module()
+    qt_core = _qt_core_module()
+    q_application = _qt_application_class()
+    QMouseEvent = qt_gui.QMouseEvent
+    QEvent = qt_core.QEvent
+    Qt = qt_core.Qt
+    global_pos = _widget_map_to_global(widget, pos)
 
     # Try Qt6 API first, then Qt5
     try:
@@ -3159,8 +3227,8 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
         )
     except TypeError:
-        pos_f = _QPointF(pos)
-        global_f = _QPointF(global_pos)
+        pos_f = _to_qpointf(pos)
+        global_f = _to_qpointf(global_pos)
         press = QMouseEvent(
             QEvent.Type.MouseButtonPress, pos_f, global_f,
             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
@@ -3170,8 +3238,8 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
         )
 
-    _QApplication.postEvent(widget, press)
-    _QApplication.postEvent(widget, release)
+    q_application.postEvent(widget, press)
+    q_application.postEvent(widget, release)
 
     if double:
         try:
@@ -3181,11 +3249,11 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
             )
         except TypeError:
             dbl = QMouseEvent(
-                QEvent.Type.MouseButtonDblClick, _QPointF(pos), _QPointF(global_pos),
+                QEvent.Type.MouseButtonDblClick, _to_qpointf(pos), _to_qpointf(global_pos),
                 Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
             )
-        _QApplication.postEvent(widget, dbl)
-        _QApplication.postEvent(widget, release)
+        q_application.postEvent(widget, dbl)
+        q_application.postEvent(widget, release)
 
 
 def _fill_widget(widget, value: str):
@@ -3214,22 +3282,25 @@ def _type_text(widget, text: str, delay: int = 0):
     if QTest and hasattr(QTest, "QTest"):
         QTest = QTest.QTest
 
-    widget.setFocus()
+    _widget_set_focus(widget)
     _process_events()
 
     if QTest and hasattr(QTest, "keyClicks"):
         QTest.keyClicks(widget, text, delay=delay)
     else:
         # Fallback: use QKeyEvent
-        QKeyEvent = _QtGui.QKeyEvent
-        QEvent = _QtCore.QEvent
-        Qt = _QtCore.Qt
+        qt_gui = _qt_gui_module()
+        qt_core = _qt_core_module()
+        q_application = _qt_application_class()
+        QKeyEvent = qt_gui.QKeyEvent
+        QEvent = qt_core.QEvent
+        Qt = qt_core.Qt
 
         for ch in text:
             press = QKeyEvent(QEvent.Type.KeyPress, 0, Qt.NoModifier, ch)
             release = QKeyEvent(QEvent.Type.KeyRelease, 0, Qt.NoModifier, ch)
-            _QApplication.postEvent(widget, press)
-            _QApplication.postEvent(widget, release)
+            q_application.postEvent(widget, press)
+            q_application.postEvent(widget, release)
             if delay:
                 _process_events()
                 time.sleep(delay / 1000.0)
@@ -3239,12 +3310,14 @@ def _type_text(widget, text: str, delay: int = 0):
 
 def _hover_widget(widget, pos):
     """Dispatch a synthetic hover event without warping the real cursor."""
-    _import_qt()
-    Qt = _QtCore.Qt
-    QEvent = _QtCore.QEvent
+    qt_core = _qt_core_module()
+    qt_gui = _qt_gui_module()
+    q_application = _qt_application_class()
+    Qt = qt_core.Qt
+    QEvent = qt_core.QEvent
 
-    QMouseEvent = _QtGui.QMouseEvent
-    global_pos = widget.mapToGlobal(pos)
+    QMouseEvent = qt_gui.QMouseEvent
+    global_pos = _widget_map_to_global(widget, pos)
 
     try:
         move = QMouseEvent(
@@ -3253,18 +3326,18 @@ def _hover_widget(widget, pos):
         )
     except TypeError:
         move = QMouseEvent(
-            QEvent.Type.MouseMove, _QPointF(pos), _QPointF(global_pos),
+            QEvent.Type.MouseMove, _to_qpointf(pos), _to_qpointf(global_pos),
             Qt.NoButton, Qt.NoButton, Qt.NoModifier,
         )
 
-    _QApplication.postEvent(widget, move)
+    q_application.postEvent(widget, move)
     _process_events()
 
 
 def _press_key(widget, key_str: str):
     """Press a named key (Enter, Tab, etc.)."""
-    _import_qt()
-    Qt = _QtCore.Qt
+    qt_core = _qt_core_module()
+    Qt = qt_core.Qt
 
     qt_key = _key_to_qt(key_str)
     if qt_key is None:
@@ -3278,18 +3351,20 @@ def _press_key(widget, key_str: str):
     if QTest and hasattr(QTest, "QTest"):
         QTest = QTest.QTest
 
-    widget.setFocus()
+    _widget_set_focus(widget)
     _process_events()
 
     if QTest and hasattr(QTest, "keyClick"):
         QTest.keyClick(widget, qt_key)
     else:
-        QKeyEvent = _QtGui.QKeyEvent
-        QEvent = _QtCore.QEvent
+        qt_gui = _qt_gui_module()
+        q_application = _qt_application_class()
+        QKeyEvent = qt_gui.QKeyEvent
+        QEvent = qt_core.QEvent
         press = QKeyEvent(QEvent.Type.KeyPress, qt_key, Qt.NoModifier)
         release = QKeyEvent(QEvent.Type.KeyRelease, qt_key, Qt.NoModifier)
-        _QApplication.postEvent(widget, press)
-        _QApplication.postEvent(widget, release)
+        q_application.postEvent(widget, press)
+        q_application.postEvent(widget, release)
 
     _process_events()
 
@@ -3312,19 +3387,20 @@ def _select_option(widget, params: dict):
 
 def _scroll_widget(widget, delta_x: int = 0, delta_y: int = 0):
     """Scroll a widget."""
-    _import_qt()
-    QWheelEvent = _QtGui.QWheelEvent
-    Qt = _QtCore.Qt
-
+    qt_gui = _qt_gui_module()
+    qt_core = _qt_core_module()
+    q_application = _qt_application_class()
+    QWheelEvent = qt_gui.QWheelEvent
+    Qt = qt_core.Qt
     target = _primary_event_target(widget)
 
-    center = target.rect().center()
-    global_pos = target.mapToGlobal(center)
+    center = _widget_center_point(target)
+    global_pos = _widget_map_to_global(target, center)
 
     try:
-        QPoint = _QtCore.QPoint
+        QPoint = qt_core.QPoint
         event = QWheelEvent(
-            _QPointF(center), _QPointF(global_pos),
+            _to_qpointf(center), _to_qpointf(global_pos),
             QPoint(delta_x, delta_y),   # pixelDelta
             QPoint(delta_x, delta_y),   # angleDelta
             Qt.NoButton, Qt.NoModifier,
@@ -3337,13 +3413,15 @@ def _scroll_widget(widget, delta_x: int = 0, delta_y: int = 0):
             delta_y, Qt.NoButton, Qt.NoModifier,
         )
 
-    _QApplication.postEvent(target, event)
+    q_application.postEvent(target, event)
     _process_events()
 
 
 def _wait_for(params: dict) -> bool:
     """Wait for a widget condition to be met."""
     selector = params.get("selector")
+    if not isinstance(selector, str) or not selector:
+        raise ValueError("wait_for requires a non-empty selector")
     state = params.get("state", "visible")  # visible, hidden, enabled, disabled
     timeout = params.get("timeout", 30000)  # ms
     poll_interval = params.get("poll_interval", 100)  # ms
@@ -3489,7 +3567,7 @@ class _ClientHandler(threading.Thread):
         # Dispatch to Qt main thread via event
         future = Future()
         event = self.command_event_cls(req, future)
-        _QApplication.postEvent(self.dispatcher, event)
+        _qt_application_class().postEvent(self.dispatcher, event)
 
         try:
             result = future.result(timeout=60)
@@ -3510,7 +3588,7 @@ class _ClientHandler(threading.Thread):
     def _run_on_main_thread(self, callback, *, timeout: float) -> None:
         future = Future()
         event = self.main_thread_call_event_cls(callback, future)
-        _QApplication.postEvent(self.dispatcher, event)
+        _qt_application_class().postEvent(self.dispatcher, event)
         try:
             future.result(timeout=timeout)
         except Exception:
@@ -3604,7 +3682,7 @@ def start_agent(
     _VISUAL_FEEDBACK_ENABLED = bool(visual_feedback)
 
     if app is None:
-        app = _QApplication.instance()
+        app = _qt_application_class().instance()
     if app is None:
         raise RuntimeError("No QApplication instance found. Create one first.")
 
