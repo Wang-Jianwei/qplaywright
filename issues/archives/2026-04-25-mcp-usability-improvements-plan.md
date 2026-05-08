@@ -176,7 +176,7 @@ Let callers request a small verified widget-state payload after actions without 
   - `value`
 - `include_state` and `include_snapshot` are independent flags and may both be `true` in the same request.
 - `include_state` returns target-level post-action widget state.
-- `include_snapshot` continues to return the heavier window-level text snapshot and refs.
+- `include_snapshot` continues to return the heavier window-level text snapshot together with stable-handle snapshot metadata.
 - Do not claim that a state changed unless the server actually compared before and after values.
 - Keep click failure behavior unchanged: disabled or obstructed widgets should still fail before returning `ok=true`.
 

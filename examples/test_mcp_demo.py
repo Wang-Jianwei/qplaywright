@@ -136,11 +136,11 @@ async def _select_window(
     return await _call_tool(session, "window", arguments)
 
 
-def _refs_by_target(snapshot: dict[str, Any]) -> dict[str, str]:
+def _handles_by_target(snapshot: dict[str, Any]) -> dict[str, str]:
     return {
-        entry["target"]: entry["ref"]
-        for entry in snapshot.get("refs", [])
-        if entry.get("target") and entry.get("ref")
+        f"#{entry['object_name']}": entry["handle"]
+        for entry in snapshot.get("widgets", [])
+        if entry.get("object_name") and entry.get("handle")
     }
 
 

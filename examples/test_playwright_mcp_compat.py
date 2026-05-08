@@ -1,4 +1,4 @@
-"""Manual end-to-end test for a snapshot-ref driven MCP flow."""
+"""Manual end-to-end test for a stable-handle driven MCP flow."""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ from examples.test_mcp_demo import (
     _attach_session,
     _call_tool,
     _close_session,
+    _handles_by_target,
     _list_windows,
     _project_root,
     _python_path_env,
-    _refs_by_target,
 )
 
 
@@ -95,55 +95,55 @@ async def main() -> None:
                 snapshot = await _call_tool(session, "snapshot", {"depth": 3})
                 print(snapshot["snapshot"])
 
-                refs_by_target = _refs_by_target(snapshot)
-                username_ref = refs_by_target["#username"]
-                password_ref = refs_by_target["#password"]
-                remember_ref = refs_by_target["#remember"]
-                role_ref = refs_by_target["#role"]
-                environment_ref = refs_by_target["#environment"]
-                notify_ref = refs_by_target["#notify"]
-                notes_ref = refs_by_target["#notes"]
-                login_ref = refs_by_target["#login_btn"]
+                handles_by_target = _handles_by_target(snapshot)
+                username_handle = handles_by_target["#username"]
+                password_handle = handles_by_target["#password"]
+                remember_handle = handles_by_target["#remember"]
+                role_handle = handles_by_target["#role"]
+                environment_handle = handles_by_target["#environment"]
+                notify_handle = handles_by_target["#notify"]
+                notes_handle = handles_by_target["#notes"]
+                login_handle = handles_by_target["#login_btn"]
 
                 await _call_tool(
                     session,
                     "input",
-                    {"target": username_ref, "text": "admin"},
+                    {"target": username_handle, "text": "admin"},
                 )
                 await _call_tool(
                     session,
                     "input",
-                    {"target": password_ref, "text": "secret123"},
+                    {"target": password_handle, "text": "secret123"},
                 )
                 await _call_tool(
                     session,
                     "input",
-                    {"target": notes_ref, "text": "Reviewed by snapshot ref flow"},
+                    {"target": notes_handle, "text": "Reviewed by stable handle flow"},
                 )
 
-                username_value = await _call_tool(session, "inspect", {"target": username_ref})
+                username_value = await _call_tool(session, "inspect", {"target": username_handle})
                 assert username_value["value"] == "admin"
 
                 await _call_tool(
                     session,
                     "choose",
-                    {"target": role_ref, "label": "Admin"},
+                    {"target": role_handle, "label": "Admin"},
                 )
                 await _call_tool(
                     session,
                     "choose",
-                    {"target": environment_ref, "label": "Production"},
+                    {"target": environment_handle, "label": "Production"},
                 )
                 await _call_tool(
                     session,
                     "click",
-                    {"target": remember_ref},
+                    {"target": remember_handle},
                 )
-                await _call_tool(session, "click", {"target": notify_ref})
+                await _call_tool(session, "click", {"target": notify_handle})
                 login_result = await _call_tool(
                     session,
                     "click",
-                    {"target": login_ref, "include_snapshot": True},
+                    {"target": login_handle, "include_snapshot": True},
                 )
                 print(f"Login click snapshot: {login_result['snapshot']}")
 
@@ -155,9 +155,9 @@ async def main() -> None:
                 assert login_button["exists"] is True
 
                 status_snapshot = await _call_tool(session, "snapshot", {"depth": 3})
-                status_ref = _refs_by_target(status_snapshot)["#status"]
+                status_handle = _handles_by_target(status_snapshot)["#status"]
 
-                status = await _call_tool(session, "snapshot", {"target": status_ref, "depth": 0})
+                status = await _call_tool(session, "snapshot", {"target": status_handle, "depth": 0})
                 print(f"Status snapshot: {status['snapshot']}")
                 assert "payment=JPY 90.9 precision=1 adjustments=on" in status["snapshot"]
 
@@ -169,7 +169,7 @@ async def main() -> None:
                 print(f"Screenshot: {screenshot}")
 
                 await _close_session(session)
-                print("Snapshot-ref flow completed")
+                print("Stable-handle flow completed")
     finally:
         demo_process.terminate()
         try:

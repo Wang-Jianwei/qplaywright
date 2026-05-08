@@ -208,7 +208,7 @@ D:/Python/Python312/python.exe examples/demo_app.py
 
 ### 4. snapshot 有结果，但后续操作找不到控件
 
-优先使用 `snapshot` 返回的 `ref` 继续做后续操作，而不是重新猜 selector。当前终态工具面已经支持稳定 ref，可以直接把 `e1`、`e2` 这类 ref 传回给动作工具。
+优先使用 `snapshot` 或 `find` 返回的 stable handle 继续做后续操作，而不是重新猜 selector。当前工具面已经支持稳定 handle，可以直接把 `w1`、`w2` 这类 handle 传回给动作工具。
 
 ### 5. OpenCode 看起来像“启动了 MCP”，但一调用就失败
 

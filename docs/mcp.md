@@ -163,7 +163,7 @@ Targeted tools accept a single `target` value.
 That value may be either:
 
 - a qplaywright selector such as `#amount_editor`, `role=button`, `text=Submit`, or `.QLabel`
-- a snapshot ref such as `e12`
+- a stable widget handle such as `w12`
 - a structured item target object such as `{"owner": "#orders_table", "item": {"kind": "table_cell", "row": 3, "column": 1}}`
 - a structured item target object such as `{"owner": "#settings_tree", "item": {"kind": "tree_node", "path": [0, 1]}}`
 - a structured item target object such as `{"owner": "#task_list", "item": {"kind": "list_item", "row": 2}}`
@@ -171,7 +171,7 @@ That value may be either:
 
 The selector side of `target` keeps the existing atomic qplaywright forms.
 This contract does not define inline composite syntax such as `role=button >> has-text=Submit`.
-When you need compound disambiguation, use `snapshot` or `inspect` first, then continue with the returned snapshot ref.
+When you need compound disambiguation, use `snapshot`, `find`, or `inspect` first, then continue with the returned stable handle.
 When you need structured item descendants, first resolve the owner widget, then call `inspect_items` and reuse the returned item `target` objects.
 
 ### Optional Post-Action Observation
@@ -182,7 +182,8 @@ When `include_snapshot=true`, the response also includes:
 - `window_changed`
 - `active_window`
 - `snapshot`
-- `refs`
+- `root_handle`
+- `widgets`
 
 Action tools also support `include_state=false` by default.
 When `include_state=true`, the response includes a compact target-level `state`
@@ -296,25 +297,21 @@ Response includes:
 - `session`
 - `window`
 - `target`
+- `root_handle`
 - `snapshot`
-- `refs`
-- `epoch` — monotonically increasing snapshot epoch counter; increments on every snapshot call
+- `widgets`
 - optional `warnings`
 - optional `save_to`
 
-Each snapshot ref entry includes:
+Each snapshot widget entry includes:
 
-- `ref`
-- `wid`
-- `target`
+- `handle`
 - `class`
 - `geometry`
-- any meaningful semantic label fields such as `text`, `accessibleName`, `currentText`, `windowTitle`, or `value`
+- any meaningful semantic label fields such as `label`, `text`, `accessible_name`, `current_text`, `window_title`, or `value`
 
-Snapshot refs are valid only for the current snapshot epoch. Every snapshot call clears all previous refs and
-assigns new ones starting from `e1`. If you use a ref from an older snapshot after a newer snapshot has been taken,
-the operation fails with an error like `Snapshot ref 'e3' has expired (current snapshot epoch is 2). Run snapshot
-to refresh refs`. Use the `epoch` field in the snapshot response to detect stale refs.
+Stable widget handles are session-stable. They survive later `snapshot`, `find`, and `inspect` calls, and only fail
+once the widget is destroyed or the session is replaced.
 
 When `topmost_only=true` and `target` is omitted, the result is an approximate
 frontmost-visible view. It may omit widgets or content and returns a warning to
@@ -322,6 +319,29 @@ make that limitation explicit.
 By default, `snapshot` filters common Qt infrastructure widgets such as internal
 scroll-area support nodes. Set `include_infrastructure=true` when you need the
 raw tree for debugging.
+
+### find
+
+Request:
+
+```json
+{
+  "root": "#payment_panel",
+  "role": "button",
+  "has_text": "Submit",
+  "visible": true,
+  "limit": 5
+}
+```
+
+`find` performs server-side widget discovery within one root scope and returns a
+small deterministic candidate set. Response fields include:
+
+- `root_handle`
+- `count`
+- `truncated`
+- `results`, where each entry includes `handle`, `class`, optional semantic fields,
+  `match_reason`, and optional `ancestor_summary`
 
 ### inspect
 
@@ -364,7 +384,7 @@ Request:
 `inspect_items` enumerates structured descendants for one table, tree, list, or tab owner widget.
 Each returned entry includes an `item` descriptor plus a reusable `target` object in the form `{owner, item}`.
 Use those returned `target` objects directly with `inspect`, `click`, `hover`, `wait`, and `set_expanded`.
-Snapshot refs remain widget-only; item discovery is handled by `inspect_items`.
+Stable widget handles remain widget-only; item discovery is handled by `inspect_items`.
 When `snapshot` or widget-tree `inspect` encounters a table, tree, or list owner widget, it may include an `itemView`
 hint so the next discovery step is explicit instead of implying that per-cell delegates are normal widget descendants.
 
@@ -377,7 +397,7 @@ Common action request shape:
 
 ```json
 {
-  "target": "e12",
+  "target": "w12",
   "include_state": false,
   "include_snapshot": true
 }
@@ -484,4 +504,4 @@ Supported selectors match the existing qplaywright syntax:
 - `.QLabel`
 
 Composite selector grammar is intentionally not part of the current contract.
-For cases like "button whose text contains Submit", first discover the right widget with `snapshot` or `inspect`, then reuse its snapshot ref.
+For cases like "button whose text contains Submit", first discover the right widget with `snapshot`, `find`, or `inspect`, then reuse its stable handle.

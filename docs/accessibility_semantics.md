@@ -309,7 +309,7 @@ but it must not rewrite the underlying widget data model by turning
 `accessibleName` into `text`.
 
 The `[a11y]` marker should coexist with other existing snapshot markers such as
-`[active]` and `[ref=eN]` on the same line. Snapshot parsers should handle
+`[active]` and `[handle=wN]` on the same line. Snapshot parsers should handle
 multiple bracket-delimited markers per entry.
 
 ### Inspect Output

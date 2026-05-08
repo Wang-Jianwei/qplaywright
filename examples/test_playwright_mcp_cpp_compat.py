@@ -1,4 +1,4 @@
-"""Manual end-to-end test for playwright-mcp style tools against the C++ demo."""
+"""Manual end-to-end test for a stable-handle MCP flow against the C++ demo."""
 
 from __future__ import annotations
 
@@ -14,7 +14,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from examples.test_mcp_cpp_demo import _cpp_demo_env, _find_cpp_demo_executable
-from examples.test_mcp_demo import _call_tool, _project_root
+from examples.test_mcp_demo import (
+    _attach_session,
+    _call_tool,
+    _close_session,
+    _handles_by_target,
+    _list_windows,
+    _project_root,
+)
 
 
 async def main() -> None:
@@ -36,107 +43,77 @@ async def main() -> None:
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                await _call_tool(session, "connect", {"name": "cpp-demo", "port": 19876, "timeout": 10.0})
+                await _attach_session(session, port=19876, timeout=60.0)
 
                 await _call_tool(
                     session,
-                    "invoke_widget_method",
+                    "invoke",
                     {
-                        "connection": "cpp-demo",
-                        "selector": "#amount_editor",
-                        "method_name": "setAmount",
+                        "target": "#amount_editor",
+                        "method": "setAmount",
                         "args": {"value": "88.50"},
                     },
                 )
 
-                tabs = await _call_tool(session, "browser_tabs", {"action": "list", "connection": "cpp-demo"})
-                print(f"Tabs: {tabs['result']}")
+                tabs = await _list_windows(session)
+                print(f"Tabs: {tabs}")
 
-                snapshot = await _call_tool(session, "browser_snapshot", {"connection": "cpp-demo", "depth": 3})
+                snapshot = await _call_tool(session, "snapshot", {"depth": 3})
                 print(snapshot["snapshot"])
 
-                refs_by_target = {
-                    entry["target"]: entry["ref"]
-                    for entry in snapshot["refs"]
-                    if entry.get("target") and entry.get("ref")
-                }
-
-                username_ref = refs_by_target["#username"]
-                password_ref = refs_by_target["#password"]
-                role_ref = refs_by_target["#role"]
-                login_ref = refs_by_target["#login_btn"]
-                status_ref = refs_by_target["#status"]
+                handles_by_target = _handles_by_target(snapshot)
+                username_handle = handles_by_target["#username"]
+                password_handle = handles_by_target["#password"]
+                role_handle = handles_by_target["#role"]
+                login_handle = handles_by_target["#login_btn"]
+                status_handle = handles_by_target["#status"]
 
                 await _call_tool(
                     session,
-                    "browser_fill_form",
-                    {
-                        "connection": "cpp-demo",
-                        "fields": [
-                            {"target": username_ref, "value": "admin"},
-                            {"target": password_ref, "value": "secret123"},
-                        ],
-                    },
+                    "input",
+                    {"target": username_handle, "text": "admin"},
                 )
                 await _call_tool(
                     session,
-                    "browser_verify_value",
-                    {
-                        "connection": "cpp-demo",
-                        "type": "textbox",
-                        "element": "Username field",
-                        "target": username_ref,
-                        "value": "admin",
-                    },
+                    "input",
+                    {"target": password_handle, "text": "secret123"},
                 )
+                username_value = await _call_tool(session, "inspect", {"target": username_handle})
+                assert username_value["value"] == "admin"
+
                 await _call_tool(
                     session,
-                    "browser_select_option",
-                    {"connection": "cpp-demo", "target": role_ref, "values": ["Admin"]},
+                    "choose",
+                    {"target": role_handle, "label": "Admin"},
                 )
                 login_result = await _call_tool(
                     session,
-                    "browser_click",
-                    {"connection": "cpp-demo", "target": login_ref},
+                    "click",
+                    {"target": login_handle, "include_snapshot": True},
                 )
                 print(f"Login click snapshot: {login_result['snapshot']}")
 
-                await _call_tool(
-                    session,
-                    "browser_wait_for",
-                    {"connection": "cpp-demo", "text": "Logged in as admin", "timeout": 5.0},
-                )
-                await _call_tool(
-                    session,
-                    "browser_verify_text_visible",
-                    {"connection": "cpp-demo", "text": "amount=88.50"},
-                )
-                await _call_tool(
-                    session,
-                    "browser_verify_element_visible",
-                    {
-                        "connection": "cpp-demo",
-                        "role": "button",
-                        "accessibleName": "Login",
-                    },
-                )
+                await _call_tool(session, "wait", {"target": "#status", "condition": "text_contains", "expected": "Logged in as admin", "timeout": 5.0})
+                status_text = await _call_tool(session, "inspect", {"target": status_handle})
+                assert "Logged in as admin" in status_text["text"]
+                assert "amount=88.50" in status_text["text"]
 
                 status = await _call_tool(
                     session,
-                    "browser_snapshot",
-                    {"connection": "cpp-demo", "target": status_ref, "depth": 0},
+                    "snapshot",
+                    {"target": status_handle, "depth": 0},
                 )
                 print(f"Status snapshot: {status['snapshot']}")
 
                 screenshot = await _call_tool(
                     session,
-                    "browser_take_screenshot",
-                    {"connection": "cpp-demo", "filename": str(screenshot_path)},
+                    "screenshot",
+                    {"path": str(screenshot_path)},
                 )
                 print(f"Screenshot: {screenshot}")
 
-                await _call_tool(session, "disconnect", {"name": "cpp-demo"})
-                print("C++ playwright-style compatibility flow completed")
+                await _close_session(session)
+                print("C++ stable-handle flow completed")
     finally:
         demo_process.terminate()
         try:

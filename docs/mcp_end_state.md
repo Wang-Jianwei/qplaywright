@@ -94,16 +94,16 @@ MCP 工具应该表达高层意图，例如：
 
 模型不应该在每次动作后都手动检查一次窗口是否变化。
 
-### 4. Snapshot refs are first-class
+### 4. Stable widget handles are first-class
 
-对 LLM 来说，快照 ref 是最适合持续交互的定位形式之一。
+对 LLM 来说，session-stable widget handle 是最适合持续交互的定位形式之一。
 
 终态里，target 应统一接受两类输入：
 
 - selector
-- snapshot ref
+- stable widget handle
 
-模型先通过 `snapshot` 获取 ref，再用 ref 驱动 click、input、invoke、screenshot。
+模型先通过 `snapshot` 或 `find` 获取 handle，再用 handle 驱动 click、input、invoke、screenshot。
 
 统一 target 解析是所有终态工具的基础设施，应尽早落地。
 
@@ -111,7 +111,7 @@ MCP 工具应该表达高层意图，例如：
 
 - 终态里的 `target` 统一成一个字符串，并不等于必须把复合条件语法也塞进这个字符串
 - 终态契约可以保持 selector 语法的原子性，例如 `role=button`、`text=Submit`、`has-text=partial`
-- 当需要“role=button 且文本包含 Submit”这类复合约束时，更清晰的终态路径是先 `snapshot` 或 `inspect` 缩小范围，再使用 ref 继续动作，而不是在 selector 中引入一套新的布尔语法
+- 当需要“role=button 且文本包含 Submit”这类复合约束时，更清晰的终态路径是先 `snapshot`、`find` 或 `inspect` 缩小范围，再使用 handle 继续动作，而不是在 selector 中引入一套新的布尔语法
 
 ### 5. Invoke is not an extension feature, it is a core feature
 
@@ -136,7 +136,7 @@ Qt 业务自动化的中心应当是：
 推荐形式：
 
 - `include_snapshot: false` 为默认值
-- 当为 `true` 时，服务端附带 post-action snapshot 和 refs
+- 当为 `true` 时，服务端附带 post-action snapshot、`root_handle` 和 `widgets`
 
 这样既保留高效路径，也保留单轮观察路径。
 
@@ -210,7 +210,7 @@ Qt 业务自动化的中心应当是：
 
 ### 3. snapshot
 
-职责：返回当前窗口或某个目标的文本快照和稳定 refs。
+职责：返回当前窗口或某个目标的文本快照和稳定 widget handles。
 
 建议参数：
 
@@ -223,7 +223,8 @@ Qt 业务自动化的中心应当是：
 
 - `session`
 - `snapshot`
-- `refs`
+- `root_handle`
+- `widgets`
 - `target`
 - `window`
 
@@ -514,14 +515,14 @@ Qt 业务自动化的中心应当是：
 `target` 可以是：
 
 - qplaywright selector
-- snapshot ref
+- stable widget handle
 
 示例：
 
 - `#amount_editor`
 - `role=button`
 - `text=保存`
-- `e12`
+- `w12`
 
 终态不鼓励把以下参数复制到所有工具里：
 
@@ -547,7 +548,7 @@ Qt 业务自动化的中心应当是：
 - `snapshot` 只由 `snapshot` 作为主入口提供
 - 动作工具默认返回精简结构
 - 动作工具统一支持 `include_snapshot`
-- 当 `include_snapshot=true` 时，返回值附带 post-action snapshot 和 refs
+- 当 `include_snapshot=true` 时，返回值附带 post-action snapshot、`root_handle` 和 `widgets`
 - 对可能导致窗口切换的动作，返回值可附带 `window_changed` 和 `active_window`
 
 推荐示例：
@@ -555,14 +556,15 @@ Qt 业务自动化的中心应当是：
 ```json
 {
   "ok": true,
-  "target": "e12",
+  "target": "w12",
   "window_changed": true,
   "active_window": {
     "wid": 9,
     "title": "Confirm"
   },
   "snapshot": "...",
-  "refs": []
+  "root_handle": "w9",
+  "widgets": []
 }
 ```
 
@@ -651,26 +653,26 @@ Qt 业务自动化的中心应当是：
 
 - 当前 active session
 - 当前 active window
-- 当前 snapshot refs
+- 当前 stable widget handle registry
 
 并且应在每次动作后检查：
 
 - active window 是否变化
 - focus widget 是否变化
-- refs 是否需要失效或重建
+- handle 是否因为 widget 销毁或 session 重建而自然失效
 
 这样模型不需要在每个工具里重新组装上下文。
 
-## Ref Lifecycle
+## Handle Lifecycle
 
-snapshot refs 不是永久标识符，终态文档必须明确它们的失效规则。
+stable widget handles 不是跨 session 的永久标识符，终态文档必须明确它们的生命周期规则。
 
 推荐规则：
 
-- 窗口切换时清空 refs
-- 重新连接时清空 refs
-- 目标控件被销毁时，ref 解析失败并由服务端返回显式错误
-- 当一次动作触发新的 snapshot 生成时，以最新 snapshot 的 ref 集为准
+- 窗口切换时不清空 handles
+- 重新连接时清空 handles
+- 目标控件被销毁时，handle 解析失败并由服务端返回显式 stale-handle 错误
+- `snapshot`、`find`、`inspect` 只会扩展或复用当前 handle 集，不会因为再次观察而整体换号
 
 ## Example Flow
 
@@ -680,7 +682,7 @@ snapshot refs 不是永久标识符，终态文档必须明确它们的失效规
 2. `window {"action": "list"}`
 3. `window {"action": "select", "index": 0}`
 4. `snapshot {"depth": 6}`
-5. `click {"target": "e12", "include_snapshot": true}`
+5. `click {"target": "w12", "include_snapshot": true}`
 6. `input {"target": "#amount_editor", "text": "123.45", "mode": "replace", "submit": false}`
 7. `invoke {"target": "#amount_editor", "method": "setCurrency", "args": {"code": "CNY"}}`
 8. `scroll {"target": "#result_table", "delta_y": 480, "include_snapshot": true}`
@@ -709,7 +711,7 @@ snapshot refs 不是永久标识符，终态文档必须明确它们的失效规
 ### Phase 2
 
 - 让工具默认作用于当前 active window
-- 让 snapshot ref 成为标准定位方式
+- 让 stable widget handle 成为标准定位方式
 - 为动作工具加入 `include_snapshot` 和 `window_changed` 返回约定
 - 收拢 `select_option` 到 `choose`
 

@@ -11,7 +11,7 @@
 - JSON 字段统一使用 `snake_case`
 - 成功响应统一包含 `ok: true`
 - 除非特别说明，目标工具在 `target` 匹配多个控件时不报错，而是返回第一个匹配项的标量字段，同时用 `count` 暴露总匹配数
-- `target` 的 selector 语法保持原子匹配，不在终态契约中定义内联布尔组合语法；需要组合条件时，先用 `snapshot` 或 `inspect` 缩小范围，再使用 snapshot ref
+- `target` 的 selector 语法保持原子匹配，不在终态契约中定义内联布尔组合语法；需要组合条件时，先用 `snapshot`、`find` 或 `inspect` 缩小范围，再使用 stable handle
 
 ## Request Model
 
@@ -33,12 +33,12 @@
 
 解释规则：
 
-1. 如果值匹配当前 ref 表中的键，例如 `e12`，按 snapshot ref 解析。
+1. 如果值匹配当前 stable handle 形状，例如 `w12`，按 stable handle 解析。
 2. 否则按 qplaywright selector 解析。
 
 示例：
 
-- `e12`
+- `w12`
 - `#amount_editor`
 - `role=button`
 - `text=保存`
@@ -47,7 +47,7 @@
 
 - 终态契约中的 selector 仍沿用 qplaywright 的单表达式语法，例如 `role=button`、`text=保存`、`has-text=partial`
 - 终态契约当前不定义 `role=button >> has-text=Submit` 或 `role=button[has-text=Submit]` 这类复合语法
-- 当需要“角色 + 文本”等复合定位时，推荐流程是先 `snapshot` 或 `inspect` 观察并拿到更稳定的 target，再使用 snapshot ref 继续动作
+- 当需要“角色 + 文本”等复合定位时，推荐流程是先 `snapshot`、`find` 或 `inspect` 观察并拿到更稳定的 target，再使用 stable handle 继续动作
 
 ### Include Snapshot
 
@@ -90,14 +90,13 @@
 - `is_modal`: 是否为模态窗口
 - `geometry`: 窗口布局数据，统一使用 `{x, y, width, height}`
 
-### RefEntry
+### SnapshotWidgetEntry
 
 ```json
 {
-  "ref": "e12",
-  "wid": 103,
-  "target": "#amount_editor",
+  "handle": "w12",
   "class": "FancyAmountEdit",
+  "object_name": "amount_editor",
   "geometry": {
     "x": 12,
     "y": 48,
@@ -155,18 +154,20 @@
     }
   },
   "snapshot": "...",
-  "refs": []
+  "root_handle": "w9",
+  "widgets": []
 }
 ```
 
-其中 `refs` 的元素类型为 `RefEntry[]`。
+其中 `widgets` 的元素类型为 `SnapshotWidgetEntry[]`。
 
 字段说明：
 
 - `window_changed`: 本次动作后 active window 是否变化
 - `active_window`: 当前 active window 摘要
 - `snapshot`: post-action 文本快照
-- `refs`: 与该快照一致的 ref 集
+- `root_handle`: post-action snapshot 的根 handle
+- `widgets`: 与该快照一致的 widget handle 集
 
 ## Error Model
 
@@ -374,19 +375,19 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 - 当 `action="close"` 且关闭的是当前 active window 时，服务端应自动把 `active_window` 切换到下一个可见窗口
 - 如果没有剩余可见窗口，则 `active_window` 允许为 `null`
-- 当 `close` 导致 active window 变化时，refs 按 `select` 的同一规则处理并清空；旧窗口上下文中的 snapshot ref 不再可用
+- 当 `close` 导致 active window 变化时，active window 作用域随之更新；已有 stable handle 不会仅因切窗而整体失效
 
 ## Snapshot
 
 工具名：`snapshot`
 
-职责：返回当前窗口或某个目标的文本快照和稳定 refs。
+职责：返回当前窗口或某个目标的文本快照和稳定 handles。
 
 ### Snapshot Request
 
 ```json
 {
-  "target": "e12",
+  "target": "w12",
   "depth": 8,
   "topmost_only": false,
   "save_to": "snapshot.txt"
@@ -412,12 +413,9 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "launched_executable": null
   },
   "window": {
-    "wid": 1,
+    "handle": "w1",
     "title": "QPlaywright Demo App",
     "class": "DemoWindow",
-    "index": 0,
-    "is_active": true,
-    "is_modal": false,
     "geometry": {
       "x": 0,
       "y": 0,
@@ -426,8 +424,9 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     }
   },
   "target": null,
+  "root_handle": "w1",
   "snapshot": "...",
-  "refs": [],
+  "widgets": [],
   "warnings": [
     "topmost_only is an approximate frontmost-visible filter and may omit widgets or content. Rerun with topmost_only=false when you need a complete tree."
   ],
@@ -435,7 +434,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
-其中 `refs` 的元素类型为 `RefEntry[]`。
+其中 `widgets` 的元素类型为 `SnapshotWidgetEntry[]`。
 当 `topmost_only=true` 且 `target=null` 时，`warnings` 应明确指出结果可能不完整。
 
 ## Inspect
@@ -548,7 +547,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 ```json
 {
-  "target": "e12",
+  "target": "w12",
   "count": 1,
   "include_snapshot": false
 }
@@ -565,7 +564,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 ```json
 {
   "ok": true,
-  "target": "e12",
+  "target": "w12",
   "count": 1,
   "window_changed": false,
   "active_window": {
@@ -1098,16 +1097,16 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 - 当提供 `path` 时，响应返回 `path`
 - 当省略 `path` 时，响应返回 `data`，其值为 PNG 图片的 base64 编码
 
-## Ref Lifetime Rules
+## Handle Lifetime Rules
 
-snapshot refs 的失效规则必须固定，不允许依赖调用方猜测。
+stable handles 的生命周期规则必须固定，不允许依赖调用方猜测。
 
 规则如下：
 
-1. 窗口切换时，refs 立即清空。
-2. session 重新 attach 或 launch 时，refs 立即清空。
-3. 目标控件被销毁后，旧 ref 解析必须失败，并返回明确错误。
-4. 每次生成新 snapshot 时，refs 以该 snapshot 返回值为准。
+1. 窗口切换时，handles 不会整体清空。
+2. session 重新 attach 或 launch 时，handles 立即清空。
+3. 目标控件被销毁后，旧 handle 解析必须失败，并返回明确的 stale-handle 错误。
+4. `snapshot`、`find`、`inspect` 会复用已有 handle，并为新看到的 widget 分配新 handle。
 
 ## Tool Discovery Guidance
 
