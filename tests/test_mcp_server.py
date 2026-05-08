@@ -215,6 +215,14 @@ def _item_target(owner: str = "#tree") -> dict[str, object]:
     }
 
 
+def _v2_snapshot_payload(label: str, *, handle: str = "w1", class_name: str = "DemoWindow") -> dict[str, object]:
+    return {
+        "snapshot": f"- {label} [handle={handle}]",
+        "root_handle": handle,
+        "widgets": [{"handle": handle, "class": class_name, "label": label}],
+    }
+
+
 def test_connect_connection_replaces_existing(monkeypatch):
     created: list[FakeQPlaywright] = []
 
@@ -933,7 +941,7 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
 
     def fake_snapshot_result(managed_connection, **kwargs):
         captured["kwargs"] = kwargs
-        return {"snapshot": "- Main [ref=e1]", "refs": [{"ref": "e1"}]}
+        return _v2_snapshot_payload("Main")
 
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
     monkeypatch.setattr(mcp_server, "_snapshot_result", fake_snapshot_result)
@@ -1127,7 +1135,7 @@ def test_snapshot_omits_topmost_warning_for_targeted_snapshot(monkeypatch):
     monkeypatch.setattr(
         mcp_server,
         "_snapshot_result",
-        lambda managed_connection, **kwargs: {"snapshot": "- Target [ref=e1]", "refs": [{"ref": "e1"}]},
+        lambda managed_connection, **kwargs: _v2_snapshot_payload("Target"),
     )
 
     result = mcp_server.snapshot(target="#amount", topmost_only=True)
@@ -1235,7 +1243,7 @@ def test_wait_can_include_snapshot(monkeypatch):
     monkeypatch.setattr(
         mcp_server,
         "_action_result_with_snapshot",
-        lambda managed_connection, **payload: payload | {"snapshot": "- DemoWindow [ref=e1]", "refs": [{"ref": "e1"}]},
+        lambda managed_connection, **payload: payload | _v2_snapshot_payload("DemoWindow"),
     )
 
     result = mcp_server.wait(target="#status_label", state="visible", timeout=5.0, include_snapshot=True)
@@ -1245,8 +1253,10 @@ def test_wait_can_include_snapshot(monkeypatch):
     assert result["target"] == "#status_label"
     assert result["window_changed"] is False
     assert result["active_window"]["wid"] == 11
-    assert result["snapshot"] == "- DemoWindow [ref=e1]"
-    assert result["refs"] == [{"ref": "e1"}]
+    assert result["snapshot"] == "- DemoWindow [handle=w1]"
+    assert result["root_handle"] == "w1"
+    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow", "label": "DemoWindow"}]
+    assert "refs" not in result
 
 
 def test_wait_can_use_text_contains_condition(monkeypatch):
@@ -1372,7 +1382,7 @@ def test_finalize_action_result_can_include_state_and_snapshot_together(monkeypa
     monkeypatch.setattr(
         mcp_server,
         "_action_result_with_snapshot",
-        lambda managed_connection, **payload: payload | {"snapshot": "- DemoWindow [ref=e1]", "refs": [{"ref": "e1"}]},
+        lambda managed_connection, **payload: payload | _v2_snapshot_payload("DemoWindow"),
     )
 
     result = mcp_server._finalize_action_result(
@@ -1386,8 +1396,10 @@ def test_finalize_action_result_can_include_state_and_snapshot_together(monkeypa
     )
 
     assert result["state"]["visible"] is True
-    assert result["snapshot"] == "- DemoWindow [ref=e1]"
-    assert result["refs"] == [{"ref": "e1"}]
+    assert result["snapshot"] == "- DemoWindow [handle=w1]"
+    assert result["root_handle"] == "w1"
+    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow", "label": "DemoWindow"}]
+    assert "refs" not in result
 
 
 def test_wait_rejects_undocumented_state(monkeypatch):
@@ -1488,7 +1500,7 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
     monkeypatch.setattr(
         mcp_server,
         "_action_result_with_snapshot",
-        lambda managed_connection, **payload: payload | {"snapshot": "- DemoWindow [ref=e1]", "refs": [{"ref": "e1"}]},
+        lambda managed_connection, **payload: payload | _v2_snapshot_payload("DemoWindow"),
     )
 
     result = getattr(mcp_server, tool_name)(**call_kwargs)
@@ -1499,8 +1511,10 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
     assert result["active_window"]["wid"] == 11
     for key, value in expected_payload.items():
         assert result[key] == value
-    assert result["snapshot"] == "- DemoWindow [ref=e1]"
-    assert result["refs"] == [{"ref": "e1"}]
+    assert result["snapshot"] == "- DemoWindow [handle=w1]"
+    assert result["root_handle"] == "w1"
+    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow", "label": "DemoWindow"}]
+    assert "refs" not in result
 
 
 def test_finalize_action_result_switches_active_window_and_uses_window_snapshot(monkeypatch):
@@ -1523,7 +1537,7 @@ def test_finalize_action_result_switches_active_window_and_uses_window_snapshot(
 
     def fake_action_result_with_snapshot(managed_connection, *, target=None, **payload):
         captured["target"] = target
-        return payload | {"snapshot": "- QDialog [ref=e1]", "refs": [{"ref": "e1"}]}
+        return payload | _v2_snapshot_payload("QDialog", class_name="QDialog")
 
     monkeypatch.setattr(mcp_server, "_action_result_with_snapshot", fake_action_result_with_snapshot)
 
@@ -2519,18 +2533,20 @@ def test_action_result_with_snapshot_merges_payload(monkeypatch):
     monkeypatch.setattr(
         mcp_server,
         "_snapshot_result",
-        lambda managed_connection, **kwargs: {"snapshot": "- item [ref=e1]", "refs": [{"ref": "e1"}]},
+        lambda managed_connection, **kwargs: _v2_snapshot_payload("item"),
     )
 
     result = mcp_server._action_result_with_snapshot(
         connection,
-        target="e1",
+        target="w1",
         ok=True,
     )
 
     assert result["ok"] is True
-    assert result["snapshot"] == "- item [ref=e1]"
-    assert result["refs"] == [{"ref": "e1"}]
+    assert result["snapshot"] == "- item [handle=w1]"
+    assert result["root_handle"] == "w1"
+    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow", "label": "item"}]
+    assert "refs" not in result
 
 
 def test_widget_tree_raw_includes_optional_window_wid():
