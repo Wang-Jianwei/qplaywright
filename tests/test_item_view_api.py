@@ -396,9 +396,10 @@ class FakeTableIndex:
 
 
 class FakeTableModel:
-    def __init__(self, rows: list[list[str]], headers: list[str]):
+    def __init__(self, rows: list[list[str]], headers: list[str], edit_rows: list[list[str | None]] | None = None):
         self._rows = rows
         self._headers = headers
+        self._edit_rows = edit_rows
 
     def rowCount(self) -> int:
         return len(self._rows)
@@ -413,6 +414,8 @@ class FakeTableModel:
     def data(self, index: FakeTableIndex, role=None):
         if not index.isValid():
             return None
+        if role == 2 and self._edit_rows is not None:
+            return self._edit_rows[index.row()][index.column()]
         return self._rows[index.row()][index.column()]
 
     def headerData(self, section: int, orientation, role=None):
@@ -430,9 +433,10 @@ class FakeSelectionModel:
 
 
 class FakeTreeNode:
-    def __init__(self, text: str, children: list[FakeTreeNode] | None = None):
+    def __init__(self, text: str, children: list[FakeTreeNode] | None = None, *, edit_text: str | None = None):
         self.text = text
         self.children = list(children or [])
+        self.edit_text = edit_text
 
 
 class FakeTreeIndex:
@@ -485,6 +489,8 @@ class FakeTreeModel:
     def data(self, index: FakeTreeIndex, role=None):
         if not index.isValid() or index._node is None:
             return None
+        if role == 2 and index._node.edit_text is not None:
+            return index._node.edit_text
         return index._node.text
 
     def text_path(self, index: FakeTreeIndex) -> tuple[str, ...]:
@@ -528,8 +534,9 @@ class FakeListIndex:
 
 
 class FakeListModel:
-    def __init__(self, items: list[str]):
+    def __init__(self, items: list[str], edit_items: list[str | None] | None = None):
         self._items = items
+        self._edit_items = edit_items
 
     def rowCount(self) -> int:
         return len(self._items)
@@ -541,6 +548,8 @@ class FakeListModel:
     def data(self, index: FakeListIndex, role=None):
         if not index.isValid():
             return None
+        if role == 2 and self._edit_items is not None:
+            return self._edit_items[index.row()]
         return self._items[index.row()]
 
 
@@ -550,6 +559,14 @@ class FakeListSelectionModel:
 
     def isSelected(self, index: FakeListIndex) -> bool:
         return index.row() in self._selected_rows
+
+
+class FakeComboEditor:
+    def __init__(self, current_text: str):
+        self._current_text = current_text
+
+    def currentText(self) -> str:
+        return self._current_text
 
 
 class FakeTabPage:
@@ -689,14 +706,17 @@ class FakeTableView:
         hidden_columns: set[int] | None = None,
         rects: dict[tuple[int, int], FakeRect] | None = None,
         selected: set[tuple[int, int]] | None = None,
+        edit_rows: list[list[str | None]] | None = None,
+        editors: dict[tuple[int, int], object] | None = None,
         class_name: str = "QTableView",
     ):
         self._meta = FakeMetaObject(class_name)
-        self._model = FakeTableModel(rows, headers)
+        self._model = FakeTableModel(rows, headers, edit_rows=edit_rows)
         self._viewport = FakeViewport()
         self._hidden_columns = set(hidden_columns or set())
         self._rects = dict(rects or {})
         self._selection_model = FakeSelectionModel(selected)
+        self._editors = dict(editors or {})
         self.scroll_calls: list[tuple[int, int, tuple[object, ...]]] = []
 
     def metaObject(self):
@@ -720,6 +740,9 @@ class FakeTableView:
     def selectionModel(self):
         return self._selection_model
 
+    def indexWidget(self, index: FakeTableIndex):
+        return self._editors.get((index.row(), index.column()))
+
 
 class FakeTreeView:
     def __init__(
@@ -729,6 +752,7 @@ class FakeTreeView:
         rects: dict[tuple[str, ...], FakeRect] | None = None,
         expanded_paths: set[tuple[str, ...]] | None = None,
         selected_paths: set[tuple[str, ...]] | None = None,
+        editors: dict[tuple[str, ...], object] | None = None,
         class_name: str = "QTreeView",
     ):
         self._meta = FakeMetaObject(class_name)
@@ -737,6 +761,7 @@ class FakeTreeView:
         self._rects = dict(rects or {})
         self._expanded_paths = set(expanded_paths or set())
         self._selection_model = FakeTreeSelectionModel(self._model, selected_paths)
+        self._editors = dict(editors or {})
         self.scroll_calls: list[tuple[tuple[str, ...], tuple[object, ...]]] = []
         self.expand_calls: list[tuple[str, ...]] = []
         self.collapse_calls: list[tuple[str, ...]] = []
@@ -752,6 +777,9 @@ class FakeTreeView:
 
     def selectionModel(self):
         return self._selection_model
+
+    def indexWidget(self, index: FakeTreeIndex):
+        return self._editors.get(self._path(index))
 
     def isColumnHidden(self, column: int) -> bool:
         return False
@@ -796,14 +824,17 @@ class FakeListView:
         rects: dict[int, FakeRect] | None = None,
         hidden_rows: set[int] | None = None,
         selected_rows: set[int] | None = None,
+        edit_items: list[str | None] | None = None,
+        editors: dict[int, object] | None = None,
         class_name: str = "QListView",
     ):
         self._meta = FakeMetaObject(class_name)
-        self._model = FakeListModel(items)
+        self._model = FakeListModel(items, edit_items=edit_items)
         self._viewport = FakeViewport()
         self._rects = dict(rects or {})
         self._hidden_rows = set(hidden_rows or set())
         self._selection_model = FakeListSelectionModel(selected_rows)
+        self._editors = dict(editors or {})
         self.scroll_calls: list[tuple[int, tuple[object, ...]]] = []
 
     def metaObject(self):
@@ -817,6 +848,9 @@ class FakeListView:
 
     def selectionModel(self):
         return self._selection_model
+
+    def indexWidget(self, index: FakeListIndex):
+        return self._editors.get(index.row())
 
     def visualRect(self, index: FakeListIndex):
         if index.row() in self._hidden_rows:
@@ -902,10 +936,11 @@ def _install_fake_item_view_qt(monkeypatch):
             Qt=SimpleNamespace(
                 Horizontal=1,
                 DisplayRole=0,
+                EditRole=2,
                 LeftButton="left",
                 NoModifier="none",
                 MouseFocusReason="mouse",
-                ItemDataRole=SimpleNamespace(DisplayRole=0),
+                ItemDataRole=SimpleNamespace(DisplayRole=0, EditRole=2),
             )
         ),
     )
@@ -975,6 +1010,31 @@ def test_handle_command_item_properties_resolves_header_name(monkeypatch):
         "column": 1,
         "text": "Bob",
         "selected": True,
+    }
+
+
+def test_handle_command_item_properties_includes_edit_value_when_it_differs(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    table = FakeTableView(
+        rows=[["Open", "Alice"]],
+        headers=["Status", "Name"],
+        edit_rows=[["Pending", None]],
+        rects={(0, 0): FakeRect(0, 0, 50, 18)},
+    )
+    wid = server._registry.register(table)
+
+    result = server._handle_command(
+        Request(method="item_properties", params={"wid": wid, "item": {"kind": "table_cell", "row": 0, "column": 0}})
+    )
+
+    assert result == {
+        "kind": "table_cell",
+        "row": 0,
+        "column": 0,
+        "text": "Open",
+        "edit_value": "Pending",
+        "selected": False,
     }
 
 
@@ -1180,6 +1240,51 @@ def test_handle_command_item_view_inspect_summarizes_table(monkeypatch):
     }
 
 
+def test_handle_command_item_view_inspect_includes_table_edit_value(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    table = FakeTableView(
+        rows=[["Open", "Alice"]],
+        headers=["Status", "Name"],
+        edit_rows=[["Pending", None]],
+        rects={(0, 0): FakeRect(0, 0, 40, 18), (0, 1): FakeRect(40, 0, 60, 18)},
+    )
+    wid = server._registry.register(table)
+
+    result = server._handle_command(
+        Request(method="item_view_inspect", params={"wid": wid, "max_rows": 1, "max_items": 10})
+    )
+
+    assert result["items"][0]["text"] == "Open"
+    assert result["items"][0]["edit_value"] == "Pending"
+    assert "edit_value" not in result["items"][1]
+
+
+def test_handle_command_item_view_inspect_prefers_live_editor_value(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    table = FakeTableView(
+        rows=[["Active", "Alice"]],
+        headers=["Status", "Name"],
+        edit_rows=[["Active", None]],
+        editors={(0, 0): FakeComboEditor("Pending")},
+        rects={(0, 0): FakeRect(0, 0, 40, 18), (0, 1): FakeRect(40, 0, 60, 18)},
+    )
+    wid = server._registry.register(table)
+
+    properties = server._handle_command(
+        Request(method="item_properties", params={"wid": wid, "item": {"kind": "table_cell", "row": 0, "column": 0}})
+    )
+    inspection = server._handle_command(
+        Request(method="item_view_inspect", params={"wid": wid, "max_rows": 1, "max_items": 10})
+    )
+
+    assert properties["text"] == "Active"
+    assert properties["edit_value"] == "Pending"
+    assert inspection["items"][0]["text"] == "Active"
+    assert inspection["items"][0]["edit_value"] == "Pending"
+
+
 def test_handle_command_item_view_inspect_accepts_qtableview_subclass(monkeypatch):
     _install_fake_item_view_qt(monkeypatch)
     server._registry.clear()
@@ -1344,6 +1449,27 @@ def test_handle_command_item_view_inspect_summarizes_tree(monkeypatch):
     }
 
 
+def test_handle_command_item_view_inspect_includes_tree_edit_value(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    tree = FakeTreeView(
+        [FakeTreeNode("Settings", [FakeTreeNode("Advanced", edit_text="Advanced Draft")])],
+        rects={
+            ("Settings",): FakeRect(4, 6, 60, 16),
+            ("Settings", "Advanced"): FakeRect(12, 28, 80, 18),
+        },
+        expanded_paths={("Settings",)},
+    )
+    wid = server._registry.register(tree)
+
+    result = server._handle_command(
+        Request(method="item_view_inspect", params={"wid": wid, "max_depth": 2, "max_items": 10})
+    )
+
+    assert result["items"][1]["text"] == "Advanced"
+    assert result["items"][1]["edit_value"] == "Advanced Draft"
+
+
 def test_handle_command_item_view_inspect_accepts_qtreeview_subclass(monkeypatch):
     _install_fake_item_view_qt(monkeypatch)
     server._registry.clear()
@@ -1389,6 +1515,25 @@ def test_handle_command_item_view_inspect_summarizes_list(monkeypatch):
         ],
         "truncated": True,
     }
+
+
+def test_handle_command_item_view_inspect_includes_list_edit_value(monkeypatch):
+    _install_fake_item_view_qt(monkeypatch)
+    server._registry.clear()
+    list_view = FakeListView(
+        ["Alpha", "Beta"],
+        edit_items=[None, "Beta (editing)"],
+        rects={0: FakeRect(0, 0, 50, 18), 1: FakeRect(0, 18, 50, 18)},
+    )
+    wid = server._registry.register(list_view)
+
+    result = server._handle_command(
+        Request(method="item_view_inspect", params={"wid": wid, "max_rows": 2, "max_items": 10})
+    )
+
+    assert "edit_value" not in result["items"][0]
+    assert result["items"][1]["text"] == "Beta"
+    assert result["items"][1]["edit_value"] == "Beta (editing)"
 
 
 def test_handle_command_item_text_rejects_ambiguous_tree_path_segment(monkeypatch):

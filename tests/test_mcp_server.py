@@ -420,6 +420,7 @@ def test_inspect_accepts_item_target(monkeypatch):
             "item_properties": {
                 "kind": "tree_node",
                 "text": "Advanced",
+                "edit_value": "Advanced Draft",
                 "path": ["Settings", "Advanced"],
                 "expanded": False,
                 "selected": True,
@@ -448,6 +449,7 @@ def test_inspect_accepts_item_target(monkeypatch):
     assert result["count"] == 1
     assert result["kind"] == "tree_node"
     assert result["text"] == "Advanced"
+    assert result["edit_value"] == "Advanced Draft"
     assert result["visible"] is True
     assert result["properties"]["selected"] is True
 
@@ -1378,6 +1380,7 @@ def test_finalize_action_result_can_include_item_compact_state(monkeypatch):
             "item_properties": {
                 "kind": "tree_node",
                 "text": "Advanced",
+                "edit_value": "Advanced Draft",
                 "path": ["Settings", "Advanced"],
                 "expanded": False,
                 "selected": True,
@@ -1424,6 +1427,7 @@ def test_finalize_action_result_can_include_item_compact_state(monkeypatch):
         "global_bounding_box": {"x": 10, "y": 20, "width": 30, "height": 12},
         "visible": True,
         "text": "Advanced",
+        "edit_value": "Advanced Draft",
         "expanded": False,
         "selected": True,
     }

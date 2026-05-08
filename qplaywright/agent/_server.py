@@ -1313,6 +1313,18 @@ def _qt_display_role():
     return getattr(qt, "DisplayRole", 0)
 
 
+def _qt_edit_role():
+    if _QtCore is None:
+        return 2
+    qt = getattr(_QtCore, "Qt", None)
+    if qt is None:
+        return 2
+    item_data_role = getattr(qt, "ItemDataRole", None)
+    if item_data_role is not None and hasattr(item_data_role, "EditRole"):
+        return item_data_role.EditRole
+    return getattr(qt, "EditRole", 2)
+
+
 def _qt_horizontal_orientation():
     if _QtCore is None:
         return 1
@@ -1634,6 +1646,48 @@ def _index_display_text(model, index) -> str:
         return "" if value is None else str(value)
 
     return ""
+
+
+def _index_edit_text(model, index) -> str | None:
+    role = _qt_edit_role()
+
+    data_fn = getattr(index, "data", None)
+    if callable(data_fn):
+        value = _call_with_optional_role(data_fn, role=role)
+        if value is None:
+            return None
+        return str(value)
+
+    model_data = getattr(model, "data", None)
+    if callable(model_data):
+        value = _call_with_optional_role(model_data, index, role=role)
+        if value is None:
+            return None
+        return str(value)
+
+    return None
+
+
+def _index_live_editor_value(view, index) -> str | None:
+    index_widget = getattr(view, "indexWidget", None)
+    if not callable(index_widget):
+        return None
+
+    widget = index_widget(index)
+    if widget is None:
+        return None
+
+    value = _widget_value(widget)
+    if value is None:
+        return None
+    return str(value)
+
+
+def _index_edit_value(view, model, index) -> str | None:
+    live_editor_value = _index_live_editor_value(view, index)
+    if live_editor_value is not None:
+        return live_editor_value
+    return _index_edit_text(model, index)
 
 
 def _header_display_text(model, section: int) -> str:
@@ -2110,13 +2164,19 @@ def _table_index_text(owner_widget, resolved_target) -> str:
 
 def _table_index_properties(owner_widget, resolved_target) -> dict[str, Any]:
     view = _table_view(owner_widget)
+    model = _table_model(owner_widget)
+    text = _table_index_text(owner_widget, resolved_target)
     payload = {
         "kind": "table_cell",
         "row": int(resolved_target["row"]),
         "column": int(resolved_target["column"]),
-        "text": _table_index_text(owner_widget, resolved_target),
+        "text": text,
         "selected": False,
     }
+
+    edit_value = _index_edit_value(view, model, resolved_target["index"])
+    if edit_value is not None and edit_value != text:
+        payload["edit_value"] = edit_value
 
     selection_model = _selection_model(view)
     is_selected = getattr(selection_model, "isSelected", None) if selection_model is not None else None
@@ -2190,13 +2250,18 @@ def _tree_index_text(owner_widget, resolved_target) -> str:
 def _tree_index_properties(owner_widget, resolved_target) -> dict[str, Any]:
     view = _tree_view(owner_widget)
     model = _tree_model(owner_widget)
+    text = _tree_index_text(owner_widget, resolved_target)
     payload = {
         "kind": "tree_node",
-        "text": _tree_index_text(owner_widget, resolved_target),
+        "text": text,
         "path": _tree_index_path(model, resolved_target["index"]),
         "expanded": _tree_index_is_expanded(view, resolved_target["index"]),
         "selected": False,
     }
+
+    edit_value = _index_edit_value(view, model, resolved_target["index"])
+    if edit_value is not None and edit_value != text:
+        payload["edit_value"] = edit_value
 
     selection_model = _selection_model(view)
     is_selected = getattr(selection_model, "isSelected", None) if selection_model is not None else None
@@ -2249,12 +2314,18 @@ def _list_index_text(owner_widget, resolved_target) -> str:
 
 def _list_index_properties(owner_widget, resolved_target) -> dict[str, Any]:
     view = _list_view(owner_widget)
+    model = _list_model(owner_widget)
+    text = _list_index_text(owner_widget, resolved_target)
     payload = {
         "kind": "list_item",
         "row": int(resolved_target["row"]),
-        "text": _list_index_text(owner_widget, resolved_target),
+        "text": text,
         "selected": False,
     }
+
+    edit_value = _index_edit_value(view, model, resolved_target["index"])
+    if edit_value is not None and edit_value != text:
+        payload["edit_value"] = edit_value
 
     selection_model = _selection_model(view)
     is_selected = getattr(selection_model, "isSelected", None) if selection_model is not None else None
@@ -2595,6 +2666,8 @@ def _table_item_inspection(owner_widget, *, max_rows: int, max_items: int, inclu
                 "visible": visible,
                 "selected": bool(properties.get("selected", False)),
             })
+            if "edit_value" in properties:
+                items[-1]["edit_value"] = properties["edit_value"]
             if len(items) >= max_items:
                 truncated = True
                 return {
@@ -2641,6 +2714,8 @@ def _list_item_inspection(owner_widget, *, max_rows: int, max_items: int, includ
             "visible": visible,
             "selected": bool(properties.get("selected", False)),
         })
+        if "edit_value" in properties:
+            items[-1]["edit_value"] = properties["edit_value"]
         if len(items) >= max_items:
             truncated = True
             break
@@ -2693,6 +2768,8 @@ def _tree_item_inspection(
                     "expanded": bool(properties.get("expanded", False)),
                     "hasChildren": child_count > 0,
                 })
+                if "edit_value" in properties:
+                    items[-1]["edit_value"] = properties["edit_value"]
                 if len(items) >= max_items:
                     truncated = True
                     return

@@ -3312,6 +3312,27 @@ private:
         return model->data(target.index, Qt::DisplayRole).toString();
     }
 
+    QString tableIndexEditText(QWidget *owner, const ResolvedTableItem &target, bool *hasEditValue = nullptr)
+    {
+        QTableView *view = tableView(owner);
+        if (QWidget *editor = view->indexWidget(target.index)) {
+            if (hasEditValue)
+                *hasEditValue = true;
+            QVariant editorValue = QPlaywrightRoles::widgetValue(editor);
+            if (editorValue.isValid() && !editorValue.isNull())
+                return editorValue.toString();
+            return QPlaywrightRoles::widgetInputValue(editor);
+        }
+        auto *model = view->model();
+        if (!model)
+            throw std::runtime_error("Table widget model is not available");
+        const QVariant value = model->data(target.index, Qt::EditRole);
+        const bool valid = value.isValid() && !value.isNull();
+        if (hasEditValue)
+            *hasEditValue = valid;
+        return valid ? value.toString() : QString();
+    }
+
     QString listIndexText(QWidget *owner, const ResolvedListItem &target)
     {
         QListView *view = listView(owner);
@@ -3319,6 +3340,27 @@ private:
         if (!model)
             throw std::runtime_error("List widget model is not available");
         return model->data(target.index, Qt::DisplayRole).toString();
+    }
+
+    QString listIndexEditText(QWidget *owner, const ResolvedListItem &target, bool *hasEditValue = nullptr)
+    {
+        QListView *view = listView(owner);
+        if (QWidget *editor = view->indexWidget(target.index)) {
+            if (hasEditValue)
+                *hasEditValue = true;
+            QVariant editorValue = QPlaywrightRoles::widgetValue(editor);
+            if (editorValue.isValid() && !editorValue.isNull())
+                return editorValue.toString();
+            return QPlaywrightRoles::widgetInputValue(editor);
+        }
+        auto *model = view->model();
+        if (!model)
+            throw std::runtime_error("List widget model is not available");
+        const QVariant value = model->data(target.index, Qt::EditRole);
+        const bool valid = value.isValid() && !value.isNull();
+        if (hasEditValue)
+            *hasEditValue = valid;
+        return valid ? value.toString() : QString();
     }
 
     QJsonArray treeIndexPath(QAbstractItemModel *model, const QModelIndex &index)
@@ -3358,6 +3400,27 @@ private:
         if (!model)
             throw std::runtime_error("Tree widget model is not available");
         return model->data(target.index, Qt::DisplayRole).toString();
+    }
+
+    QString treeIndexEditText(QWidget *owner, const ResolvedTreeItem &target, bool *hasEditValue = nullptr)
+    {
+        QTreeView *view = treeView(owner);
+        if (QWidget *editor = view->indexWidget(target.index)) {
+            if (hasEditValue)
+                *hasEditValue = true;
+            QVariant editorValue = QPlaywrightRoles::widgetValue(editor);
+            if (editorValue.isValid() && !editorValue.isNull())
+                return editorValue.toString();
+            return QPlaywrightRoles::widgetInputValue(editor);
+        }
+        auto *model = view->model();
+        if (!model)
+            throw std::runtime_error("Tree widget model is not available");
+        const QVariant value = model->data(target.index, Qt::EditRole);
+        const bool valid = value.isValid() && !value.isNull();
+        if (hasEditValue)
+            *hasEditValue = valid;
+        return valid ? value.toString() : QString();
     }
 
     QString tabItemText(QWidget *owner, const ResolvedTabItem &target)
@@ -3480,10 +3543,15 @@ private:
     {
         QTableView *view = tableView(owner);
         QJsonObject payload;
+        const QString text = tableIndexText(owner, target);
         payload["kind"] = "table_cell";
         payload["row"] = target.row;
         payload["column"] = target.column;
-        payload["text"] = tableIndexText(owner, target);
+        payload["text"] = text;
+        bool hasEditValue = false;
+        const QString editValue = tableIndexEditText(owner, target, &hasEditValue);
+        if (hasEditValue && editValue != text)
+            payload["edit_value"] = editValue;
         payload["selected"] = view->selectionModel() && view->selectionModel()->isSelected(target.index);
         return payload;
     }
@@ -3492,9 +3560,14 @@ private:
     {
         QListView *view = listView(owner);
         QJsonObject payload;
+        const QString text = listIndexText(owner, target);
         payload["kind"] = "list_item";
         payload["row"] = target.row;
-        payload["text"] = listIndexText(owner, target);
+        payload["text"] = text;
+        bool hasEditValue = false;
+        const QString editValue = listIndexEditText(owner, target, &hasEditValue);
+        if (hasEditValue && editValue != text)
+            payload["edit_value"] = editValue;
         payload["selected"] = view->selectionModel() && view->selectionModel()->isSelected(target.index);
         return payload;
     }
@@ -3507,9 +3580,14 @@ private:
             throw std::runtime_error("Tree widget model is not available");
 
         QJsonObject payload;
+        const QString text = treeIndexText(owner, target);
         payload["kind"] = "tree_node";
-        payload["text"] = treeIndexText(owner, target);
+        payload["text"] = text;
         payload["path"] = treeIndexPath(model, target.index);
+        bool hasEditValue = false;
+        const QString editValue = treeIndexEditText(owner, target, &hasEditValue);
+        if (hasEditValue && editValue != text)
+            payload["edit_value"] = editValue;
         payload["expanded"] = view->isExpanded(target.index);
         payload["selected"] = view->selectionModel() && view->selectionModel()->isSelected(target.index);
         return payload;

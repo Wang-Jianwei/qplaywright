@@ -1089,7 +1089,7 @@ def _inspect_item_locator(
         "kind": properties.get("kind") or locator._item.get("kind"),
     }
 
-    for key in ("text", "row", "column", "path", "selected", "expanded"):
+    for key in ("text", "edit_value", "row", "column", "path", "selected", "expanded"):
         value = properties.get(key)
         if value is None or value == "":
             continue
@@ -1190,6 +1190,7 @@ def _compact_item_state(connection: ManagedConnection, locator: ItemLocator) -> 
         ("row", "row"),
         ("column", "column"),
         ("path", "path"),
+        ("edit_value", "edit_value"),
         ("bounding_box", "bounding_box"),
         ("global_bounding_box", "global_bounding_box"),
         ("visible", "visible"),
