@@ -245,6 +245,22 @@ V2 中 selector 与 handle 的 scope 语义不同，必须固定：
 未来如需跨窗口动作，应新增显式参数或专门 window activation flow。
 V2 初始契约不做隐式窗口激活。
 
+### Target Resolution Strictness
+
+所有需要单个 widget 的参数都应采用 strict resolution。
+
+这包括：
+
+1. `snapshot(target=...)` 的非空 `target`。
+2. `inspect(target=...)` 的 `target`。
+3. widget-oriented action 的 `target`。
+4. `find(root=...)` 的非空 `root`。
+5. structured item target 的 `owner`。
+
+如果 selector 匹配 0 个 widget，返回 not found error。
+如果 selector 匹配多个 widget，返回 ambiguous target error，并提示调用方先用 `find` 缩小候选。
+handle lookup 天然应解析为 0 或 1 个 widget；0 表示 stale handle 或 unknown handle。
+
 ## Proposed Tool Surface
 
 本文不改写全部 MCP 工具面，只定义与 agent UI 理解和控制最相关的观察面。
@@ -304,7 +320,7 @@ V2 初始契约不做隐式窗口激活。
 {
   "ok": true,
   "window": {
-    "wid": 1,
+    "target": "w1",
     "title": "DemoWindow",
     "class": "DemoWindow",
     "geometry": {"x": 0, "y": 0, "width": 640, "height": 720}
@@ -328,7 +344,8 @@ V2 初始契约不做隐式窗口激活。
 1. `widgets` 是面向机器的稳定 widget target 列表，不再叫 `refs`。
 2. `snapshot` 是面向模型快速阅读的文本视图。
 3. `widgets` 中每个元素都应携带稳定 `target`。
-4. `snapshot` 与 `widgets` 应描述同一棵树，不允许各自使用不同 identity 体系。
+4. `window.target` 同样应是稳定 widget handle，不暴露内部整数 `wid`。
+5. `snapshot` 与 `widgets` 应描述同一棵树，不允许各自使用不同 identity 体系。
 
 ## 2. find
 
@@ -368,10 +385,11 @@ V2 初始契约不做隐式窗口激活。
 字段约束：
 
 1. `root` 可选；为空时默认使用 active window。
-2. 所有非空谓词按 AND 关系求交。
+2. 所有显式启用的谓词按 AND 关系求交。
 3. 初始版本不提供任意布尔表达式语言。
 4. `limit` 是强约束，服务端不应返回超额候选。
 5. `find` 只搜索真实 widget，不扩展到 item-view descendants。
+6. `root` 如果是 selector，必须 strict resolve 为单个 widget。
 
 ### Find Predicate Semantics
 
@@ -390,8 +408,14 @@ V2 初始契约不做隐式窗口激活。
 | `accessible_name` | 精确匹配 `accessibleName`，大小写敏感 |
 | `visible` | 当为 `true` 时只返回当前可见且几何非空的 widget；当为 `false` 时只返回当前不可见 widget；缺省不筛选 |
 | `enabled` | 当为 `true` 时只返回 enabled widget；当为 `false` 时只返回 disabled widget；缺省不筛选 |
-| `interactable` | 当为 `true` 时只返回当前可点击或可接收指针动作的 widget；缺省不筛选 |
+| `interactable` | 当为 `true` 时只返回当前可点击或可接收指针动作的 widget；当为 `false` 时只返回当前不可交互 widget；缺省不筛选 |
 | `limit` | 返回上限，必须为正整数，默认由服务端决定 |
+
+谓词启用规则：
+
+1. 字段缺省或值为 `null` 表示不启用该谓词。
+2. 布尔字段的 `false` 是有效谓词值，不等同于缺省。
+3. 字符串字段的空字符串不是有效谓词值。
 
 主文本归一规则：
 
@@ -401,7 +425,7 @@ V2 初始契约不做隐式窗口激活。
 4. `text` 不匹配 `accessible_name`。
 5. `current_text`、`value`、`accessible_name` 如需搜索，应作为独立谓词加入 V2 schema，而不是混进 `text`。
 
-空字符串不是有效谓词值。
+字符串谓词的空字符串不是有效谓词值。
 如果调用方传入空字符串，服务端应拒绝请求，而不是把它解释成“匹配所有”。
 
 可见性与可交互性语义必须分开：
@@ -469,15 +493,16 @@ MCP 层职责：
 
 推荐排序优先级：
 
-1. 匹配谓词越具体的候选优先；服务端只比较本次请求实际提供的谓词。
-2. 更接近 `root` 的节点优先。
-3. `interactable=true` 的节点优先。
-4. 有 non-empty geometry 的节点优先。
-5. 同级节点按 widget tree preorder 排序。
-6. 最后按 stable widget handle 排序，确保完全 deterministic。
+1. 更接近 `root` 的节点优先。
+2. 当请求未显式设置 `interactable` 时，当前可交互的节点优先。
+3. 当请求未显式设置 `visible` 时，visible 且有 non-empty geometry 的节点优先。
+4. 同级节点按 widget tree preorder 排序。
+5. 最后按 stable widget handle 排序，确保完全 deterministic。
 
-不要使用未传入谓词参与排序。
-例如请求未提供 `object_name` 时，不应出现 “object_name 精确命中优先” 这类隐式排序规则。
+不要使用未传入的匹配谓词参与相关性排序。
+例如请求未提供 `object_name` 时，不应出现 “object_name 精确命中优先” 这类隐式相关性规则。
+已经作为 AND 过滤条件的谓词也不应再次影响排序；因为结果集内所有候选都已满足这些条件。
+`visible`、`interactable` 可以作为固定 tie-breaker，但只能在请求没有显式筛选这些字段时生效。
 
 ## 3. inspect
 
