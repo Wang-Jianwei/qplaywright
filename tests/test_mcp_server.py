@@ -340,7 +340,7 @@ def test_require_exactly_one_window_selector_rejects_missing_or_multiple_values(
     mcp_server._require_exactly_one_window_selector(index=0, wid=None, title=None)
 
 
-def test_resolve_locator_accepts_snapshot_ref_as_widget_id():
+def test_resolve_locator_accepts_stable_handle_as_widget_id():
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -348,11 +348,12 @@ def test_resolve_locator_accepts_snapshot_ref_as_widget_id():
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
-        snapshot_refs={"e2": 42},
+        wid_to_handle={42: "w2"},
+        handle_to_wid={"w2": 42},
     )
     connection.app._conn = FakeTransportConn()
 
-    locator = mcp_server._resolve_locator(connection, target="e2")
+    locator = mcp_server._resolve_locator(connection, target="w2")
     locator.click()
 
     assert connection.app._conn.calls == [
@@ -360,7 +361,7 @@ def test_resolve_locator_accepts_snapshot_ref_as_widget_id():
     ]
 
 
-def test_resolve_locator_rejects_missing_snapshot_ref_with_refresh_hint():
+def test_resolve_locator_rejects_unknown_stable_handle():
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -368,11 +369,12 @@ def test_resolve_locator_rejects_missing_snapshot_ref_with_refresh_hint():
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
-        snapshot_refs={"e1": 41},
+        wid_to_handle={41: "w1"},
+        handle_to_wid={"w1": 41},
     )
 
-    with pytest.raises(ValueError, match="Snapshot ref 'e9' has expired"):
-        mcp_server._resolve_locator(connection, target="e9")
+    with pytest.raises(ValueError, match="Unknown stable handle 'w9'"):
+        mcp_server._resolve_locator(connection, target="w9")
 
 
 def test_resolve_item_locator_uses_owner_locator_wid():
@@ -723,7 +725,7 @@ def test_set_expanded_uses_item_expand(monkeypatch):
     assert result["snapshot_target"] == "#tree"
 
 
-def test_clear_snapshot_refs_increments_epoch():
+def test_handle_for_wid_is_stable_across_calls():
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -731,20 +733,15 @@ def test_clear_snapshot_refs_increments_epoch():
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
-        snapshot_refs={"e1": 1},
-        snapshot_wids={1: "e1"},
     )
 
-    assert connection.snapshot_epoch == 0
-    connection.clear_snapshot_refs()
-    assert connection.snapshot_epoch == 1
-    assert connection.snapshot_refs == {}
-    assert connection.snapshot_wids == {}
-    connection.clear_snapshot_refs()
-    assert connection.snapshot_epoch == 2
+    assert connection.handle_for_wid(1) == "w1"
+    assert connection.handle_for_wid(1) == "w1"
+    assert connection.handle_for_wid(2) == "w2"
+    assert connection.handle_to_wid == {"w1": 1, "w2": 2}
 
 
-def test_snapshot_payload_includes_epoch_in_result():
+def test_snapshot_payload_returns_v2_handle_shape():
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -752,7 +749,7 @@ def test_snapshot_payload_includes_epoch_in_result():
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
-        snapshot_epoch=3,
+        active_window_wid=1,
     )
 
     payload = mcp_server._snapshot_payload(
@@ -760,10 +757,16 @@ def test_snapshot_payload_includes_epoch_in_result():
         [{"wid": 1, "class": "DemoWindow", "objectName": "", "text": "Title", "children": []}],
     )
 
-    assert payload["epoch"] == 3
+    assert payload["ok"] is True
+    assert payload["root_handle"] == "w1"
+    assert payload["widgets"] == [
+        {"handle": "w1", "class": "DemoWindow", "text": "Title", "label": "Title"}
+    ]
+    assert "refs" not in payload
+    assert "epoch" not in payload
 
 
-def test_target_not_found_message_includes_epoch_for_expired_ref():
+def test_target_not_found_message_handles_stable_handle():
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -771,15 +774,12 @@ def test_target_not_found_message_includes_epoch_for_expired_ref():
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
-        snapshot_refs={"e1": 42},
-        snapshot_epoch=5,
     )
 
-    message = mcp_server._target_not_found_message(connection, "e9")
+    message = mcp_server._target_not_found_message(connection, "w9")
 
-    assert "has expired" in message
-    assert "epoch is 5" in message
-    assert "Run snapshot to refresh refs" in message
+    assert "stable handle 'w9'" in message
+    assert "Run snapshot, find, or inspect" in message
 
 
 def test_inspect_target_uses_target_payload(monkeypatch):
@@ -972,10 +972,10 @@ def test_snapshot_entry_preserves_item_view_hint():
             "class": "FancyOrdersTable",
             "itemView": {"kind": "table", "discoverableBy": "inspect_items"},
         },
-        "e1",
+        "w1",
     )
 
-    assert entry["itemView"] == {"kind": "table", "discoverableBy": "inspect_items"}
+    assert entry["item_view"] == {"kind": "table", "discoverableBy": "inspect_items"}
 
 
 def test_inspect_without_target_returns_active_window_tree(monkeypatch):
@@ -1725,7 +1725,7 @@ def test_format_widget_snapshot_marks_accessibility_derived_labels():
     assert 'MenuButton "功率扫描" [a11y] target=#measure_type_btn' in snapshot
 
 
-def test_snapshot_payload_creates_stable_refs():
+def test_snapshot_payload_creates_stable_handles():
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -1757,10 +1757,11 @@ def test_snapshot_payload_creates_stable_refs():
         ],
     )
 
-    assert "[ref=e1]" in payload["snapshot"]
-    assert "[ref=e2]" in payload["snapshot"]
-    assert connection.snapshot_refs == {"e1": 1, "e2": 2}
-    assert payload["refs"][1]["target"] == "#login_btn"
+    assert "[handle=w1]" in payload["snapshot"]
+    assert "[handle=w2]" in payload["snapshot"]
+    assert connection.handle_to_wid == {"w1": 1, "w2": 2}
+    assert payload["widgets"][1]["handle"] == "w2"
+    assert payload["widgets"][1]["object_name"] == "login_btn"
 
 
 def test_snapshot_payload_filters_infrastructure_widgets_by_default():
@@ -1802,7 +1803,8 @@ def test_snapshot_payload_filters_infrastructure_widgets_by_default():
     )
 
     assert "qt_scrollarea_viewport" not in payload["snapshot"]
-    assert [entry["wid"] for entry in payload["refs"]] == [1, 3]
+    assert [entry["handle"] for entry in payload["widgets"]] == ["w1", "w2"]
+    assert connection.handle_to_wid == {"w1": 1, "w2": 3}
 
 
 def test_snapshot_payload_can_include_infrastructure_widgets_when_requested():
@@ -1840,7 +1842,7 @@ def test_snapshot_payload_can_include_infrastructure_widgets_when_requested():
     assert "qt_scrollarea_viewport" in payload["snapshot"]
 
 
-def test_snapshot_payload_preserves_existing_ref_bindings():
+def test_snapshot_payload_preserves_existing_handle_bindings():
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -1848,8 +1850,9 @@ def test_snapshot_payload_preserves_existing_ref_bindings():
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
-        snapshot_refs={"e1": 99},
-        snapshot_wids={99: "e1"},
+        wid_to_handle={99: "w9"},
+        handle_to_wid={"w9": 99},
+        handle_counter=9,
     )
 
     payload = mcp_server._snapshot_payload(
@@ -1866,21 +1869,20 @@ def test_snapshot_payload_preserves_existing_ref_bindings():
         ],
     )
 
-    assert payload["refs"] == [
+    assert payload["widgets"] == [
         {
-            "ref": "e2",
-            "wid": 1,
-            "target": ".DemoWindow",
+            "handle": "w10",
             "class": "DemoWindow",
             "geometry": {"x": 10, "y": 20, "width": 640, "height": 480},
-            "windowTitle": "Title",
+            "window_title": "Title",
+            "label": "Title",
         }
     ]
-    assert connection.snapshot_refs == {"e1": 99, "e2": 1}
-    assert connection.snapshot_wids == {99: "e1", 1: "e2"}
+    assert connection.handle_to_wid == {"w9": 99, "w10": 1}
+    assert connection.wid_to_handle == {99: "w9", 1: "w10"}
 
 
-def test_snapshot_result_resets_refs_and_passes_depth_for_target_snapshot():
+def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
     transport = FakeTransportConn(
         responses={
             mcp_server.METHOD_FIND: {
@@ -1911,33 +1913,34 @@ def test_snapshot_result_resets_refs_and_passes_depth_for_target_snapshot():
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
-        snapshot_refs={"e9": 42},
-        snapshot_wids={42: "e9"},
+        wid_to_handle={42: "w9"},
+        handle_to_wid={"w9": 42},
+        handle_counter=9,
     )
 
-    result = mcp_server._snapshot_result(connection, target="e9", depth=3)
+    result = mcp_server._snapshot_result(connection, target="w9", depth=3)
 
     assert transport.calls == [
         {"method": "find", "params": {"wid": 42, "max_depth": 3}, "timeout": 30.0}
     ]
-    assert connection.snapshot_refs == {"e1": 42, "e2": 43}
-    assert connection.snapshot_wids == {42: "e1", 43: "e2"}
-    assert result["refs"] == [
+    assert connection.handle_to_wid == {"w9": 42, "w10": 43}
+    assert connection.wid_to_handle == {42: "w9", 43: "w10"}
+    assert result["root_handle"] == "w9"
+    assert result["widgets"] == [
         {
-            "ref": "e1",
-            "wid": 42,
-            "target": ".DemoWindow",
+            "handle": "w9",
             "class": "DemoWindow",
             "geometry": {"x": 0, "y": 0, "width": 320, "height": 180},
             "text": "Dialog",
+            "label": "Dialog",
         },
         {
-            "ref": "e2",
-            "wid": 43,
-            "target": "#confirm_btn",
+            "handle": "w10",
             "class": "QPushButton",
+            "object_name": "confirm_btn",
             "geometry": {"x": 40, "y": 60, "width": 80, "height": 24},
             "text": "Confirm",
+            "label": "Confirm",
         },
     ]
 
@@ -1970,13 +1973,14 @@ def test_snapshot_result_preserves_target_root_when_it_matches_infrastructure():
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
-        snapshot_refs={"e9": 42},
-        snapshot_wids={42: "e9"},
+        wid_to_handle={42: "w9"},
+        handle_to_wid={"w9": 42},
+        handle_counter=9,
     )
 
-    result = mcp_server._snapshot_result(connection, target="e9", depth=2)
+    result = mcp_server._snapshot_result(connection, target="w9", depth=2)
 
-    assert [entry["wid"] for entry in result["refs"]] == [42, 43]
+    assert [entry["handle"] for entry in result["widgets"]] == ["w9", "w10"]
 
 
 def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
@@ -1997,8 +2001,8 @@ def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
         ],
     )
 
-    assert payload["refs"] == [{"ref": "e1", "wid": 1, "target": ".DemoWindow", "class": "DemoWindow", "text": "Title"}]
-    assert payload["snapshot"].count("[ref=e1]") == 1
+    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title", "label": "Title"}]
+    assert payload["snapshot"].count("[handle=w1]") == 1
 
 
 def test_screenshot_returns_schema_fields(monkeypatch):
@@ -2481,7 +2485,7 @@ def test_screenshot_clip_kwargs_validates_required_fields():
         mcp_server._screenshot_clip_kwargs(x=-1, y=2, width=3, height=4)
 
 
-def test_target_params_accept_snapshot_ref():
+def test_target_params_accept_stable_handle():
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -2489,10 +2493,11 @@ def test_target_params_accept_snapshot_ref():
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
-        snapshot_refs={"e2": 42},
+        wid_to_handle={42: "w2"},
+        handle_to_wid={"w2": 42},
     )
 
-    params = mcp_server._target_params(connection, "e2")
+    params = mcp_server._target_params(connection, "w2")
 
     assert params == {"wid": 42}
 
@@ -2570,10 +2575,11 @@ def test_snapshot_result_scopes_to_active_window(monkeypatch):
 
     assert captured["kwargs"] == {"max_depth": 3, "window_wid": 22, "topmost_only": True, "timeout": None}
     assert 'DialogWindow "Dialog"' in payload["snapshot"]
-    assert payload["refs"][0]["wid"] == 22
+    assert payload["root_handle"] == "w1"
+    assert payload["widgets"][0]["handle"] == "w1"
 
 
-def test_target_not_found_message_suggests_refresh_for_missing_snapshot_ref():
+def test_target_not_found_message_suggests_discovery_for_missing_handle():
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -2581,13 +2587,12 @@ def test_target_not_found_message_suggests_refresh_for_missing_snapshot_ref():
         host="127.0.0.1",
         port=19876,
         timeout=30.0,
-        snapshot_refs={"e1": 42},
     )
 
-    message = mcp_server._target_not_found_message(connection, "e9")
+    message = mcp_server._target_not_found_message(connection, "w9")
 
-    assert "Snapshot ref 'e9' has expired" in message
-    assert "Run snapshot to refresh refs" in message
+    assert "stable handle 'w9'" in message
+    assert "Run snapshot, find, or inspect" in message
 
 
 def test_target_not_found_message_includes_selector_examples():

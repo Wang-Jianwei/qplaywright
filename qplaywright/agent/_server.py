@@ -2632,7 +2632,6 @@ def _handle_command(req: Request) -> Any:
     if session_id:
         _mark_session_active(session_id)
     qt_core = _qt_core_module()
-    q_application = _qt_application_class()
     Qt = qt_core.Qt
 
     # -- Ping ----------------------------------------------------------------
@@ -2901,6 +2900,7 @@ def _handle_command(req: Request) -> Any:
 
     # -- Screenshot ----------------------------------------------------------
     if method in (METHOD_SCREENSHOT, METHOD_SCREENSHOT_WIDGET):
+        q_application = _qt_application_class()
         if method == METHOD_SCREENSHOT_WIDGET:
             w = _resolve_one(params)
         else:

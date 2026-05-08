@@ -276,6 +276,7 @@ def decode_line(line: bytes) -> dict:
 # Widget discovery
 METHOD_FIND = "find"
 METHOD_FIND_ALL = "find_all"
+METHOD_FIND_WIDGETS = "find_widgets"
 METHOD_WIDGET_TREE = "widget_tree"
 METHOD_GET_PROPERTY = "get_property"
 METHOD_GET_PROPERTIES = "get_properties"

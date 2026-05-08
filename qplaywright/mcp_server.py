@@ -200,7 +200,7 @@ IncludeStateArg = Annotated[
 ]
 IncludeSnapshotArg = Annotated[
     bool,
-    Field(description="When true, include a post-action snapshot and refs in the result. If the action changes windows, the snapshot falls back to the active window."),
+    Field(description="When true, include a post-action snapshot in the V2 stable-handle shape. If the action changes windows, the snapshot falls back to the active window."),
 ]
 MethodArg = Annotated[
     str,
@@ -322,6 +322,7 @@ else:
 
 
 _MCP_CANCEL_NOTIFICATION_METHOD = "notifications/cancelled"
+_HANDLE_PATTERN = re.compile(r"^w\d+$")
 
 
 @dataclass
@@ -336,9 +337,10 @@ class ManagedConnection:
     timeout: float
     launched_executable: str | None = None
     active_window_wid: int | None = None
-    snapshot_refs: dict[str, int] = field(default_factory=dict)
-    snapshot_wids: dict[int, str] = field(default_factory=dict)
-    snapshot_epoch: int = 0
+    handle_counter: int = 0
+    wid_to_handle: dict[int, str] = field(default_factory=dict)
+    handle_to_wid: dict[str, int] = field(default_factory=dict)
+    stale_handles: set[str] = field(default_factory=set)
 
     def close(self) -> None:
         with contextlib.suppress(Exception):
@@ -346,10 +348,25 @@ class ManagedConnection:
         with contextlib.suppress(Exception):
             self.qplaywright.close()
 
-    def clear_snapshot_refs(self) -> None:
-        self.snapshot_refs.clear()
-        self.snapshot_wids.clear()
-        self.snapshot_epoch += 1
+    def handle_for_wid(self, wid: int | None) -> str | None:
+        if wid is None:
+            return None
+        handle = self.wid_to_handle.get(wid)
+        if handle is not None:
+            return handle
+        self.handle_counter += 1
+        handle = f"w{self.handle_counter}"
+        self.wid_to_handle[wid] = handle
+        self.handle_to_wid[handle] = wid
+        return handle
+
+    def wid_for_handle(self, handle: str) -> int:
+        wid = self.handle_to_wid.get(handle)
+        if wid is not None:
+            return wid
+        if handle in self.stale_handles:
+            raise ValueError(f"Stable handle {handle!r} is stale because its widget no longer exists.")
+        raise ValueError(f"Unknown stable handle {handle!r}. Run snapshot, find, or inspect to discover handles.")
 
 
 @dataclass
@@ -599,7 +616,6 @@ def _session_summary(connection: ManagedConnection) -> dict[str, Any]:
 
 def _select_active_window(connection: ManagedConnection, window_wid: int | None) -> None:
     connection.active_window_wid = window_wid
-    connection.clear_snapshot_refs()
 
 
 def _initialize_active_window(connection: ManagedConnection) -> list[dict[str, Any]]:
@@ -771,11 +787,9 @@ def _resolve_locator(
     if not target.strip():
         raise ValueError("target must not be empty")
 
-    if _SNAPSHOT_REF_PATTERN.match(target):
-        ref_wid = connection.snapshot_refs.get(target)
-        if ref_wid is None:
-            raise ValueError(_target_not_found_message(connection, target))
-        return Locator(connection.app._conn, "", widget_wid=ref_wid, timeout=connection.timeout)
+    if _HANDLE_PATTERN.match(target):
+        handle_wid = connection.wid_for_handle(target)
+        return Locator(connection.app._conn, "", widget_wid=handle_wid, timeout=connection.timeout)
 
     window = _resolve_window(connection)
     return window.locator(target)
@@ -792,7 +806,7 @@ def _normalize_item_target(target: Any) -> dict[str, Any]:
     owner = target.get("owner")
     item = target.get("item")
     if not isinstance(owner, str) or not owner.strip():
-        raise ValueError("item target owner must be a non-empty widget selector or snapshot ref")
+        raise ValueError("item target owner must be a non-empty widget selector or stable handle")
     if not isinstance(item, dict):
         raise ValueError("item target item must be an object descriptor")
     return {"owner": owner, "item": dict(item)}
@@ -1116,11 +1130,8 @@ def _invoke_locator_method(
 def _target_not_found_message(connection: ManagedConnection, target: str | None, *, element: str | None = None) -> str:
     examples = "#objectName, role=button, text=Submit, has-text=partial, a11y-name=Submit, .QLabel"
     candidate = (target or element or "").strip()
-    if candidate and _SNAPSHOT_REF_PATTERN.match(candidate) and candidate not in connection.snapshot_refs:
-        return (
-            f"Snapshot ref {candidate!r} has expired (current snapshot epoch is {connection.snapshot_epoch}). "
-            f"Run snapshot to refresh refs, or target a widget with selectors like {examples}."
-        )
+    if candidate and _HANDLE_PATTERN.match(candidate):
+        return f"No widget found for stable handle {candidate!r}. Run snapshot, find, or inspect to discover handles."
     if candidate:
         return (
             f"No widget found for target {candidate!r}. Run snapshot or inspect to discover the UI, "
@@ -1187,16 +1198,8 @@ def _format_widget_snapshot(nodes: list[dict[str, Any]], *, depth: int = 10, lev
     return "\n".join(lines)
 
 
-def _snapshot_ref_for_widget(connection: ManagedConnection, wid: int | None) -> str | None:
-    if wid is None:
-        return None
-    ref = connection.snapshot_wids.get(wid)
-    if ref is not None:
-        return ref
-    ref = f"e{len(connection.snapshot_refs) + 1}"
-    connection.snapshot_refs[ref] = wid
-    connection.snapshot_wids[wid] = ref
-    return ref
+def _snapshot_handle_for_widget(connection: ManagedConnection, wid: int | None) -> str | None:
+    return connection.handle_for_wid(wid if isinstance(wid, int) and not isinstance(wid, bool) else None)
 
 
 def _snapshot_target_hint(node: dict[str, Any]) -> str:
@@ -1240,24 +1243,34 @@ def _snapshot_item_view_marker(node: dict[str, Any]) -> str:
     return f"[item-view={kind}]"
 
 
-def _snapshot_entry(node: dict[str, Any], ref: str | None) -> dict[str, Any]:
+def _snapshot_entry(node: dict[str, Any], handle: str | None) -> dict[str, Any]:
     entry = {
-        "ref": ref,
-        "wid": node.get("wid"),
-        "target": _snapshot_target_hint(node) or None,
+        "handle": handle,
         "class": node.get("class", ""),
     }
     geometry = node.get("geometry")
     if isinstance(geometry, dict) and geometry:
         entry["geometry"] = geometry
-    for key in ("text", "accessibleName", "accessibleDescription", "currentText", "windowTitle", "value"):
+    key_map = {
+        "text": "text",
+        "accessibleName": "accessible_name",
+        "accessibleDescription": "accessible_description",
+        "currentText": "current_text",
+        "windowTitle": "window_title",
+        "value": "value",
+        "objectName": "object_name",
+    }
+    for key, output_key in key_map.items():
         value = node.get(key)
         if value is None or value == "":
             continue
-        entry[key] = value
+        entry[output_key] = value
+    label, _marker = _snapshot_display_label(node)
+    if label:
+        entry["label"] = label
     item_view = node.get("itemView")
     if isinstance(item_view, dict) and item_view:
-        entry["itemView"] = dict(item_view)
+        entry["item_view"] = dict(item_view)
     return entry
 
 
@@ -1315,7 +1328,7 @@ def _render_snapshot_tree(
         seen_wids = set()
 
     lines: list[str] = []
-    refs: list[dict[str, Any]] = []
+    widgets: list[dict[str, Any]] = []
 
     for node in nodes:
         wid = node.get("wid")
@@ -1324,16 +1337,16 @@ def _render_snapshot_tree(
                 continue
             seen_wids.add(wid)
 
-        ref = _snapshot_ref_for_widget(connection, wid)
-        ref_part = f" [ref={ref}]" if ref else ""
+        handle = _snapshot_handle_for_widget(connection, wid)
+        handle_part = f" [handle={handle}]" if handle else ""
         target_hint = _snapshot_target_hint(node)
         target_part = f" target={target_hint}" if target_hint else ""
         label, marker = _snapshot_display_label(node)
         text_part = f' "{label}"' if label else ""
         marker_part = f" {marker}" if marker else ""
         active_part = " [active]" if wid == connection.active_window_wid else ""
-        lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{active_part}{ref_part}{target_part}")
-        refs.append(_snapshot_entry(node, ref))
+        lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{active_part}{handle_part}{target_part}")
+        widgets.append(_snapshot_entry(node, handle))
 
         child_lines, child_refs = _render_snapshot_tree(
             connection,
@@ -1343,9 +1356,23 @@ def _render_snapshot_tree(
             seen_wids=seen_wids,
         )
         lines.extend(child_lines)
-        refs.extend(child_refs)
+        widgets.extend(child_refs)
 
-    return lines, refs
+    return lines, widgets
+
+
+def _snapshot_window_payload(connection: ManagedConnection) -> dict[str, Any] | None:
+    window_wid = connection.active_window_wid
+    if window_wid is None:
+        return None
+
+    window_payload: dict[str, Any] = {"handle": connection.handle_for_wid(window_wid)}
+    with contextlib.suppress(Exception):
+        window = _resolve_window(connection, window_wid=window_wid)
+        window_payload["title"] = window.title()
+        window_payload["class"] = ""
+        window_payload["geometry"] = {"x": None, "y": None, "width": None, "height": None}
+    return window_payload
 
 
 def _snapshot_payload(
@@ -1359,11 +1386,19 @@ def _snapshot_payload(
     if not include_infrastructure:
         nodes = _filter_infrastructure_nodes(nodes, preserve_roots=preserve_roots)
 
-    lines, refs = _render_snapshot_tree(connection, nodes, depth=depth)
+    lines, widgets = _render_snapshot_tree(connection, nodes, depth=depth)
+    root_wid = None
+    if nodes:
+        candidate = nodes[0].get("wid")
+        if isinstance(candidate, int) and not isinstance(candidate, bool):
+            root_wid = candidate
+    root_handle = connection.handle_for_wid(root_wid if root_wid is not None else connection.active_window_wid)
     return {
+        "ok": True,
+        "window": _snapshot_window_payload(connection),
+        "root_handle": root_handle,
         "snapshot": "\n".join(lines),
-        "refs": refs,
-        "epoch": connection.snapshot_epoch,
+        "widgets": widgets,
     }
 
 
@@ -1403,11 +1438,8 @@ def _normalize_screenshot_result(result: Any) -> dict[str, Any]:
 
 
 def _target_params(connection: ManagedConnection, target: str, **extra: Any) -> dict[str, Any]:
-    if _SNAPSHOT_REF_PATTERN.match(target):
-        ref_wid = connection.snapshot_refs.get(target)
-        if ref_wid is None:
-            raise ValueError(_target_not_found_message(connection, target))
-        params: dict[str, Any] = {"wid": ref_wid}
+    if _HANDLE_PATTERN.match(target):
+        params: dict[str, Any] = {"wid": connection.wid_for_handle(target)}
     else:
         params = {"selector": target}
     params.update(extra)
@@ -1424,7 +1456,6 @@ def _snapshot_result(
     timeout: float | None = None,
 ) -> dict[str, Any]:
     target_params = _target_params(managed_connection, target, max_depth=depth) if target is not None else None
-    managed_connection.clear_snapshot_refs()
 
     if target is None:
         return _snapshot_payload(
