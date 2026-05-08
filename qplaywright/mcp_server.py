@@ -2066,13 +2066,11 @@ if FastMCP is not None:
                 window_title=title,
                 window_index=index,
             )
-            refs_cleared = connection_state.active_window_wid != selected_window.wid
             _select_active_window(connection_state, selected_window.wid)
             return {
                 "ok": True,
                 "action": action,
                 "active_window": _active_window_summary(connection_state),
-                "refs_cleared": refs_cleared,
             }
 
         if action == "resize":

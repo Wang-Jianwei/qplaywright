@@ -888,7 +888,7 @@ def test_window_tool_lists_selects_resizes_and_closes(monkeypatch):
     assert selected["active_window"]["wid"] == 22
     assert selected["active_window"]["is_modal"] is True
     assert selected["active_window"]["geometry"] == {"x": None, "y": None, "width": None, "height": None}
-    assert selected["refs_cleared"] is True
+    assert "refs_cleared" not in selected
     assert resized["active_window"]["wid"] == 22
     assert "windows" not in resized
     assert first.resized_to is None

@@ -343,8 +343,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
       "width": 480,
       "height": 320
     }
-  },
-  "refs_cleared": true
+  }
 }
 ```
 

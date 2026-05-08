@@ -252,7 +252,7 @@ Supported actions:
 - `resize`
 - `close`
 
-If `select` or `close` changes the active window, previously issued snapshot refs are cleared and should be treated as expired.
+`window select` only updates the server's active-window scope. Session-stable widget handles are not invalidated just because the active window changes.
 
 Selection fields:
 
