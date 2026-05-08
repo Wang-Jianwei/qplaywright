@@ -1127,14 +1127,38 @@ def _inspect_item_locator(
     return result
 
 
-def _compact_action_state(locator: Any) -> dict[str, Any]:
+def _widget_handle_from_locator(connection: ManagedConnection, locator: Any) -> str | None:
+    resolve_owner_wid = getattr(locator, "_resolve_owner_wid", None)
+    if not callable(resolve_owner_wid):
+        return None
+    try:
+        owner_wid = resolve_owner_wid()
+    except Exception:
+        return None
+    if isinstance(owner_wid, bool) or not isinstance(owner_wid, int):
+        return None
+    return connection.handle_for_wid(int(owner_wid))
+
+
+def _compact_action_state(connection: ManagedConnection, locator: Any) -> dict[str, Any]:
     inspected = _inspect_locator(locator)
     state = {
         "exists": inspected["exists"],
         "count": inspected["count"],
     }
 
+    handle = _widget_handle_from_locator(connection, locator)
+    if handle is not None:
+        state["handle"] = handle
+
     for source_key, target_key in (
+        ("object_name", "object_name"),
+        ("accessible_name", "accessible_name"),
+        ("accessible_description", "accessible_description"),
+        ("class", "class"),
+        ("geometry", "geometry"),
+        ("bounding_box", "bounding_box"),
+        ("global_bounding_box", "global_bounding_box"),
         ("visible", "visible"),
         ("enabled", "enabled"),
         ("checked", "checked"),
@@ -1150,14 +1174,24 @@ def _compact_action_state(locator: Any) -> dict[str, Any]:
     return state
 
 
-def _compact_item_state(locator: ItemLocator) -> dict[str, Any]:
+def _compact_item_state(connection: ManagedConnection, locator: ItemLocator) -> dict[str, Any]:
     inspected = _inspect_item_locator(locator)
     state = {
         "exists": inspected["exists"],
         "count": inspected["count"],
     }
 
+    owner_handle = connection.handle_for_wid(getattr(locator, "_owner_wid", None))
+    if owner_handle is not None:
+        state["owner_handle"] = owner_handle
+
     for source_key, target_key in (
+        ("kind", "kind"),
+        ("row", "row"),
+        ("column", "column"),
+        ("path", "path"),
+        ("bounding_box", "bounding_box"),
+        ("global_bounding_box", "global_bounding_box"),
         ("visible", "visible"),
         ("text", "text"),
         ("expanded", "expanded"),
@@ -1851,10 +1885,10 @@ def _observe_action_target_state(
 ) -> dict[str, Any]:
     if isinstance(target, str):
         locator = _resolve_locator(managed_connection, target=target)
-        return _compact_action_state(locator)
+        return _compact_action_state(managed_connection, locator)
 
     locator = _resolve_item_locator(managed_connection, target=target)
-    return _compact_item_state(locator)
+    return _compact_item_state(managed_connection, locator)
 
 
 def _normalize_choose_selectors(

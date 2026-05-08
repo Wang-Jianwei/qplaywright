@@ -130,6 +130,7 @@ class FakeLocator:
 
     def properties(self) -> dict[str, object]:
         return {
+            "class": "FancyAmountEdit",
             "objectName": self._target or "amount_editor",
             "accessibleName": "Amount editor",
             "accessibleDescription": "输入金额",
@@ -1353,11 +1354,78 @@ def test_finalize_action_result_can_include_compact_state(monkeypatch):
     assert result["state"] == {
         "exists": True,
         "count": 1,
+        "handle": "w1",
+        "object_name": "amount_editor",
+        "accessible_name": "Amount editor",
+        "accessible_description": "输入金额",
+        "class": "FancyAmountEdit",
+        "geometry": {"x": 11, "y": 22, "width": 130, "height": 28},
+        "bounding_box": {"x": 1, "y": 2, "width": 3, "height": 4},
+        "global_bounding_box": {"x": 1, "y": 2, "width": 3, "height": 4},
         "visible": True,
         "enabled": False,
         "checked": True,
         "text": "Save",
         "value": "ready",
+    }
+
+
+def test_finalize_action_result_can_include_item_compact_state(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(
+        responses={
+            "item_properties": {
+                "kind": "tree_node",
+                "text": "Advanced",
+                "path": ["Settings", "Advanced"],
+                "expanded": False,
+                "selected": True,
+            },
+            "item_text": "Advanced",
+            "item_visible": True,
+            "item_bounding_box": {"x": 10, "y": 20, "width": 30, "height": 12},
+        }
+    )
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_list_windows_raw",
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
+    )
+
+    result = mcp_server._finalize_action_result(
+        connection,
+        include_state=True,
+        state_target=_item_target(),
+        ok=True,
+        target=_item_target(),
+    )
+
+    assert result["ok"] is True
+    assert result["window_changed"] is False
+    assert result["active_window"]["wid"] == 11
+    assert result["state"] == {
+        "exists": True,
+        "count": 1,
+        "owner_handle": "w1",
+        "kind": "tree_node",
+        "path": ["Settings", "Advanced"],
+        "bounding_box": {"x": 10, "y": 20, "width": 30, "height": 12},
+        "global_bounding_box": {"x": 10, "y": 20, "width": 30, "height": 12},
+        "visible": True,
+        "text": "Advanced",
+        "expanded": False,
+        "selected": True,
     }
 
 
