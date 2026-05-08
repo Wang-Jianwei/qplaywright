@@ -27,6 +27,7 @@
 #include <QPointer>
 #include <QTextEdit>
 #include <QGroupBox>
+#include <QTabWidget>
 
 #include "qplaywright_agent.h"
 
@@ -120,6 +121,14 @@ public:
         setCentralWidget(central);
         auto *layout = new QVBoxLayout(central);
 
+        m_tabs = new QTabWidget;
+        m_tabs->setObjectName("main_tabs");
+        layout->addWidget(m_tabs);
+
+        auto *loginPage = new QWidget;
+        loginPage->setObjectName("tab_login");
+        auto *loginPageLayout = new QVBoxLayout(loginPage);
+
         // --- Login form ---
         auto *loginGroup = new QGroupBox("Login Form");
         auto *loginLayout = new QVBoxLayout(loginGroup);
@@ -170,7 +179,37 @@ public:
         connect(m_loginBtn, &QPushButton::clicked, this, &DemoWindow::onLogin);
         loginLayout->addWidget(m_loginBtn);
 
-        layout->addWidget(loginGroup);
+        loginPageLayout->addWidget(loginGroup);
+        loginPageLayout->addStretch(1);
+        m_tabs->addTab(loginPage, "Login");
+
+        auto *dataPage = new QWidget;
+        dataPage->setObjectName("tab_data");
+        auto *dataPageLayout = new QVBoxLayout(dataPage);
+
+        auto *dataTitle = new QLabel("Data tab content for structured tab-item automation.");
+        dataTitle->setObjectName("data_tab_title");
+        dataPageLayout->addWidget(dataTitle);
+
+        m_dataPanelLabel = new QLabel("Data tab ready");
+        m_dataPanelLabel->setObjectName("data_panel_label");
+        dataPageLayout->addWidget(m_dataPanelLabel);
+
+        auto *dataRefreshBtn = new QPushButton("Refresh Data Panel");
+        dataRefreshBtn->setObjectName("data_refresh_btn");
+        connect(dataRefreshBtn, &QPushButton::clicked, this, &DemoWindow::onRefreshDataPanel);
+        dataPageLayout->addWidget(dataRefreshBtn);
+        dataPageLayout->addStretch(1);
+        m_tabs->addTab(dataPage, "Data");
+
+        auto *settingsPage = new QWidget;
+        settingsPage->setObjectName("tab_settings");
+        auto *settingsPageLayout = new QVBoxLayout(settingsPage);
+        auto *settingsLabel = new QLabel("Settings tab placeholder");
+        settingsLabel->setObjectName("settings_tab_label");
+        settingsPageLayout->addWidget(settingsLabel);
+        settingsPageLayout->addStretch(1);
+        m_tabs->addTab(settingsPage, "Settings");
 
         // Status
         m_status = new QLabel("Status: Ready");
@@ -286,12 +325,22 @@ private slots:
         m_status->setText("Status: Log cleared");
     }
 
+    void onRefreshDataPanel()
+    {
+        if (m_dataPanelLabel)
+            m_dataPanelLabel->setText("Data tab refreshed");
+        m_status->setText("Status: Data tab refreshed");
+        m_log->append("[INFO] Data tab refreshed");
+    }
+
 private:
+    QTabWidget *m_tabs;
     QLineEdit *m_username;
     QLineEdit *m_password;
     QCheckBox *m_remember;
     QComboBox *m_role;
     FancyAmountEdit *m_amountEditor;
+    QLabel *m_dataPanelLabel;
     QPushButton *m_loginBtn;
     QPointer<QDialog> m_dialog;
     QPointer<QLineEdit> m_dialogInput;

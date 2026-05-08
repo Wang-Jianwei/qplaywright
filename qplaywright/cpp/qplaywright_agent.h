@@ -1972,6 +1972,24 @@ private:
             obj["roles"] = roleArray;
         }
 
+        QString itemViewKind;
+        if (qobject_cast<QTableView *>(w)) {
+            itemViewKind = "table";
+        } else if (qobject_cast<QListView *>(w)) {
+            itemViewKind = "list";
+        } else if (qobject_cast<QTreeView *>(w)) {
+            itemViewKind = "tree";
+        } else if (qobject_cast<QTabWidget *>(w) || qobject_cast<QTabBar *>(w)) {
+            itemViewKind = "tab";
+        }
+
+        if (!itemViewKind.isEmpty()) {
+            QJsonObject itemView;
+            itemView["kind"] = itemViewKind;
+            itemView["discoverableBy"] = "inspect_items";
+            obj["itemView"] = itemView;
+        }
+
         QJsonObject geo;
         geo["x"] = w->x();
         geo["y"] = w->y();
