@@ -2382,6 +2382,8 @@ def test_run_cli_help_click_uses_mcp_schema(capsys):
     output = capsys.readouterr().out
     assert "Allowed request shapes:" in output
     assert "Window-relative x coordinate in pixels." in output
+    assert "Prefer the stable handle returned by snapshot, find, or inspect." in output
+    assert "Selector fallback examples:" in output
     assert "a11y-name=Submit" in output
     assert "screenshot clipping" not in output
 
@@ -3142,8 +3144,17 @@ def test_target_not_found_message_includes_selector_examples():
     message = mcp_server._target_not_found_message(connection, "#missing_btn")
 
     assert "No widget found for target '#missing_btn'" in message
-    assert "snapshot or inspect" in message
+    assert "Run snapshot, find, or inspect" in message
+    assert "prefer a returned stable handle" in message
     assert "#objectName, role=button, text=Submit, has-text=partial, a11y-name=Submit, .QLabel" in message
+
+
+def test_selector_help_text_prefers_handles_for_repeatable_actions():
+    text = mcp_server._selector_help_text()
+
+    assert "prefer returned stable handles for repeatable actions" in text
+    assert '{"owner": "w12", "item": {"kind": "table_cell", "row": 3, "column": 1}}' in text
+    assert "invoke with those handles" in text
 
 
 def test_cli_tool_help_includes_action_level_session_and_window_guidance():

@@ -94,8 +94,8 @@ def _tighten_pointer_tool_schema(tool: Any | None, *, verb: str) -> None:
     _strip_null_schema_type(target_schema)
     target_schema.pop("default", None)
     target_schema["description"] = (
-        f"Widget selector or stable handle, or a structured item target object {{owner, item}}. "
-        f"Provide target to {verb} a widget or item. Omit target only when using both x and y to {verb} "
+        f"Stable widget handle or selector, or a structured item target object {{owner, item}}. "
+        f"Prefer the handle returned by snapshot, find, or inspect. Provide target to {verb} a widget or item. Omit target only when using both x and y to {verb} "
         "a window-relative coordinate in the active window."
     )
 
@@ -185,27 +185,27 @@ WindowHeightArg = Annotated[
 
 WidgetTargetArg = Annotated[
     str,
-    Field(description="Widget selector or stable handle target, such as #objectName, role=button, text=Submit, or w12."),
+    Field(description="Stable widget handle or selector target, such as w12, #objectName, role=button, or text=Submit. Prefer the handle returned by snapshot, find, or inspect."),
 ]
 ItemTargetArg = Annotated[
     dict[str, Any],
-    Field(description="Structured item target object: {owner: <widget selector or stable handle>, item: <table_cell/tree_node/list_item descriptor>}"),
+    Field(description="Structured item target object: {owner: <widget stable handle or selector>, item: <table_cell/tree_node/list_item descriptor>}. Prefer a stable handle for owner when available."),
 ]
 UnifiedTargetArg = Annotated[
     str | dict[str, Any],
-    Field(description="Widget selector or stable handle, or a structured item target object {owner, item}."),
+    Field(description="Stable widget handle or selector, or a structured item target object {owner, item}. Prefer the handle returned by snapshot, find, or inspect."),
 ]
 OptionalUnifiedTargetArg = Annotated[
     str | dict[str, Any] | None,
-    Field(description="Optional widget target or structured item target. Omit to inspect the active window when the tool supports it."),
+    Field(description="Optional stable widget handle, selector, or structured item target. Prefer the handle returned by snapshot, find, or inspect. Omit to inspect the active window when the tool supports it."),
 ]
 OptionalWidgetTargetArg = Annotated[
     str | None,
-    Field(description="Optional widget selector or stable handle target. Omit to use the active window or focused widget when supported."),
+    Field(description="Optional stable widget handle or selector target. Prefer the handle returned by snapshot, find, or inspect. Omit to use the active window or focused widget when supported."),
 ]
 FindRootArg = Annotated[
     str | None,
-    Field(description="Optional find scope root: widget selector or stable handle. Omit to search under the active window."),
+    Field(description="Optional find scope root: stable widget handle or selector. Prefer the handle returned by snapshot, find, or inspect. Omit to search under the active window."),
 ]
 FindRoleArg = Annotated[
     str | None,
@@ -1408,8 +1408,8 @@ def _invoke_locator_method(
     count = locator.count()
     if count == 0:
         raise ValueError(
-            "No widget found for invoke. Use snapshot or inspect first, then target with selectors like "
-            "#objectName, role=button, text=Submit, has-text=partial, a11y-name=Submit, or .QLabel."
+            "No widget found for invoke. Use snapshot, find, or inspect first, prefer the returned stable handle, "
+            "and fall back to selectors like #objectName, role=button, text=Submit, has-text=partial, a11y-name=Submit, or .QLabel when needed."
         )
 
     result = locator.first().invoke(method_name, args or {})
@@ -1427,18 +1427,18 @@ def _target_not_found_message(connection: ManagedConnection, target: str | None,
         return f"No widget found for stable handle {candidate!r}. Run snapshot, find, or inspect to discover handles."
     if candidate:
         return (
-            f"No widget found for target {candidate!r}. Run snapshot or inspect to discover the UI, "
-            f"then target a widget with selectors like {examples}."
+            f"No widget found for target {candidate!r}. Run snapshot, find, or inspect to discover the UI, "
+            f"prefer a returned stable handle, and fall back to selectors like {examples} when needed."
         )
     return (
-        "No widget target was resolved. Run snapshot or inspect first, then target a widget with "
-        f"selectors like {examples}."
+        "No widget target was resolved. Run snapshot, find, or inspect first, prefer a returned stable handle, "
+        f"and fall back to selectors like {examples} when needed."
     )
 
 
 def _selector_help_text() -> str:
     return (
-        "Selectors follow the qplaywright selector syntax.\n\n"
+        "Selectors follow the qplaywright selector syntax. Use snapshot, find, or inspect first and prefer returned stable handles for repeatable actions. Selector hints are only a fallback.\n\n"
         "Common forms:\n"
         "- role=button\n"
         "- text=Submit\n"
@@ -1449,15 +1449,15 @@ def _selector_help_text() -> str:
         "- name=objectName\n"
         "- .QLabel\n\n"
         "Structured item targets use the form {owner, item}, for example:\n"
-        "- {\"owner\": \"#orders_table\", \"item\": {\"kind\": \"table_cell\", \"row\": 3, \"column\": 1}}\n"
-        "- {\"owner\": \"#settings_tree\", \"item\": {\"kind\": \"tree_node\", \"path\": [0, 1]}}\n"
-        "- {\"owner\": \"#task_list\", \"item\": {\"kind\": \"list_item\", \"row\": 2}}\n"
-        "- {\"owner\": \"#main_tabs\", \"item\": {\"kind\": \"tab_item\", \"index\": 1}}\n\n"
+        "- {\"owner\": \"w12\", \"item\": {\"kind\": \"table_cell\", \"row\": 3, \"column\": 1}}\n"
+        "- {\"owner\": \"w9\", \"item\": {\"kind\": \"tree_node\", \"path\": [0, 1]}}\n"
+        "- {\"owner\": \"w5\", \"item\": {\"kind\": \"list_item\", \"row\": 2}}\n"
+        "- {\"owner\": \"w3\", \"item\": {\"kind\": \"tab_item\", \"index\": 1}}\n\n"
         "Typical workflow:\n"
         "1. session attach or session launch\n"
         "2. window list and window select when multiple windows are visible\n"
-        "3. snapshot, find, or inspect for widgets; inspect_items for table/tree/list/tab descendants\n"
-        "4. click, hover, wait, set_expanded, input, set_checked, press_key, choose, screenshot, or invoke\n"
+        "3. snapshot, find, or inspect for widgets and capture stable handles; inspect_items for table/tree/list/tab descendants\n"
+        "4. click, hover, wait, set_expanded, input, set_checked, press_key, choose, screenshot, or invoke with those handles\n"
         "5. session close when finished"
     )
 
@@ -3023,10 +3023,10 @@ def _cli_usage_text() -> str:
         "  qplaywright-mcp cli session attach --port 19877\n"
         "  qplaywright-mcp cli window select --title Dialog\n"
         "  qplaywright-mcp cli snapshot --depth 4 --topmost-only\n"
-        "  qplaywright-mcp cli click text=Start --count 2\n"
+        "  qplaywright-mcp cli click w12 --count 2\n"
         "  qplaywright-mcp cli click --x 320 --y 180\n"
         "  qplaywright-mcp cli hover --x 320 --y 180\n"
-        "  qplaywright-mcp cli input #amount_editor 123.45 --submit\n"
+        "  qplaywright-mcp cli input w7 123.45 --submit\n"
         "  qplaywright-mcp cli session '{\"action\": \"attach\", \"port\": 19877}'\n"
         "  qplaywright-mcp cli resource '{\"uri\": \"qplaywright://help/selectors\"}'\n"
         "  qplaywright-mcp cli snapshot '{\"depth\": 4}'\n\n"
@@ -3133,7 +3133,12 @@ def _cli_tool_help_from_schema(tool_name: str) -> str | None:
             lines.append(line)
 
     if isinstance(properties, dict) and any(name in properties for name in ("target", "root", "owner")):
-        lines.extend(["", "Selector examples:", f"- {_SELECTOR_EXAMPLES}"])
+        lines.extend([
+            "",
+            "Target guidance:",
+            "- Prefer the stable handle returned by snapshot, find, or inspect.",
+            f"- Selector fallback examples: {_SELECTOR_EXAMPLES}",
+        ])
 
     return "\n".join(lines)
 
