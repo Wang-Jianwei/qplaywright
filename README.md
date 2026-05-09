@@ -138,6 +138,7 @@ qplaywright> click {"target": "w12"}
 ```
 
 Use `snapshot`, `find`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
+Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find` when you want a short candidate list for one predicate.
 
 You can also inspect CLI help and available MCP resources directly:
 

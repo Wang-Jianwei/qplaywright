@@ -1528,9 +1528,10 @@ def _selector_help_text() -> str:
         "Typical workflow:\n"
         "1. session attach or session launch\n"
         "2. window list and window select when multiple windows are visible\n"
-        "3. snapshot, find, or inspect to inspect widgets and capture stable handles; inspect_items for table/tree/list/tab descendants\n"
-        "4. click, hover, wait, set_expanded, input, set_checked, press_key, choose, screenshot, or invoke with those handles\n"
-        "5. session close when finished"
+        "3. use snapshot with target+depth when you want one subtree and several child handles; use find when you want a small candidate set for one predicate\n"
+        "4. inspect one chosen handle when you need methods, properties, or exact state; inspect_items for table/tree/list/tab descendants\n"
+        "5. click, hover, wait, set_expanded, input, set_checked, press_key, choose, screenshot, or invoke with those handles\n"
+        "6. session close when finished"
     )
 
 
@@ -2384,6 +2385,9 @@ if FastMCP is not None:
     ) -> dict[str, Any]:
         """Return a text snapshot of the current active window or one target.
 
+        Use target plus depth when you want to inspect one subtree and capture
+        several child handles in one call.
+
         When topmost_only is true, the window-wide snapshot becomes an approximate
         frontmost-visible view and may be incomplete.
         """
@@ -2491,7 +2495,11 @@ if FastMCP is not None:
         include_infrastructure: IncludeInfrastructureArg = False,
         limit: FindLimitArg = 5,
     ) -> dict[str, Any]:
-        """Return a small, deterministic set of widget candidates within one root scope."""
+        """Return a small, deterministic set of widget candidates within one root scope.
+
+        Prefer find when you already have one predicate and want a short
+        candidate list instead of a full subtree snapshot.
+        """
 
         if limit <= 0:
             raise ValueError("limit must be > 0")
@@ -3145,7 +3153,7 @@ def _cli_tool_help_from_schema(tool_name: str) -> str | None:
     if tool is None:
         return None
 
-    description = _prefix_action_lines(tool_name, (tool.description or "No description available.").strip())
+    description = _prefix_action_lines(tool_name, pyinspect.cleandoc(tool.description or "No description available."))
     schema = tool.parameters if isinstance(tool.parameters, dict) else {}
     properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
 

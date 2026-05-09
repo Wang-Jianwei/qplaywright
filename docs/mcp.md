@@ -89,6 +89,7 @@ qplaywright-mcp cli input w7 123.45 --submit
 ```
 
 Use `snapshot`, `find`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
+Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find` when you want a short candidate list for one predicate.
 
 When `click` or `hover` omits `target`, `x` and `y` are interpreted as coordinates relative to the active window.
 If the active window is not the desired scope, switch it first with `window select`.
@@ -335,6 +336,9 @@ with `WA_TransparentForMouseEvents`.
 
 Stable widget handles are session-stable. They survive later `snapshot`, `find`, and `inspect` calls, and only fail
 once the widget is destroyed or the session is replaced.
+
+Use `snapshot(target=..., depth=N)` when you already know a container or owner widget and want to inspect a local subtree in one round-trip.
+Use `find` when you already have one narrowing predicate such as `object_name`, `text`, `role`, or `has_text` and want a small candidate set instead of a subtree dump.
 
 When `topmost_only=true` and `target` is omitted, the result is an approximate
 frontmost-visible view. It may omit widgets or content and returns a warning to

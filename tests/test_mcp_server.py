@@ -2461,6 +2461,16 @@ def test_run_cli_help_click_uses_mcp_schema(capsys):
     assert "screenshot clipping" not in output
 
 
+def test_run_cli_help_snapshot_mentions_targeted_subtree_capture(capsys):
+    exit_code = mcp_server._run_cli(["help", "snapshot"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "inspect one subtree and capture" in output
+    assert "frontmost-visible view" in output
+    assert "        Use target plus depth" not in output
+
+
 def test_run_cli_prints_resource_list(monkeypatch, capsys):
     def fake_selector_help():
         """Selector syntax and recommended qplaywright MCP workflow."""
@@ -3257,6 +3267,7 @@ def test_selector_help_text_prefers_handles_for_repeatable_actions():
     text = mcp_server._selector_help_text()
 
     assert "observe the UI and capture stable handles for repeatable actions" in text
+    assert "use snapshot with target+depth when you want one subtree and several child handles" in text
     assert '{"owner": "w12", "item": {"kind": "table_cell", "row": 3, "column": 1}}' in text
     assert "invoke with those handles" in text
 
