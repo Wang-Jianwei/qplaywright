@@ -1060,6 +1060,43 @@ def test_filter_infrastructure_nodes_drops_qt_internal_support_widgets():
     assert [child["wid"] for child in filtered[0]["children"]] == [3]
 
 
+def test_filter_infrastructure_nodes_promotes_meaningful_descendants_of_internal_widgets():
+    nodes = [
+        {
+            "wid": 1,
+            "class": "DemoWindow",
+            "objectName": "",
+            "children": [
+                {
+                    "wid": 2,
+                    "class": "QStackedWidget",
+                    "objectName": "qt_tabwidget_stackedwidget",
+                    "children": [
+                        {
+                            "wid": 3,
+                            "class": "QWidget",
+                            "objectName": "tab_login",
+                            "children": [
+                                {
+                                    "wid": 4,
+                                    "class": "QLineEdit",
+                                    "objectName": "username",
+                                    "children": [],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    filtered = mcp_server._filter_infrastructure_nodes(nodes)
+
+    assert [child["wid"] for child in filtered[0]["children"]] == [3]
+    assert filtered[0]["children"][0]["children"][0]["wid"] == 4
+
+
 def test_inspect_without_target_filters_infrastructure_by_default(monkeypatch):
     state = mcp_server.ServerState()
     state.connection = mcp_server.ManagedConnection(

@@ -1673,6 +1673,7 @@ def _filter_infrastructure_nodes(
             normalized.pop("children", None)
 
         if not preserve_roots and _is_infrastructure_widget_node(normalized):
+            filtered.extend(filtered_children)
             continue
 
         filtered.append(normalized)
