@@ -1540,8 +1540,6 @@ def _format_widget_snapshot(nodes: list[dict[str, Any]], *, depth: int = 10, lev
 
     lines: list[str] = []
     for node in nodes:
-        target_hint = _snapshot_target_hint(node)
-        hint_part = f" ~{target_hint}" if target_hint else ""
         transparent_part = " !transparent" if _is_mouse_transparent(node) else ""
 
         label, marker = _snapshot_display_label(node)
@@ -1549,7 +1547,7 @@ def _format_widget_snapshot(nodes: list[dict[str, Any]], *, depth: int = 10, lev
         text_part = f' "{label}"' if label else ""
         markers = " ".join(part for part in (marker, item_view_marker) if part)
         marker_part = f" {markers}" if markers else ""
-        line = f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{transparent_part}{hint_part}"
+        line = f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{transparent_part}"
         lines.append(line)
 
         children = node.get("children") or []
@@ -1562,19 +1560,6 @@ def _format_widget_snapshot(nodes: list[dict[str, Any]], *, depth: int = 10, lev
 
 def _snapshot_handle_for_widget(connection: ManagedConnection, wid: int | None) -> str | None:
     return connection.handle_for_wid(wid if isinstance(wid, int) and not isinstance(wid, bool) else None)
-
-
-def _snapshot_target_hint(node: dict[str, Any]) -> str:
-    object_name = node.get("objectName") or ""
-    if object_name:
-        return f"#{object_name}"
-    accessible_name = node.get("accessibleName") or ""
-    if accessible_name:
-        return f"a11y-name={accessible_name}"
-    widget_class = node.get("class") or ""
-    if widget_class:
-        return f".{widget_class}"
-    return ""
 
 
 def _snapshot_display_label(node: dict[str, Any]) -> tuple[str, str]:
@@ -1613,9 +1598,6 @@ def _snapshot_entry(node: dict[str, Any], handle: str | None) -> dict[str, Any]:
         "handle": handle,
         "class": node.get("class", ""),
     }
-    selector_hint = _snapshot_target_hint(node)
-    if selector_hint:
-        entry["selector_hint"] = selector_hint
     compact_geometry = _compact_geometry(node.get("geometry") if isinstance(node.get("geometry"), dict) else None)
     if compact_geometry is not None:
         entry["geometry"] = compact_geometry
@@ -1707,14 +1689,12 @@ def _render_snapshot_tree(
 
         handle = _snapshot_handle_for_widget(connection, wid)
         handle_part = f" @{handle}" if handle else ""
-        selector_hint = _snapshot_target_hint(node)
-        hint_part = f" ~{selector_hint}" if selector_hint else ""
         transparent_part = " !transparent" if _is_mouse_transparent(node) else ""
         label, marker = _snapshot_display_label(node)
         text_part = f' "{label}"' if label else ""
         marker_part = f" {marker}" if marker else ""
         active_part = " [active]" if wid == connection.active_window_wid else ""
-        lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{active_part}{handle_part}{transparent_part}{hint_part}")
+        lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{active_part}{handle_part}{transparent_part}")
         widgets.append(_snapshot_entry(node, handle))
 
         child_lines, child_refs = _render_snapshot_tree(

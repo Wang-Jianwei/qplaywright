@@ -771,7 +771,7 @@ def test_snapshot_payload_returns_v2_handle_shape():
 
     assert payload["ok"] is True
     assert payload["root_handle"] == "w1"
-    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "selector_hint": ".DemoWindow", "text": "Title"}]
+    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title"}]
     assert "refs" not in payload
     assert "epoch" not in payload
 
@@ -977,7 +977,7 @@ def test_format_widget_snapshot_marks_item_view_owner_for_inspect_items():
         ]
     )
 
-    assert snapshot == "- FancyOrdersTable [item-view=table; use inspect_items] ~#orders_table"
+    assert snapshot == "- FancyOrdersTable [item-view=table; use inspect_items]"
 
 
 def test_snapshot_entry_preserves_item_view_hint():
@@ -2001,7 +2001,7 @@ def test_initialize_active_window_uses_first_visible_window():
     assert windows[0]["is_active"] is True
 
 
-def test_format_widget_snapshot_includes_selector_hints():
+def test_format_widget_snapshot_omits_selector_hints():
     snapshot = mcp_server._format_widget_snapshot(
         [
             {
@@ -2014,7 +2014,7 @@ def test_format_widget_snapshot_includes_selector_hints():
         depth=3,
     )
 
-    assert 'QPushButton "Login" ~#login_btn' in snapshot
+    assert snapshot == '- QPushButton "Login"'
 
 
 def test_format_widget_snapshot_marks_accessibility_derived_labels():
@@ -2030,10 +2030,10 @@ def test_format_widget_snapshot_marks_accessibility_derived_labels():
         depth=3,
     )
 
-    assert 'MenuButton "功率扫描" [a11y] ~#measure_type_btn' in snapshot
+    assert snapshot == '- MenuButton "功率扫描" [a11y]'
 
 
-def test_format_widget_snapshot_uses_a11y_selector_when_no_object_name():
+def test_format_widget_snapshot_uses_a11y_label_when_no_object_name():
     snapshot = mcp_server._format_widget_snapshot(
         [
             {
@@ -2045,7 +2045,7 @@ def test_format_widget_snapshot_uses_a11y_selector_when_no_object_name():
         depth=3,
     )
 
-    assert 'ui_toolbar_icon_button_t "AddTraceButton" [a11y] ~a11y-name=AddTraceButton' in snapshot
+    assert snapshot == '- ui_toolbar_icon_button_t "AddTraceButton" [a11y]'
 
 
 def test_format_widget_snapshot_marks_mouse_transparent_widgets():
@@ -2062,7 +2062,6 @@ def test_format_widget_snapshot_marks_mouse_transparent_widgets():
     )
 
     assert "!transparent" in snapshot
-    assert "~#overlay_hint" in snapshot
 
 
 def test_snapshot_entry_wraps_special_attributes():
@@ -2113,11 +2112,9 @@ def test_snapshot_payload_creates_stable_handles():
 
     assert "@w1" in payload["snapshot"]
     assert "@w2" in payload["snapshot"]
-    assert "~#login_btn" in payload["snapshot"]
     assert connection.handle_to_wid == {"w1": 1, "w2": 2}
     assert payload["widgets"][1]["handle"] == "w2"
     assert payload["widgets"][1]["object_name"] == "login_btn"
-    assert payload["widgets"][1]["selector_hint"] == "#login_btn"
 
 
 def test_snapshot_payload_filters_infrastructure_widgets_by_default():
@@ -2195,7 +2192,7 @@ def test_snapshot_payload_can_include_infrastructure_widgets_when_requested():
         include_infrastructure=True,
     )
 
-    assert "qt_scrollarea_viewport" in payload["snapshot"]
+    assert payload["widgets"][1]["object_name"] == "qt_scrollarea_viewport"
 
 
 def test_snapshot_payload_preserves_existing_handle_bindings():
@@ -2229,7 +2226,6 @@ def test_snapshot_payload_preserves_existing_handle_bindings():
         {
             "handle": "w10",
             "class": "DemoWindow",
-            "selector_hint": ".DemoWindow",
             "geometry": [10, 20, 640, 480],
             "window_title": "Title",
         }
@@ -2287,7 +2283,6 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
         {
             "handle": "w9",
             "class": "DemoWindow",
-            "selector_hint": ".DemoWindow",
             "geometry": [0, 0, 320, 180],
             "text": "Dialog",
         },
@@ -2295,7 +2290,6 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
             "handle": "w10",
             "class": "QPushButton",
             "object_name": "confirm_btn",
-            "selector_hint": "#confirm_btn",
             "geometry": [40, 60, 80, 24],
             "text": "Confirm",
         },
@@ -2358,7 +2352,7 @@ def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
         ],
     )
 
-    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "selector_hint": ".DemoWindow", "text": "Title"}]
+    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title"}]
     assert payload["snapshot"].count("@w1") == 1
 
 
@@ -3113,7 +3107,6 @@ def test_find_result_returns_v2_handle_shape():
         "results": [
             {
                 "handle": "w2",
-                "selector_hint": "#submit_btn",
                 "class": "QPushButton",
                 "object_name": "submit_btn",
                 "text": "Submit",

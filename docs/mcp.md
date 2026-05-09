@@ -322,17 +322,15 @@ Each snapshot widget entry includes:
 
 - `handle`
 - `class`
-- optional `selector_hint`
 - optional compact `geometry`
 - optional `attribute`
 - any meaningful semantic label fields such as `text`, `accessible_name`, `current_text`, `window_title`, or `value`
 
-Snapshot text is also compact by design: entries append `@wN` for stable handles,
-`~selector` for selector hints, and `!transparent` when the widget is marked
+Snapshot text is also compact by design: entries append `@wN` for stable handles
+and `!transparent` when the widget is marked
 with `WA_TransparentForMouseEvents`.
 
 `handle` is the exact follow-up identity for widget actions.
-`selector_hint` is only a discovery hint and should not replace the stable handle for exact widget actions.
 `geometry` uses `[x, y, width, height]`, and `attribute` wraps exceptional widget flags such as `{"transparent_for_mouse_events": true}`.
 
 Stable widget handles are session-stable. They survive later `snapshot`, `find`, and `inspect` calls, and only fail

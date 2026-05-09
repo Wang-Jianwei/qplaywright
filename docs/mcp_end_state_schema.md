@@ -135,7 +135,6 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
   "handle": "w12",
   "class": "FancyAmountEdit",
   "object_name": "amount_editor",
-  "selector_hint": "#amount_editor",
   "text": "123.45",
   "geometry": [12, 48, 220, 80]
 }
@@ -144,7 +143,6 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 补充说明：
 
 - `handle` 是 exact widget follow-up action 的稳定标识
-- `selector_hint` 仅用于 discovery 提示，不是 exact widget action 的目标身份
 - `attribute` 为可选字段，用于承载特殊属性，例如 `{"transparent_for_mouse_events": true}`
 - `geometry` 遵循 `Rect Array` 的固定槽位语义
 
@@ -490,7 +488,6 @@ MCP 工具失败时应返回明确、可操作的错误信息。
       "handle": "w48",
       "class": "QPushButton",
       "object_name": "submit_btn",
-      "selector_hint": "#submit_btn",
       "text": "Submit",
       "geometry": [310, 412, 96, 28],
       "match_reason": ["role=button", "has_text~=Submit", "visible=true", "enabled=true", "interactable=true"],
