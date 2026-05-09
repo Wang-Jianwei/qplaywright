@@ -1505,12 +1505,6 @@ def _snapshot_target_hint(node: dict[str, Any]) -> str:
 
 
 def _actionable_widget_target(node: dict[str, Any], handle: str | None) -> str:
-    object_name = node.get("objectName") or ""
-    if object_name:
-        return f"#{object_name}"
-    accessible_name = node.get("accessibleName") or ""
-    if accessible_name:
-        return f"a11y-name={accessible_name}"
     return handle or ""
 
 
