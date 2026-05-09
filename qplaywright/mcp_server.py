@@ -1504,10 +1504,6 @@ def _snapshot_target_hint(node: dict[str, Any]) -> str:
     return ""
 
 
-def _actionable_widget_target(node: dict[str, Any], handle: str | None) -> str:
-    return handle or ""
-
-
 def _snapshot_display_label(node: dict[str, Any]) -> tuple[str, str]:
     text = node.get("text") or ""
     if text:
@@ -1544,9 +1540,6 @@ def _snapshot_entry(node: dict[str, Any], handle: str | None) -> dict[str, Any]:
         "handle": handle,
         "class": node.get("class", ""),
     }
-    target = _actionable_widget_target(node, handle)
-    if target:
-        entry["target"] = target
     selector_hint = _snapshot_target_hint(node)
     if selector_hint:
         entry["selector_hint"] = selector_hint
@@ -1641,15 +1634,13 @@ def _render_snapshot_tree(
 
         handle = _snapshot_handle_for_widget(connection, wid)
         handle_part = f" [handle={handle}]" if handle else ""
-        actionable_target = _actionable_widget_target(node, handle)
-        target_part = f" target={actionable_target}" if actionable_target else ""
         selector_hint = _snapshot_target_hint(node)
         hint_part = f" hint={selector_hint}" if selector_hint else ""
         label, marker = _snapshot_display_label(node)
         text_part = f' "{label}"' if label else ""
         marker_part = f" {marker}" if marker else ""
         active_part = " [active]" if wid == connection.active_window_wid else ""
-        lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{active_part}{handle_part}{target_part}{hint_part}")
+        lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{active_part}{handle_part}{hint_part}")
         widgets.append(_snapshot_entry(node, handle))
 
         child_lines, child_refs = _render_snapshot_tree(

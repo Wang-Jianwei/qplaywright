@@ -2030,12 +2030,10 @@ def test_snapshot_payload_creates_stable_handles():
 
     assert "[handle=w1]" in payload["snapshot"]
     assert "[handle=w2]" in payload["snapshot"]
-    assert "target=w2" in payload["snapshot"]
     assert "hint=#login_btn" in payload["snapshot"]
     assert connection.handle_to_wid == {"w1": 1, "w2": 2}
     assert payload["widgets"][1]["handle"] == "w2"
     assert payload["widgets"][1]["object_name"] == "login_btn"
-    assert payload["widgets"][1]["target"] == "w2"
     assert payload["widgets"][1]["selector_hint"] == "#login_btn"
 
 
@@ -3034,7 +3032,6 @@ def test_find_result_returns_v2_handle_shape():
         "results": [
             {
                 "handle": "w2",
-                "target": "w2",
                 "selector_hint": "#submit_btn",
                 "class": "QPushButton",
                 "object_name": "submit_btn",

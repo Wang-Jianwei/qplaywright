@@ -49,7 +49,7 @@
 
 - 终态契约中的 selector 仍沿用 qplaywright 的单表达式语法，例如 `role=button`、`text=保存`、`has-text=partial`
 - 终态契约当前不定义 `role=button >> has-text=Submit` 或 `role=button[has-text=Submit]` 这类复合语法
-- 当需要“角色 + 文本”等复合定位时，推荐流程是先 `snapshot`、`find` 或 `inspect` 观察并拿到更稳定的 target，再使用 stable handle 继续动作
+- 当需要“角色 + 文本”等复合定位时，推荐流程是先 `snapshot`、`find` 或 `inspect` 观察并拿到 stable handle，再继续动作
 
 ### Root / Owner
 
