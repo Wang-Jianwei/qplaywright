@@ -95,7 +95,7 @@ def _tighten_pointer_tool_schema(tool: Any | None, *, verb: str) -> None:
     target_schema.pop("default", None)
     target_schema["description"] = (
         f"Stable widget handle, or a structured item target object {{owner, item}}. "
-        f"Use snapshot, find, or inspect to discover handles first. Provide target to {verb} a widget or item. Omit target only when using both x and y to {verb} "
+        f"Use snapshot, find, or inspect to observe the UI and capture handles first. Provide target to {verb} a widget or item. Omit target only when using both x and y to {verb} "
         "a window-relative coordinate in the active window."
     )
 
@@ -185,15 +185,15 @@ WindowHeightArg = Annotated[
 
 WidgetHandleArg = Annotated[
     str,
-    Field(description="Stable widget handle target, such as w12. Discover handles with snapshot, find, or inspect before precise widget actions."),
+    Field(description="Stable widget handle target, such as w12. Get handles from snapshot, find, or inspect before precise widget actions."),
 ]
 WidgetDiscoveryTargetArg = Annotated[
     str,
-    Field(description="Stable widget handle or selector discovery target, such as w12, #objectName, role=button, or text=Submit. Use selectors to search; reuse returned handles for precise widget actions."),
+    Field(description="Stable widget handle or selector target used for observation or search, such as w12, #objectName, role=button, or text=Submit. Use selectors to narrow candidates; reuse returned handles for precise widget actions."),
 ]
 ItemTargetArg = Annotated[
     dict[str, Any],
-    Field(description="Structured item target object: {owner: <widget stable handle or discovery selector>, item: <table_cell/tree_node/list_item descriptor>}. Prefer a stable handle for owner when available."),
+    Field(description="Structured item target object: {owner: <widget stable handle or selector>, item: <table_cell/tree_node/list_item descriptor>}. Prefer a stable handle for owner when available."),
 ]
 ActionTargetArg = Annotated[
     str | dict[str, Any],
@@ -205,19 +205,19 @@ OptionalActionTargetArg = Annotated[
 ]
 OptionalWidgetHandleArg = Annotated[
     str | None,
-    Field(description="Optional stable widget handle target. Discover handles with snapshot, find, or inspect before precise widget actions. Omit to use the active window or focused widget when supported."),
+    Field(description="Optional stable widget handle target. Get handles from snapshot, find, or inspect before precise widget actions. Omit to use the active window or focused widget when supported."),
 ]
 OptionalWidgetDiscoveryTargetArg = Annotated[
     str | None,
-    Field(description="Optional stable widget handle or selector discovery target. Use selectors to search; reuse returned handles for precise widget actions. Omit to inspect or snapshot the active window when supported."),
+    Field(description="Optional stable widget handle or selector target used for observation or search. Use selectors to narrow candidates; reuse returned handles for precise widget actions. Omit to inspect or snapshot the active window when supported."),
 ]
 OptionalDiscoveryOrItemTargetArg = Annotated[
     str | dict[str, Any] | None,
-    Field(description="Optional stable widget handle, selector discovery target, or structured item target object {owner, item}. Omit to inspect the active window when the tool supports it."),
+    Field(description="Optional stable widget handle, selector target used for observation or search, or structured item target object {owner, item}. Omit to inspect the active window when the tool supports it."),
 ]
 FindRootArg = Annotated[
     str | None,
-    Field(description="Optional find scope root: stable widget handle or selector. Use selectors to search; reuse returned handles for precise widget actions. Omit to search under the active window."),
+    Field(description="Optional find scope root: stable widget handle or selector. Use selectors to narrow candidate search; reuse returned handles for precise widget actions. Omit to search under the active window."),
 ]
 FindRoleArg = Annotated[
     str | None,
@@ -1496,10 +1496,10 @@ def _target_not_found_message(connection: ManagedConnection, target: str | None,
     examples = "#objectName, role=button, text=Submit, has-text=partial, a11y-name=Submit, .QLabel"
     candidate = (target or element or "").strip()
     if candidate and _HANDLE_PATTERN.match(candidate):
-        return f"No widget found for stable handle {candidate!r}. Run snapshot, find, or inspect to discover handles."
+        return f"No widget found for stable handle {candidate!r}. Run snapshot, find, or inspect to capture fresh handles."
     if candidate:
         return (
-            f"No widget found for target {candidate!r}. Run snapshot, find, or inspect to discover the UI, "
+            f"No widget found for target {candidate!r}. Run snapshot, find, or inspect to observe the UI, "
             f"prefer a returned stable handle, and fall back to selectors like {examples} when needed."
         )
     return (
@@ -1510,7 +1510,7 @@ def _target_not_found_message(connection: ManagedConnection, target: str | None,
 
 def _selector_help_text() -> str:
     return (
-        "Selectors follow the qplaywright selector syntax. Use snapshot, find, or inspect first and prefer returned stable handles for repeatable actions. Selector hints are only a fallback.\n\n"
+        "Selectors follow the qplaywright selector syntax. Use snapshot, find, or inspect first to observe the UI and capture stable handles for repeatable actions.\n\n"
         "Common forms:\n"
         "- role=button\n"
         "- text=Submit\n"
@@ -1528,7 +1528,7 @@ def _selector_help_text() -> str:
         "Typical workflow:\n"
         "1. session attach or session launch\n"
         "2. window list and window select when multiple windows are visible\n"
-        "3. snapshot, find, or inspect for widgets and capture stable handles; inspect_items for table/tree/list/tab descendants\n"
+        "3. snapshot, find, or inspect to inspect widgets and capture stable handles; inspect_items for table/tree/list/tab descendants\n"
         "4. click, hover, wait, set_expanded, input, set_checked, press_key, choose, screenshot, or invoke with those handles\n"
         "5. session close when finished"
     )
@@ -2208,7 +2208,7 @@ if FastMCP is not None:
         "qplaywright",
         instructions=(
             "Automate Qt QWidget applications through qplaywright. "
-            "Use session, window, snapshot, inspect, and inspect_items to discover the UI before "
+            "Use session, window, snapshot, inspect, and inspect_items to observe the UI before "
             "performing destructive UI actions."
         ),
         json_response=True,
@@ -3384,7 +3384,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("--include-infrastructure", action="store_true")
     snapshot_parser.add_argument("--save-to")
 
-    find_parser = subparsers.add_parser("find", help="Run server-side widget discovery under one scope.")
+    find_parser = subparsers.add_parser("find", help="Run server-side widget search under one scope.")
     find_parser.add_argument("--root")
     find_parser.add_argument("--role")
     find_parser.add_argument("--text")

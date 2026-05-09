@@ -27,9 +27,9 @@
 
 ## Value Types
 
-### Widget Discovery Target
+### Widget Observation/Search Target
 
-观察和 discovery 工具里的 widget `target` 使用统一字符串参数。
+观察或搜索工具里的 widget `target` 使用统一字符串参数。
 
 类型：`string`
 
@@ -38,7 +38,7 @@
 1. 如果值匹配当前 stable handle 形状，例如 `w12`，按 stable handle 解析。
 2. 否则按 qplaywright selector 解析。
 
-适用范围：`snapshot.target`、`inspect.target`、`find.root` 的 widget scope，以及其他仅用于 discovery 的 widget 入口。
+适用范围：`snapshot.target`、`inspect.target`、`find.root` 的 widget scope，以及其他仅用于观察或搜索的 widget 入口。
 
 示例：
 
@@ -75,10 +75,10 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 
 `root` 和 `owner` 与 `target` 一样，都是字符串形态的可解析目标 spec。
 
-- `root` 用于 widget discovery 或局部观察 scope
+- `root` 用于 widget 搜索或局部观察 scope
 - `owner` 用于 table/tree/list/tab 这类 item-view owner widget
 
-它们的解析规则与 widget discovery target 一致：优先解析 stable handle，否则按 selector 解析。
+它们的解析规则与 widget observation/search target 一致：优先解析 stable handle，否则按 selector 解析。
 
 ### Rect Array
 
@@ -447,7 +447,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 工具名：`find`
 
-职责：在给定 scope 下做结构化 widget discovery。
+职责：在给定 scope 下做结构化 widget 搜索。
 
 ### Find Request
 

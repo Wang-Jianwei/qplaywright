@@ -2457,7 +2457,7 @@ def test_run_cli_help_click_uses_mcp_schema(capsys):
     output = capsys.readouterr().out
     assert "Allowed request shapes:" in output
     assert "Window-relative x coordinate in pixels." in output
-    assert "Use snapshot, find, or inspect to discover handles first." in output
+    assert "Use snapshot, find, or inspect to observe the UI and capture handles first." in output
     assert "screenshot clipping" not in output
 
 
@@ -3222,7 +3222,7 @@ def test_target_not_found_message_includes_selector_examples():
 def test_selector_help_text_prefers_handles_for_repeatable_actions():
     text = mcp_server._selector_help_text()
 
-    assert "prefer returned stable handles for repeatable actions" in text
+    assert "observe the UI and capture stable handles for repeatable actions" in text
     assert '{"owner": "w12", "item": {"kind": "table_cell", "row": 3, "column": 1}}' in text
     assert "invoke with those handles" in text
 

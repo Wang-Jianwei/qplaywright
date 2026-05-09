@@ -88,7 +88,7 @@ qplaywright-mcp cli hover --x 320 --y 180
 qplaywright-mcp cli input w7 123.45 --submit
 ```
 
-Use `snapshot`, `find`, or `inspect` to discover widget handles first. Exact widget actions then reuse those stable handles; selector hints stay on the discovery side.
+Use `snapshot`, `find`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
 
 When `click` or `hover` omits `target`, `x` and `y` are interpreted as coordinates relative to the active window.
 If the active window is not the desired scope, switch it first with `window select`.
@@ -96,7 +96,7 @@ If the active window is not the desired scope, switch it first with `window sele
 ## Typical Tool Flow
 
 1. `session` with `action="attach"` or `action="launch"` to establish the active session.
-2. `window` with `action="list"` to discover visible top-level windows.
+2. `window` with `action="list"` to list visible top-level windows.
 3. `window` with `action="select"` when the desired scope is not the current active window.
 4. `snapshot`, `find`, or `inspect` to understand the widget tree and obtain stable handles.
 5. `inspect_items` when the target widget is a table, tree, or list and you need structured descendant item targets.
@@ -162,7 +162,7 @@ There is no parallel top-level `width` / `height` return shape anymore.
 
 ### Target Rules
 
-Discovery and inspection tools accept a single `target` value.
+Observation and search tools accept a single `target` value.
 That value may be either:
 
 - a stable widget handle such as `w12`
@@ -174,7 +174,7 @@ That value may be either:
 
 Exact widget actions use the same `target` parameter name, but for widgets they only accept stable handles such as `w12`.
 That applies to `click`, `input`, `invoke`, `set_checked`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and targeted `screenshot`.
-Selectors remain valid for discovery scopes such as `snapshot`, `find`, `inspect`, and `inspect_items` owner resolution.
+Selectors remain valid for observation/search scopes such as `snapshot`, `find`, `inspect`, and `inspect_items` owner resolution.
 
 The selector side keeps the existing atomic qplaywright forms.
 This contract does not define inline composite syntax such as `role=button >> has-text=Submit`.
@@ -357,7 +357,7 @@ Request:
 }
 ```
 
-`find` performs server-side widget discovery within one root scope and returns a
+`find` performs server-side widget search within one root scope and returns a
 small deterministic candidate set. Response fields include:
 
 - `root_handle`
@@ -376,7 +376,7 @@ Typical fields include:
 - `match_reason`
 - `ancestor_summary`
 
-`find` is still a discovery tool, not a full inspect payload. If you need methods,
+`find` is still a search tool, not a full inspect payload. If you need methods,
 properties, or exact target-level state, follow up with `inspect` on the chosen handle.
 
 ### inspect
@@ -421,9 +421,9 @@ Request:
 `inspect_items` enumerates structured descendants for one table, tree, list, or tab owner widget.
 Each returned entry includes an `item` descriptor plus a reusable `target` object in the form `{owner, item}`.
 Use those returned `target` objects directly with `inspect`, `click`, `hover`, `wait`, and `set_expanded`.
-Stable widget handles remain widget-only; item discovery is handled by `inspect_items`.
+Stable widget handles remain widget-only; structured item targets come from `inspect_items`.
 When `snapshot` or widget-tree `inspect` encounters a table, tree, or list owner widget, it may include an `itemView`
-hint so the next discovery step is explicit instead of implying that per-cell delegates are normal widget descendants.
+hint so the next step is explicit instead of implying that per-cell delegates are normal widget descendants.
 
 For table, tree, and list items, `text` remains the display-facing model value.
 When an item is actively being edited and the live editor value differs, the same
@@ -499,7 +499,7 @@ For item views, that means:
 - paint-only delegates and non-persistent editors do not appear as widgets, because they are not stable QWidget descendants
 - item-view owner widgets may expose `itemView: {kind, discoverableBy}` to point you to `inspect_items`
 
-If you need to discover table cells, tree nodes, or list rows reliably, use `inspect_items` first instead of expecting `snapshot`
+If you need table cells, tree nodes, or list rows reliably, use `inspect_items` first instead of expecting `snapshot`
 to materialize delegate-painted item content as standalone widgets.
 
 ## End-to-End Demo
@@ -546,6 +546,6 @@ Supported selectors match the existing qplaywright syntax:
 - `.QLabel`
 
 Composite selector grammar is intentionally not part of the current contract.
-Selectors are for discovery scopes, not exact widget actions.
-For cases like "button whose text contains Submit", first discover the right widget with `snapshot`, `find`, or `inspect`, then reuse its stable handle.
+Selectors are for observation/search scopes, not exact widget actions.
+For cases like "button whose text contains Submit", first narrow to the right widget with `snapshot`, `find`, or `inspect`, then reuse its stable handle.
 For structured item interactions, resolve the owner widget first and prefer its stable handle in the item target object.

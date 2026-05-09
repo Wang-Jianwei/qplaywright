@@ -137,7 +137,7 @@ qplaywright> find {"text": "Start", "limit": 1}
 qplaywright> click {"target": "w12"}
 ```
 
-Use `snapshot`, `find`, or `inspect` to discover widget handles first. Exact widget actions then reuse those stable handles; selector hints stay on the discovery side.
+Use `snapshot`, `find`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
 
 You can also inspect CLI help and available MCP resources directly:
 
@@ -206,7 +206,7 @@ In this repository, if you are using the checked-in virtual environment, run:
 - MCP uses a single active session and a single active window scope; use the `session` and `window` tools to switch explicitly.
 - MCP window summaries and snapshot widget entries expose layout data through compact `geometry: [x, y, width, height]` arrays.
 - Targeted MCP `inspect` responses expose compact `geometry`, `bounding_box`, and `global_bounding_box` arrays in the same `[x, y, width, height]` form.
-- MCP widget discovery surfaces still accept selector strings, but exact widget actions are handle-first and should reuse the stable handles returned by `snapshot`, `find`, or `inspect`.
+- MCP observation/search surfaces still accept selector strings, but exact widget actions are handle-first and should reuse the stable handles returned by `snapshot`, `find`, or `inspect`.
 - `topmost_only=true` is an approximate frontmost-visible filter for window-wide `snapshot` and targetless `inspect`; it may omit content.
 
 ## Additional Docs
