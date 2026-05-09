@@ -3185,6 +3185,40 @@ def test_snapshot_result_scopes_to_active_window(monkeypatch):
     assert payload["widgets"][0]["handle"] == "w1"
 
 
+def test_snapshot_window_payload_preserves_active_window_geometry_array(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_active_window_summary",
+        lambda managed_connection: {
+            "wid": 11,
+            "title": "Main",
+            "class": "DemoWindow",
+            "geometry": [510, 139, 900, 720],
+            "is_active": True,
+            "is_modal": False,
+        },
+    )
+
+    payload = mcp_server._snapshot_window_payload(connection)
+
+    assert payload == {
+        "handle": "w1",
+        "title": "Main",
+        "class": "DemoWindow",
+        "geometry": [510, 139, 900, 720],
+    }
+
+
 def test_target_not_found_message_suggests_discovery_for_missing_handle():
     connection = mcp_server.ManagedConnection(
         name="demo",

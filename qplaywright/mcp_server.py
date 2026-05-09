@@ -1719,7 +1719,7 @@ def _snapshot_window_payload(connection: ManagedConnection) -> dict[str, Any] | 
         "handle": connection.handle_for_wid(active_window.get("wid")),
         "title": active_window.get("title", ""),
         "class": active_window.get("class", ""),
-        "geometry": _compact_geometry(active_window.get("geometry") if isinstance(active_window.get("geometry"), dict) else None) or [None, None, None, None],
+        "geometry": _window_geometry(active_window),
     }
 
 
