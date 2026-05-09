@@ -82,12 +82,7 @@
   "index": 1,
   "is_active": true,
   "is_modal": true,
-  "geometry": {
-    "x": 120,
-    "y": 80,
-    "width": 480,
-    "height": 320
-  }
+  "geometry": [120, 80, 480, 320]
 }
 ```
 
@@ -99,7 +94,7 @@
 - `index`: 当前窗口列表中的索引
 - `is_active`: 是否为当前 active window
 - `is_modal`: 是否为模态窗口
-- `geometry`: 窗口布局数据，统一使用 `{x, y, width, height}`
+- `geometry`: 窗口布局数据，统一使用 `[x, y, width, height]`
 
 ### SnapshotWidgetEntry
 
@@ -108,13 +103,9 @@
   "handle": "w12",
   "class": "FancyAmountEdit",
   "object_name": "amount_editor",
-  "label": "123.45",
-  "geometry": {
-    "x": 12,
-    "y": 48,
-    "width": 220,
-    "height": 80
-  }
+  "selector_hint": "#amount_editor",
+  "text": "123.45",
+  "geometry": [12, 48, 220, 80]
 }
 ```
 
@@ -131,12 +122,7 @@
   "visible": true,
   "enabled": true,
   "checked": false,
-  "geometry": {
-    "x": 12,
-    "y": 48,
-    "width": 220,
-    "height": 80
-  },
+  "geometry": [12, 48, 220, 80],
   "children": []
 }
 ```
@@ -157,12 +143,7 @@
     "index": 1,
     "is_active": true,
     "is_modal": true,
-    "geometry": {
-      "x": 120,
-      "y": 80,
-      "width": 480,
-      "height": 320
-    }
+    "geometry": [120, 80, 480, 320]
   },
   "snapshot": "...",
   "root_handle": "w9",
@@ -249,12 +230,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   }
 }
 ```
@@ -288,12 +264,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   }
 }
 ```
@@ -349,12 +320,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 1,
     "is_active": true,
     "is_modal": true,
-    "geometry": {
-      "x": 120,
-      "y": 80,
-      "width": 480,
-      "height": 320
-    }
+    "geometry": [120, 80, 480, 320]
   }
 }
 ```
@@ -372,12 +338,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 800,
-      "height": 600
-    }
+    "geometry": [0, 0, 800, 600]
   }
 }
 ```
@@ -429,12 +390,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "handle": "w1",
     "title": "QPlaywright Demo App",
     "class": "DemoWindow",
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   },
   "target": null,
   "root_handle": "w1",
@@ -495,13 +451,9 @@ MCP 工具失败时应返回明确、可操作的错误信息。
       "handle": "w48",
       "class": "QPushButton",
       "object_name": "submit_btn",
+      "selector_hint": "#submit_btn",
       "text": "Submit",
-      "geometry": {
-        "x": 310,
-        "y": 412,
-        "width": 96,
-        "height": 28
-      },
+      "geometry": [310, 412, 96, 28],
       "match_reason": ["role=button", "has_text~=Submit", "visible=true", "enabled=true", "interactable=true"],
       "ancestor_summary": [
         {"handle": "w12", "class": "QGroupBox", "label": "Payment"}
@@ -558,24 +510,9 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "enabled": true,
   "checked": false,
   "interactable": true,
-  "geometry": {
-    "x": 12,
-    "y": 48,
-    "width": 220,
-    "height": 80
-  },
-  "global_bounding_box": {
-    "x": 300,
-    "y": 220,
-    "width": 220,
-    "height": 80
-  },
-  "bounding_box": {
-    "x": 300,
-    "y": 220,
-    "width": 220,
-    "height": 80
-  },
+  "geometry": [12, 48, 220, 80],
+  "global_bounding_box": [300, 220, 220, 80],
+  "bounding_box": [300, 220, 220, 80],
   "property_value": null,
   "properties": {
     "objectName": "amount_editor",
@@ -601,12 +538,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
       "visible": true,
       "enabled": true,
       "checked": false,
-      "geometry": {
-        "x": 0,
-        "y": 0,
-        "width": 640,
-        "height": 720
-      },
+      "geometry": [0, 0, 640, 720],
       "children": []
     }
   ],
@@ -692,12 +624,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   }
 }
 ```
@@ -750,12 +677,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   }
 }
 ```
@@ -800,12 +722,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   }
 }
 ```
@@ -841,12 +758,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   }
 }
 ```
@@ -892,12 +804,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   }
 }
 ```
@@ -931,12 +838,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   },
   "snapshot": "...",
   "root_handle": "w1",
@@ -984,12 +886,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   },
   "snapshot": "...",
   "root_handle": "w1",
@@ -1040,12 +937,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   }
 }
 ```
@@ -1110,12 +1002,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   }
 }
 ```
@@ -1176,12 +1063,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   }
 }
 ```
@@ -1202,12 +1084,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "index": 0,
     "is_active": true,
     "is_modal": false,
-    "geometry": {
-      "x": 0,
-      "y": 0,
-      "width": 640,
-      "height": 720
-    }
+    "geometry": [0, 0, 640, 720]
   }
 }
 ```

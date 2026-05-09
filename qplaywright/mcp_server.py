@@ -702,12 +702,21 @@ def _window_geometry(window: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(geometry, dict):
         raise ValueError("Window payload is missing geometry")
 
-    return {
-        "x": geometry.get("x"),
-        "y": geometry.get("y"),
-        "width": geometry.get("width"),
-        "height": geometry.get("height"),
-    }
+    return _compact_geometry(geometry) or [None, None, None, None]
+
+
+def _compact_geometry(geometry: dict[str, Any] | None) -> list[Any] | None:
+    if not isinstance(geometry, dict):
+        return None
+    compact = [geometry.get("x"), geometry.get("y"), geometry.get("width"), geometry.get("height")]
+    if all(value is None for value in compact):
+        return None
+    return compact
+
+
+def _is_mouse_transparent(node: dict[str, Any]) -> bool:
+    attributes = node.get("attributes")
+    return isinstance(attributes, dict) and attributes.get("WA_TransparentForMouseEvents") is True
 
 
 def _widget_tree_raw(
@@ -1132,8 +1141,12 @@ def _inspect_locator(
         result["class"] = widget_class
 
     geometry = properties.get("geometry")
-    if isinstance(geometry, dict) and geometry:
-        result["geometry"] = geometry
+    compact_geometry = _compact_geometry(geometry if isinstance(geometry, dict) else None)
+    if compact_geometry is not None:
+        result["geometry"] = compact_geometry
+
+    if _is_mouse_transparent(properties):
+        result["mouse_transparent"] = True
 
     text_content = first.text_content()
     if text_content not in (None, ""):
@@ -1144,8 +1157,9 @@ def _inspect_locator(
         result["value"] = input_value
 
     bounding_box = first.bounding_box()
-    if bounding_box:
-        result["global_bounding_box"] = bounding_box
+    compact_bounding_box = _compact_geometry(bounding_box if isinstance(bounding_box, dict) else None)
+    if compact_bounding_box is not None:
+        result["global_bounding_box"] = compact_bounding_box
 
     result.update(
         {
@@ -1153,7 +1167,7 @@ def _inspect_locator(
             "visible": first.is_visible(),
             "enabled": first.is_enabled(),
             "checked": first.is_checked(),
-            "bounding_box": bounding_box,
+            "bounding_box": compact_bounding_box,
         }
     )
 
@@ -1209,9 +1223,10 @@ def _inspect_item_locator(
         bounding_box = locator.bounding_box()
     except Exception:
         bounding_box = None
-    if bounding_box:
-        result["bounding_box"] = bounding_box
-        result["global_bounding_box"] = bounding_box
+    compact_bounding_box = _compact_geometry(bounding_box if isinstance(bounding_box, dict) else None)
+    if compact_bounding_box is not None:
+        result["bounding_box"] = compact_bounding_box
+        result["global_bounding_box"] = compact_bounding_box
 
     if property_name is not None:
         result["property_name"] = property_name
@@ -1469,14 +1484,15 @@ def _format_widget_snapshot(nodes: list[dict[str, Any]], *, depth: int = 10, lev
     lines: list[str] = []
     for node in nodes:
         target_hint = _snapshot_target_hint(node)
-        hint_part = f" hint={target_hint}" if target_hint else ""
+        hint_part = f" ~{target_hint}" if target_hint else ""
+        transparent_part = " !transparent" if _is_mouse_transparent(node) else ""
 
         label, marker = _snapshot_display_label(node)
         item_view_marker = _snapshot_item_view_marker(node)
         text_part = f' "{label}"' if label else ""
         markers = " ".join(part for part in (marker, item_view_marker) if part)
         marker_part = f" {markers}" if markers else ""
-        line = f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{hint_part}"
+        line = f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{transparent_part}{hint_part}"
         lines.append(line)
 
         children = node.get("children") or []
@@ -1543,9 +1559,11 @@ def _snapshot_entry(node: dict[str, Any], handle: str | None) -> dict[str, Any]:
     selector_hint = _snapshot_target_hint(node)
     if selector_hint:
         entry["selector_hint"] = selector_hint
-    geometry = node.get("geometry")
-    if isinstance(geometry, dict) and geometry:
-        entry["geometry"] = geometry
+    compact_geometry = _compact_geometry(node.get("geometry") if isinstance(node.get("geometry"), dict) else None)
+    if compact_geometry is not None:
+        entry["geometry"] = compact_geometry
+    if _is_mouse_transparent(node):
+        entry["mouse_transparent"] = True
     key_map = {
         "text": "text",
         "accessibleName": "accessible_name",
@@ -1575,8 +1593,7 @@ def _is_infrastructure_widget_node(node: dict[str, Any]) -> bool:
     if isinstance(widget_class, str) and widget_class in _INFRASTRUCTURE_WIDGET_CLASSES:
         return True
 
-    attributes = node.get("attributes")
-    if isinstance(attributes, dict) and attributes.get("WA_TransparentForMouseEvents") is True:
+    if _is_mouse_transparent(node):
         return True
 
     return False
@@ -1630,14 +1647,15 @@ def _render_snapshot_tree(
             seen_wids.add(wid)
 
         handle = _snapshot_handle_for_widget(connection, wid)
-        handle_part = f" [handle={handle}]" if handle else ""
+        handle_part = f" @{handle}" if handle else ""
         selector_hint = _snapshot_target_hint(node)
-        hint_part = f" hint={selector_hint}" if selector_hint else ""
+        hint_part = f" ~{selector_hint}" if selector_hint else ""
+        transparent_part = " !transparent" if _is_mouse_transparent(node) else ""
         label, marker = _snapshot_display_label(node)
         text_part = f' "{label}"' if label else ""
         marker_part = f" {marker}" if marker else ""
         active_part = " [active]" if wid == connection.active_window_wid else ""
-        lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{active_part}{handle_part}{hint_part}")
+        lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{active_part}{handle_part}{transparent_part}{hint_part}")
         widgets.append(_snapshot_entry(node, handle))
 
         child_lines, child_refs = _render_snapshot_tree(
@@ -1662,7 +1680,7 @@ def _snapshot_window_payload(connection: ManagedConnection) -> dict[str, Any] | 
         "handle": connection.handle_for_wid(active_window.get("wid")),
         "title": active_window.get("title", ""),
         "class": active_window.get("class", ""),
-        "geometry": dict(active_window.get("geometry") or {}),
+        "geometry": _compact_geometry(active_window.get("geometry") if isinstance(active_window.get("geometry"), dict) else None) or [None, None, None, None],
     }
 
 

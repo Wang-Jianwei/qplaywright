@@ -292,7 +292,7 @@ Recommended rendering style:
 
 ```text
 - QToolButton "Start"
-- MenuButton "功率扫描" [a11y] target=#MenuButton
+- MenuButton "功率扫描" [a11y] @w12 ~#measure_type_btn
 ```
 
 This avoids pretending that an accessibility label is visible widget text while
@@ -309,8 +309,10 @@ but it must not rewrite the underlying widget data model by turning
 `accessibleName` into `text`.
 
 The `[a11y]` marker should coexist with other existing snapshot markers such as
-`[active]` and `[handle=wN]` on the same line. Snapshot parsers should handle
-multiple bracket-delimited markers per entry.
+`[active]`, compact handle markers like `@w12`, compact selector hints like
+`~#measure_type_btn`, and transparency hints such as `!transparent` on the same
+line. Snapshot parsers should treat bracket markers and compact suffix markers
+as additive entry metadata.
 
 ### Inspect Output
 

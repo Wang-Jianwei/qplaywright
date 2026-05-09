@@ -155,7 +155,7 @@ After actions, the server updates the active window tracking automatically.
 Window summaries exposed through `session`, `window`, and post-action observation
 use one layout field:
 
-- `geometry: {x, y, width, height}`
+- `geometry: [x, y, width, height]`
 
 There is no parallel top-level `width` / `height` return shape anymore.
 
@@ -191,8 +191,8 @@ Action tools also support `include_state=false` by default.
 When `include_state=true`, the response includes a compact target-level `state`
 payload.
 
-- widget targets may return compact widget fields such as `exists`, `count`, `visible`, `enabled`, `checked`, `text`, `current_text`, `value`, `object_name`, `class`, `accessible_name`, `accessible_description`, `bounding_box`, and `global_bounding_box`
-- item targets may return compact item fields such as `exists`, `count`, `kind`, `row`, `column`, `path`, `visible`, `text`, `edit_value`, `selected`, `expanded`, `bounding_box`, and `global_bounding_box`
+- widget targets may return compact widget fields such as `exists`, `count`, `visible`, `enabled`, `checked`, `text`, `current_text`, `value`, `object_name`, `class`, `accessible_name`, `accessible_description`, `geometry`, `bounding_box`, `global_bounding_box`, and `mouse_transparent`
+- item targets may return compact item fields such as `exists`, `count`, `kind`, `row`, `column`, `path`, `visible`, `text`, `edit_value`, `selected`, `expanded`, `bounding_box`, and `global_bounding_box`; all box fields use `[x, y, width, height]`
 
 `include_state` is intentionally compact. It is not a replacement for full `snapshot`
 or the richer widget/item payloads returned by `inspect` and `inspect_items`.
@@ -314,8 +314,14 @@ Each snapshot widget entry includes:
 
 - `handle`
 - `class`
-- `geometry`
-- any meaningful semantic label fields such as `label`, `text`, `accessible_name`, `current_text`, `window_title`, or `value`
+- optional `selector_hint`
+- optional compact `geometry`
+- optional `mouse_transparent`
+- any meaningful semantic label fields such as `text`, `accessible_name`, `current_text`, `window_title`, or `value`
+
+Snapshot text is also compact by design: entries append `@wN` for stable handles,
+`~selector` for selector hints, and `!transparent` when the widget is marked
+with `WA_TransparentForMouseEvents`.
 
 Stable widget handles are session-stable. They survive later `snapshot`, `find`, and `inspect` calls, and only fail
 once the widget is destroyed or the session is replaced.

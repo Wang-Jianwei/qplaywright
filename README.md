@@ -204,8 +204,8 @@ In this repository, if you are using the checked-in virtual environment, run:
 - Qt bindings are imported lazily by the Python agent.
 - The C++ agent is header-only, but because it contains `Q_OBJECT`, it must still be listed in your CMake sources for AUTOMOC.
 - MCP uses a single active session and a single active window scope; use the `session` and `window` tools to switch explicitly.
-- MCP window summaries and snapshot widget entries expose layout data through `geometry {x, y, width, height}`.
-- Targeted MCP `inspect` responses expose both local `geometry` and screen-space `globalBoundingBox`.
+- MCP window summaries and snapshot widget entries expose layout data through compact `geometry: [x, y, width, height]` arrays.
+- Targeted MCP `inspect` responses expose compact `geometry`, `bounding_box`, and `global_bounding_box` arrays in the same `[x, y, width, height]` form.
 - MCP follow-up actions should prefer the stable widget handles returned by `snapshot`, `find`, or `inspect`; selector strings are a fallback discovery aid.
 - `topmost_only=true` is an approximate frontmost-visible filter for window-wide `snapshot` and targetless `inspect`; it may omit content.
 

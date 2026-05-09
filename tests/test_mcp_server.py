@@ -219,9 +219,9 @@ def _item_target(owner: str = "#tree") -> dict[str, object]:
 
 def _v2_snapshot_payload(label: str, *, handle: str = "w1", class_name: str = "DemoWindow") -> dict[str, object]:
     return {
-        "snapshot": f"- {label} [handle={handle}]",
+        "snapshot": f"- {label} @{handle}",
         "root_handle": handle,
-        "widgets": [{"handle": handle, "class": class_name, "label": label}],
+        "widgets": [{"handle": handle, "class": class_name}],
     }
 
 
@@ -771,7 +771,7 @@ def test_snapshot_payload_returns_v2_handle_shape():
 
     assert payload["ok"] is True
     assert payload["root_handle"] == "w1"
-    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title"}]
+    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "selector_hint": ".DemoWindow", "text": "Title"}]
     assert "refs" not in payload
     assert "epoch" not in payload
 
@@ -801,8 +801,8 @@ def test_inspect_target_uses_target_payload(monkeypatch):
     result = mcp_server.inspect(target="#amount", include_methods=True, include_properties=True)
 
     assert result["target"] == "#amount"
-    assert result["geometry"] == {"x": 11, "y": 22, "width": 130, "height": 28}
-    assert result["global_bounding_box"] == {"x": 1, "y": 2, "width": 3, "height": 4}
+    assert result["geometry"] == [11, 22, 130, 28]
+    assert result["global_bounding_box"] == [1, 2, 3, 4]
     assert result["methods"][0]["name"] == "setAmount"
     assert result["properties"]["myText"] == "pressme"
 
@@ -894,10 +894,10 @@ def test_window_tool_lists_selects_resizes_and_closes(monkeypatch):
     assert listed["active_window"]["wid"] == 11
     assert listed["windows"][0]["is_active"] is True
     assert listed["windows"][1]["is_modal"] is True
-    assert listed["windows"][0]["geometry"] == {"x": None, "y": None, "width": None, "height": None}
+    assert listed["windows"][0]["geometry"] == [None, None, None, None]
     assert selected["active_window"]["wid"] == 22
     assert selected["active_window"]["is_modal"] is True
-    assert selected["active_window"]["geometry"] == {"x": None, "y": None, "width": None, "height": None}
+    assert selected["active_window"]["geometry"] == [None, None, None, None]
     assert "refs_cleared" not in selected
     assert resized["active_window"]["wid"] == 22
     assert "windows" not in resized
@@ -972,7 +972,7 @@ def test_format_widget_snapshot_marks_item_view_owner_for_inspect_items():
         ]
     )
 
-    assert snapshot == "- FancyOrdersTable [item-view=table; use inspect_items] hint=#orders_table"
+    assert snapshot == "- FancyOrdersTable [item-view=table; use inspect_items] ~#orders_table"
 
 
 def test_snapshot_entry_preserves_item_view_hint():
@@ -1156,8 +1156,8 @@ def test_inspect_locator_handles_empty_and_present_results():
     assert present["value"] == "ready"
     assert present["object_name"] == "amount_editor"
     assert present["accessible_name"] == "Amount editor"
-    assert present["geometry"] == {"x": 11, "y": 22, "width": 130, "height": 28}
-    assert present["global_bounding_box"] == {"x": 1, "y": 2, "width": 3, "height": 4}
+    assert present["geometry"] == [11, 22, 130, 28]
+    assert present["global_bounding_box"] == [1, 2, 3, 4]
     assert present["property_value"] == "attr:placeholderText"
 
     with_methods = mcp_server._inspect_locator(FakeLocator(count=1), include_methods=True, include_properties=True)
@@ -1204,7 +1204,7 @@ def test_invoke_locator_method_uses_first_match():
         "args": {"value": "88.00"},
     }
 
-    with pytest.raises(ValueError, match="No widget found for invoke.*snapshot or inspect"):
+    with pytest.raises(ValueError, match="No widget found for invoke.*snapshot, find, or inspect"):
         mcp_server._invoke_locator_method(FakeLocator(count=0), method_name="setAmount")
 
 
@@ -1255,7 +1255,7 @@ def test_wait_can_include_snapshot(monkeypatch):
     assert result["target"] == "#status_label"
     assert result["window_changed"] is False
     assert result["active_window"]["wid"] == 11
-    assert result["snapshot"] == "- DemoWindow [handle=w1]"
+    assert result["snapshot"] == "- DemoWindow @w1"
     assert result["root_handle"] == "w1"
     assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
     assert "refs" not in result
@@ -1360,9 +1360,9 @@ def test_finalize_action_result_can_include_compact_state(monkeypatch):
         "accessible_name": "Amount editor",
         "accessible_description": "输入金额",
         "class": "FancyAmountEdit",
-        "geometry": {"x": 11, "y": 22, "width": 130, "height": 28},
-        "bounding_box": {"x": 1, "y": 2, "width": 3, "height": 4},
-        "global_bounding_box": {"x": 1, "y": 2, "width": 3, "height": 4},
+        "geometry": [11, 22, 130, 28],
+        "bounding_box": [1, 2, 3, 4],
+        "global_bounding_box": [1, 2, 3, 4],
         "visible": True,
         "enabled": False,
         "checked": True,
@@ -1422,8 +1422,8 @@ def test_finalize_action_result_can_include_item_compact_state(monkeypatch):
         "owner_handle": "w1",
         "kind": "tree_node",
         "path": ["Settings", "Advanced"],
-        "bounding_box": {"x": 10, "y": 20, "width": 30, "height": 12},
-        "global_bounding_box": {"x": 10, "y": 20, "width": 30, "height": 12},
+        "bounding_box": [10, 20, 30, 12],
+        "global_bounding_box": [10, 20, 30, 12],
         "visible": True,
         "text": "Advanced",
         "edit_value": "Advanced Draft",
@@ -1467,7 +1467,7 @@ def test_finalize_action_result_can_include_state_and_snapshot_together(monkeypa
     )
 
     assert result["state"]["visible"] is True
-    assert result["snapshot"] == "- DemoWindow [handle=w1]"
+    assert result["snapshot"] == "- DemoWindow @w1"
     assert result["root_handle"] == "w1"
     assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
     assert "refs" not in result
@@ -1582,7 +1582,7 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
     assert result["active_window"]["wid"] == 11
     for key, value in expected_payload.items():
         assert result[key] == value
-    assert result["snapshot"] == "- DemoWindow [handle=w1]"
+    assert result["snapshot"] == "- DemoWindow @w1"
     assert result["root_handle"] == "w1"
     assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
     assert "refs" not in result
@@ -1747,7 +1747,7 @@ def test_summarize_windows_uses_geometry_payload():
             "wid": 11,
             "title": "Main",
             "class": "DemoWindow",
-            "geometry": {"x": 5, "y": 7, "width": 640, "height": 720},
+            "geometry": [5, 7, 640, 720],
             "is_active": True,
             "is_modal": False,
         }
@@ -1960,7 +1960,7 @@ def test_format_widget_snapshot_includes_selector_hints():
         depth=3,
     )
 
-    assert 'QPushButton "Login" hint=#login_btn' in snapshot
+    assert 'QPushButton "Login" ~#login_btn' in snapshot
 
 
 def test_format_widget_snapshot_marks_accessibility_derived_labels():
@@ -1976,7 +1976,7 @@ def test_format_widget_snapshot_marks_accessibility_derived_labels():
         depth=3,
     )
 
-    assert 'MenuButton "功率扫描" [a11y] hint=#measure_type_btn' in snapshot
+    assert 'MenuButton "功率扫描" [a11y] ~#measure_type_btn' in snapshot
 
 
 def test_format_widget_snapshot_uses_a11y_selector_when_no_object_name():
@@ -1991,7 +1991,24 @@ def test_format_widget_snapshot_uses_a11y_selector_when_no_object_name():
         depth=3,
     )
 
-    assert 'ui_toolbar_icon_button_t "AddTraceButton" [a11y] hint=a11y-name=AddTraceButton' in snapshot
+    assert 'ui_toolbar_icon_button_t "AddTraceButton" [a11y] ~a11y-name=AddTraceButton' in snapshot
+
+
+def test_format_widget_snapshot_marks_mouse_transparent_widgets():
+    snapshot = mcp_server._format_widget_snapshot(
+        [
+            {
+                "class": "QWidget",
+                "objectName": "overlay_hint",
+                "attributes": {"WA_TransparentForMouseEvents": True},
+                "children": [],
+            }
+        ],
+        depth=3,
+    )
+
+    assert "!transparent" in snapshot
+    assert "~#overlay_hint" in snapshot
 
 
 def test_snapshot_payload_creates_stable_handles():
@@ -2026,9 +2043,9 @@ def test_snapshot_payload_creates_stable_handles():
         ],
     )
 
-    assert "[handle=w1]" in payload["snapshot"]
-    assert "[handle=w2]" in payload["snapshot"]
-    assert "hint=#login_btn" in payload["snapshot"]
+    assert "@w1" in payload["snapshot"]
+    assert "@w2" in payload["snapshot"]
+    assert "~#login_btn" in payload["snapshot"]
     assert connection.handle_to_wid == {"w1": 1, "w2": 2}
     assert payload["widgets"][1]["handle"] == "w2"
     assert payload["widgets"][1]["object_name"] == "login_btn"
@@ -2144,7 +2161,8 @@ def test_snapshot_payload_preserves_existing_handle_bindings():
         {
             "handle": "w10",
             "class": "DemoWindow",
-            "geometry": {"x": 10, "y": 20, "width": 640, "height": 480},
+            "selector_hint": ".DemoWindow",
+            "geometry": [10, 20, 640, 480],
             "window_title": "Title",
         }
     ]
@@ -2202,7 +2220,7 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
             "handle": "w9",
             "class": "DemoWindow",
             "selector_hint": ".DemoWindow",
-            "geometry": {"x": 0, "y": 0, "width": 320, "height": 180},
+            "geometry": [0, 0, 320, 180],
             "text": "Dialog",
         },
         {
@@ -2210,7 +2228,7 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
             "class": "QPushButton",
             "object_name": "confirm_btn",
             "selector_hint": "#confirm_btn",
-            "geometry": {"x": 40, "y": 60, "width": 80, "height": 24},
+            "geometry": [40, 60, 80, 24],
             "text": "Confirm",
         },
     ]
@@ -2272,8 +2290,8 @@ def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
         ],
     )
 
-    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title"}]
-    assert payload["snapshot"].count("[handle=w1]") == 1
+    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "selector_hint": ".DemoWindow", "text": "Title"}]
+    assert payload["snapshot"].count("@w1") == 1
 
 
 def test_screenshot_returns_schema_fields(monkeypatch):
@@ -2886,7 +2904,7 @@ def test_action_result_with_snapshot_merges_payload(monkeypatch):
     )
 
     assert result["ok"] is True
-    assert result["snapshot"] == "- item [handle=w1]"
+    assert result["snapshot"] == "- item @w1"
     assert result["root_handle"] == "w1"
     assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
     assert "refs" not in result
@@ -3038,7 +3056,7 @@ def test_find_result_returns_v2_handle_shape():
                 "visible": True,
                 "enabled": False,
                 "interactable": False,
-                "geometry": {"x": 310, "y": 412, "width": 96, "height": 28},
+                "geometry": [310, 412, 96, 28],
                 "match_reason": ["role=button", "has_text~=Submit", "visible=true"],
                 "ancestor_summary": [
                     {"handle": "w1", "class": "QGroupBox", "label": "Payment"},
