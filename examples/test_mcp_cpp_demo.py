@@ -20,7 +20,14 @@ from mcp.client.stdio import stdio_client
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from examples.test_mcp_demo import _attach_session, _call_tool, _close_session, _project_root, _python_path_env
+from examples.test_mcp_demo import (
+    _attach_session,
+    _call_tool,
+    _close_session,
+    _discover_widget_handles,
+    _project_root,
+    _python_path_env,
+)
 
 
 def _find_snapshot_node(tree: Any, *, object_name: str) -> dict[str, Any] | None:
@@ -103,7 +110,29 @@ async def main() -> None:
                 print(f"Tabs snapshot node: {tabs_node}")
                 assert tabs_node["itemView"] == {"kind": "tab", "discoverableBy": "inspect_items"}
 
-                tab_items = await _call_tool(session, "inspect_items", {"owner": "#main_tabs", "max_items": 10})
+                handles_by_target = await _discover_widget_handles(
+                    session,
+                    [
+                        "#main_tabs",
+                        "#data_refresh_btn",
+                        "#amount_editor",
+                        "#username",
+                        "#password",
+                        "#role",
+                        "#login_btn",
+                        "#status",
+                    ],
+                )
+                tabs_handle = handles_by_target["#main_tabs"]
+                data_refresh_handle = handles_by_target["#data_refresh_btn"]
+                amount_handle = handles_by_target["#amount_editor"]
+                username_handle = handles_by_target["#username"]
+                password_handle = handles_by_target["#password"]
+                role_handle = handles_by_target["#role"]
+                login_handle = handles_by_target["#login_btn"]
+                status_handle = handles_by_target["#status"]
+
+                tab_items = await _call_tool(session, "inspect_items", {"owner": tabs_handle, "max_items": 10})
                 print(f"Tab items: {tab_items['items']}")
                 assert tab_items["kind"] == "tab"
                 assert [entry["text"] for entry in tab_items["items"]] == ["Login", "Data", "Settings"]
@@ -112,33 +141,33 @@ async def main() -> None:
                 await _call_tool(
                     session,
                     "click",
-                    {"target": {"owner": "#main_tabs", "item": {"kind": "tab_item", "label": "Data"}}},
+                    {"target": {"owner": tabs_handle, "item": {"kind": "tab_item", "label": "Data"}}},
                 )
 
-                data_button = await _call_tool(session, "inspect", {"target": "#data_refresh_btn"})
+                data_button = await _call_tool(session, "inspect", {"target": data_refresh_handle})
                 print(f"Data button after tab switch: {data_button}")
                 assert data_button["exists"] is True
-                assert data_button["is_visible"] is True
+                assert data_button["visible"] is True
 
-                await _call_tool(session, "click", {"target": "#data_refresh_btn"})
+                await _call_tool(session, "click", {"target": data_refresh_handle})
 
                 data_label = await _call_tool(session, "inspect", {"target": "#data_panel_label"})
                 print(f"Data label after refresh: {data_label.get('text')}")
                 assert data_label["text"] == "Data tab refreshed"
 
-                status_after_tab = await _call_tool(session, "inspect", {"target": "#status"})
+                status_after_tab = await _call_tool(session, "inspect", {"target": status_handle})
                 assert status_after_tab["text"] == "Status: Data tab refreshed"
 
-                updated_tab_items = await _call_tool(session, "inspect_items", {"owner": "#main_tabs", "max_items": 10})
+                updated_tab_items = await _call_tool(session, "inspect_items", {"owner": tabs_handle, "max_items": 10})
                 assert updated_tab_items["items"][1]["selected"] is True
 
                 await _call_tool(
                     session,
                     "click",
-                    {"target": {"owner": "#main_tabs", "item": {"kind": "tab_item", "label": "Login"}}},
+                    {"target": {"owner": tabs_handle, "item": {"kind": "tab_item", "label": "Login"}}},
                 )
 
-                methods = await _call_tool(session, "inspect", {"target": "#amount_editor", "include_methods": True})
+                methods = await _call_tool(session, "inspect", {"target": amount_handle, "include_methods": True})
                 method_names = [entry["name"] for entry in methods["methods"]]
                 print(f"Custom methods: {method_names}")
                 assert method_names == ["amount", "setAmount", "clearAmount"]
@@ -146,7 +175,7 @@ async def main() -> None:
                 properties = await _call_tool(
                     session,
                     "inspect",
-                    {"target": "#amount_editor", "include_properties": True},
+                    {"target": amount_handle, "include_properties": True},
                 )
                 print(f"Initial properties: {properties['properties']}")
                 assert properties["properties"]["semanticRole"] == "amount-input"
@@ -157,7 +186,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "setAmount",
                         "args": {"value": "123.45"},
                     },
@@ -169,7 +198,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "amount",
                         "args": {},
                     },
@@ -185,7 +214,7 @@ async def main() -> None:
                 updated_properties = await _call_tool(
                     session,
                     "inspect",
-                    {"target": "#amount_editor", "include_properties": True},
+                    {"target": amount_handle, "include_properties": True},
                 )
                 print(f"Updated properties: {updated_properties['properties']}")
                 assert updated_properties["properties"]["amountValue"] == "123.45"
@@ -194,25 +223,25 @@ async def main() -> None:
                 await _call_tool(
                     session,
                     "input",
-                    {"target": "#username", "text": "admin"},
+                    {"target": username_handle, "text": "admin"},
                 )
                 await _call_tool(
                     session,
                     "input",
-                    {"target": "#password", "text": "secret123"},
+                    {"target": password_handle, "text": "secret123"},
                 )
                 await _call_tool(
                     session,
                     "choose",
-                    {"target": "#role", "label": "Admin"},
+                    {"target": role_handle, "label": "Admin"},
                 )
                 await _call_tool(
                     session,
                     "click",
-                    {"target": "#login_btn"},
+                    {"target": login_handle},
                 )
 
-                status = await _call_tool(session, "inspect", {"target": "#status"})
+                status = await _call_tool(session, "inspect", {"target": status_handle})
                 print(f"Status after login: {status['text']}")
                 assert "amount=123.45" in status["text"]
 
@@ -220,7 +249,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "clearAmount",
                         "args": {},
                     },
@@ -232,7 +261,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "amount",
                         "args": {},
                     },

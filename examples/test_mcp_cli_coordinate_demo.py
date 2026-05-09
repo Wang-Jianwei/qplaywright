@@ -74,13 +74,13 @@ class CliRepl:
             self._process.wait(timeout=5)
 
 
-def _center_point(box: dict[str, int]) -> tuple[int, int]:
-    return box["x"] + box["width"] // 2, box["y"] + box["height"] // 2
+def _center_point(box: list[int]) -> tuple[int, int]:
+    return box[0] + box[2] // 2, box[1] + box[3] // 2
 
 
-def _window_relative_point(*, window_box: dict[str, int], global_box: dict[str, int]) -> tuple[int, int]:
+def _window_relative_point(*, window_box: list[int], global_box: list[int]) -> tuple[int, int]:
     global_x, global_y = _center_point(global_box)
-    return global_x - window_box["x"], global_y - window_box["y"]
+    return global_x - window_box[0], global_y - window_box[1]
 
 
 def main() -> None:
@@ -118,13 +118,13 @@ def main() -> None:
         print(f"Connected: {active_window}")
 
         window_inspect = cli.command("inspect --target .DemoWindow")
-        window_box = window_inspect.get("globalBoundingBox") or window_inspect.get("bounding_box")
-        if not isinstance(window_box, dict):
+        window_box = window_inspect.get("global_bounding_box") or window_inspect.get("bounding_box")
+        if not isinstance(window_box, list) or len(window_box) != 4:
             raise RuntimeError(f"Window inspect did not return a usable bounding box: {window_inspect}")
 
         clear_button = cli.command("inspect --target #clear_btn")
-        clear_box = clear_button.get("globalBoundingBox") or clear_button.get("bounding_box")
-        if not isinstance(clear_box, dict):
+        clear_box = clear_button.get("global_bounding_box") or clear_button.get("bounding_box")
+        if not isinstance(clear_box, list) or len(clear_box) != 4:
             raise RuntimeError(f"Clear button inspect did not return a usable bounding box: {clear_button}")
 
         point_x, point_y = _window_relative_point(

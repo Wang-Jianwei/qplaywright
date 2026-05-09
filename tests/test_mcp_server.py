@@ -630,7 +630,7 @@ def test_click_rejects_mixed_target_and_coordinates(monkeypatch):
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
 
     with pytest.raises(ValueError, match="does not accept x/y together with target"):
-        mcp_server.click(target="#submit", x=1, y=2)
+        mcp_server.click(target="w2", x=1, y=2)
 
 
 def test_hover_without_target_uses_active_window_transport(monkeypatch):
@@ -795,12 +795,17 @@ def test_target_not_found_message_handles_stable_handle():
 def test_inspect_target_uses_target_payload(monkeypatch):
     locator = FakeLocator(count=1)
 
-    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: object())
+    class HandleConnection:
+        def handle_for_wid(self, wid: int | None) -> str | None:
+            return f"w{wid}" if wid is not None else None
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: HandleConnection())
     monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
 
     result = mcp_server.inspect(target="#amount", include_methods=True, include_properties=True)
 
     assert result["target"] == "#amount"
+    assert result["handle"] == "w101"
     assert result["geometry"] == [11, 22, 130, 28]
     assert result["global_bounding_box"] == [1, 2, 3, 4]
     assert result["methods"][0]["name"] == "setAmount"
@@ -1192,6 +1197,18 @@ def test_inspect_locator_omits_empty_text_and_value_for_a11y_only_widget():
     assert "value" not in result
 
 
+def test_inspect_locator_wraps_special_attributes():
+    class TransparentLocator(FakeLocator):
+        def properties(self) -> dict[str, object]:
+            return super().properties() | {
+                "attributes": {"WA_TransparentForMouseEvents": True},
+            }
+
+    result = mcp_server._inspect_locator(TransparentLocator(count=1))
+
+    assert result["attribute"] == {"transparent_for_mouse_events": True}
+
+
 def test_invoke_locator_method_uses_first_match():
     result = mcp_server._invoke_locator_method(
         FakeLocator(count=1),
@@ -1236,7 +1253,7 @@ def test_wait_can_include_snapshot(monkeypatch):
     locator = FakeLocator(count=1)
 
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
-    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: locator)
     monkeypatch.setattr(
         mcp_server,
         "_list_windows_raw",
@@ -1248,11 +1265,11 @@ def test_wait_can_include_snapshot(monkeypatch):
         lambda managed_connection, **payload: payload | _v2_snapshot_payload("DemoWindow"),
     )
 
-    result = mcp_server.wait(target="#status_label", state="visible", timeout=5.0, include_snapshot=True)
+    result = mcp_server.wait(target="w7", state="visible", timeout=5.0, include_snapshot=True)
 
     assert locator.wait_calls == [{"state": "visible", "timeout": 5.0}]
     assert result["ok"] is True
-    assert result["target"] == "#status_label"
+    assert result["target"] == "w7"
     assert result["window_changed"] is False
     assert result["active_window"]["wid"] == 11
     assert result["snapshot"] == "- DemoWindow @w1"
@@ -1274,14 +1291,14 @@ def test_wait_can_use_text_contains_condition(monkeypatch):
     locator = FakeLocator(count=1)
 
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
-    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: locator)
     monkeypatch.setattr(
         mcp_server,
         "_list_windows_raw",
         lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
     )
 
-    result = mcp_server.wait(target="#status_label", condition="text_contains", expected="ave", timeout=5.0)
+    result = mcp_server.wait(target="w7", condition="text_contains", expected="ave", timeout=5.0)
 
     assert locator.wait_calls == []
     assert result["ok"] is True
@@ -1303,7 +1320,7 @@ def test_wait_rejects_state_and_condition_together(monkeypatch):
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
 
     with pytest.raises(ValueError, match="mutually exclusive"):
-        mcp_server.wait(target="#status_label", state="visible", condition="text_contains", expected="ok")
+        mcp_server.wait(target="w7", state="visible", condition="text_contains", expected="ok")
 
 
 def test_wait_condition_requires_expected(monkeypatch):
@@ -1319,7 +1336,7 @@ def test_wait_condition_requires_expected(monkeypatch):
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
 
     with pytest.raises(ValueError, match="expected is required"):
-        mcp_server.wait(target="#status_label", condition="text_contains")
+        mcp_server.wait(target="w7", condition="text_contains")
 
 
 def test_finalize_action_result_can_include_compact_state(monkeypatch):
@@ -1334,7 +1351,7 @@ def test_finalize_action_result_can_include_compact_state(monkeypatch):
     )
     locator = FakeLocator(count=1)
 
-    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: locator)
     monkeypatch.setattr(
         mcp_server,
         "_list_windows_raw",
@@ -1344,9 +1361,9 @@ def test_finalize_action_result_can_include_compact_state(monkeypatch):
     result = mcp_server._finalize_action_result(
         connection,
         include_state=True,
-        state_target="#submit",
+        state_target="w1",
         ok=True,
-        target="#submit",
+        target="w1",
     )
 
     assert result["ok"] is True
@@ -1444,7 +1461,7 @@ def test_finalize_action_result_can_include_state_and_snapshot_together(monkeypa
     )
     locator = FakeLocator(count=1)
 
-    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: locator)
     monkeypatch.setattr(
         mcp_server,
         "_list_windows_raw",
@@ -1460,10 +1477,10 @@ def test_finalize_action_result_can_include_state_and_snapshot_together(monkeypa
         connection,
         include_state=True,
         include_snapshot=True,
-        state_target="#submit",
-        snapshot_target="#submit",
+        state_target="w1",
+        snapshot_target="w1",
         ok=True,
-        target="#submit",
+        target="w1",
     )
 
     assert result["state"]["visible"] is True
@@ -1486,7 +1503,7 @@ def test_wait_rejects_undocumented_state(monkeypatch):
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
 
     with pytest.raises(ValueError, match="state must be one of"):
-        mcp_server.wait(target="#status_label", state="attached")
+        mcp_server.wait(target="w7", state="attached")
 
 
 def test_wait_rejects_undocumented_condition(monkeypatch):
@@ -1502,10 +1519,10 @@ def test_wait_rejects_undocumented_condition(monkeypatch):
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
 
     with pytest.raises(ValueError, match="condition must be one of"):
-        mcp_server.wait(target="#status_label", condition="text_matches", expected="ok")
+        mcp_server.wait(target="w7", condition="text_matches", expected="ok")
 
 
-def test_choose_ignores_blank_unused_string_selectors(monkeypatch):
+def test_choose_ignores_blank_unused_string_values(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -1518,14 +1535,14 @@ def test_choose_ignores_blank_unused_string_selectors(monkeypatch):
     locator = FakeLocator(count=1)
 
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
-    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: locator)
     monkeypatch.setattr(
         mcp_server,
         "_list_windows_raw",
         lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
     )
 
-    result = mcp_server.choose(target="#currency", value="", label="CNY")
+    result = mcp_server.choose(target="w3", value="", label="CNY")
 
     assert locator.action_calls == [("select_option", {"value": None, "index": None, "label": "CNY"})]
     assert result["ok"] is True
@@ -1536,17 +1553,17 @@ def test_choose_ignores_blank_unused_string_selectors(monkeypatch):
 @pytest.mark.parametrize(
     ("tool_name", "call_kwargs", "expected_calls", "expected_payload"),
     [
-        ("click", {"target": "#submit", "include_snapshot": True}, [("click", {})], {"target": "#submit", "count": 1}),
-        ("click", {"target": "#submit", "count": 2, "include_snapshot": True}, [("dblclick", {})], {"target": "#submit", "count": 2}),
-        ("input", {"target": "#amount", "text": "123.45", "include_snapshot": True}, [("fill", {"value": "123.45"})], {"target": "#amount", "text": "123.45", "mode": "replace", "delay": 0, "submitted": False}),
-        ("invoke", {"target": "#amount", "method": "setAmount", "args": {"value": "88.00"}, "include_snapshot": True}, [("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}})], {"target": "#amount", "method": "setAmount", "args": {"value": "88.00"}}),
-        ("input", {"target": "#amount", "text": "abc", "mode": "append", "delay": 25, "submit": True, "include_snapshot": True}, [("type", {"text": "abc", "delay": 25}), ("press", {"key": "Enter"})], {"target": "#amount", "text": "abc", "mode": "append", "delay": 25, "submitted": True}),
-        ("press_key", {"target": "#amount", "key": "Enter", "include_snapshot": True}, [("press", {"key": "Enter"})], {"target": "#amount", "key": "Enter"}),
-        ("set_checked", {"target": "#remember", "checked": True, "include_snapshot": True}, [("check", {})], {"target": "#remember", "checked": True}),
-        ("set_checked", {"target": "#remember", "checked": False, "include_snapshot": True}, [("uncheck", {})], {"target": "#remember", "checked": False}),
-        ("choose", {"target": "#currency", "label": "CNY", "include_snapshot": True}, [("select_option", {"value": None, "index": None, "label": "CNY"})], {"target": "#currency", "label": "CNY", "value": None, "index": None}),
-        ("hover", {"target": "#item", "include_snapshot": True}, [("hover", {})], {"target": "#item"}),
-        ("scroll", {"target": "#item", "delta_x": 5, "delta_y": 10, "include_snapshot": True}, [("scroll", {"delta_x": 5, "delta_y": 10})], {"target": "#item", "delta_x": 5, "delta_y": 10}),
+        ("click", {"target": "w2", "include_snapshot": True}, [("click", {})], {"target": "w2", "count": 1}),
+        ("click", {"target": "w2", "count": 2, "include_snapshot": True}, [("dblclick", {})], {"target": "w2", "count": 2}),
+        ("input", {"target": "w3", "text": "123.45", "include_snapshot": True}, [("fill", {"value": "123.45"})], {"target": "w3", "text": "123.45", "mode": "replace", "delay": 0, "submitted": False}),
+        ("invoke", {"target": "w3", "method": "setAmount", "args": {"value": "88.00"}, "include_snapshot": True}, [("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}})], {"target": "w3", "method": "setAmount", "args": {"value": "88.00"}}),
+        ("input", {"target": "w3", "text": "abc", "mode": "append", "delay": 25, "submit": True, "include_snapshot": True}, [("type", {"text": "abc", "delay": 25}), ("press", {"key": "Enter"})], {"target": "w3", "text": "abc", "mode": "append", "delay": 25, "submitted": True}),
+        ("press_key", {"target": "w3", "key": "Enter", "include_snapshot": True}, [("press", {"key": "Enter"})], {"target": "w3", "key": "Enter"}),
+        ("set_checked", {"target": "w4", "checked": True, "include_snapshot": True}, [("check", {})], {"target": "w4", "checked": True}),
+        ("set_checked", {"target": "w4", "checked": False, "include_snapshot": True}, [("uncheck", {})], {"target": "w4", "checked": False}),
+        ("choose", {"target": "w5", "label": "CNY", "include_snapshot": True}, [("select_option", {"value": None, "index": None, "label": "CNY"})], {"target": "w5", "label": "CNY", "value": None, "index": None}),
+        ("hover", {"target": "w6", "include_snapshot": True}, [("hover", {})], {"target": "w6"}),
+        ("scroll", {"target": "w6", "delta_x": 5, "delta_y": 10, "include_snapshot": True}, [("scroll", {"delta_x": 5, "delta_y": 10})], {"target": "w6", "delta_x": 5, "delta_y": 10}),
     ],
 )
 def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_kwargs, expected_calls, expected_payload):
@@ -1562,7 +1579,7 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
     locator = FakeLocator(count=1)
 
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
-    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: locator)
     monkeypatch.setattr(
         mcp_server,
         "_list_windows_raw",
@@ -1615,9 +1632,9 @@ def test_finalize_action_result_switches_active_window_and_uses_window_snapshot(
     result = mcp_server._finalize_action_result(
         connection,
         include_snapshot=True,
-        snapshot_target="#submit",
+        snapshot_target="w2",
         ok=True,
-        target="#submit",
+        target="w2",
     )
 
     assert result["window_changed"] is True
@@ -1867,7 +1884,7 @@ def test_active_window_summary_prefers_precomputed_active_window():
         "wid": 22,
         "title": "Payment Review",
         "class": "QDialog",
-        "geometry": {"x": 40, "y": 50, "width": 480, "height": 320},
+        "geometry": [40, 50, 480, 320],
         "is_active": True,
         "is_modal": True,
     }
@@ -1886,7 +1903,7 @@ def test_scroll_rejects_zero_delta(monkeypatch):
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
 
     with pytest.raises(ValueError, match="cannot both be 0"):
-        mcp_server.scroll(target="#item")
+        mcp_server.scroll(target="w6")
 
 
 def test_configure_stdio_for_mcp_reconfigures_utf8_streams(monkeypatch):
@@ -2009,6 +2026,20 @@ def test_format_widget_snapshot_marks_mouse_transparent_widgets():
 
     assert "!transparent" in snapshot
     assert "~#overlay_hint" in snapshot
+
+
+def test_snapshot_entry_wraps_special_attributes():
+    entry = mcp_server._snapshot_entry(
+        {
+            "wid": 11,
+            "class": "QWidget",
+            "objectName": "overlay_hint",
+            "attributes": {"WA_TransparentForMouseEvents": True},
+        },
+        "w1",
+    )
+
+    assert entry["attribute"] == {"transparent_for_mouse_events": True}
 
 
 def test_snapshot_payload_creates_stable_handles():
@@ -2309,13 +2340,13 @@ def test_screenshot_returns_schema_fields(monkeypatch):
     locator = FakeLocator(count=1)
 
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
-    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: locator)
 
-    result = mcp_server.screenshot(target="#amount", path="amount.png")
+    result = mcp_server.screenshot(target="w5", path="amount.png")
 
     assert locator.screenshot_calls == [{"path": "amount.png"}]
     assert result["ok"] is True
-    assert result["target"] == "#amount"
+    assert result["target"] == "w5"
     assert result["path"] == "amount.png"
     assert result["width"] == 120
     assert result["height"] == 40
@@ -2348,15 +2379,15 @@ def test_screenshot_without_path_writes_managed_temp_file(monkeypatch, tmp_path)
         }
 
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
-    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: locator)
     monkeypatch.setattr(mcp_server, "_SCREENSHOT_TEMP_DIR", tmp_path / "qplaywright_screenshots")
     monkeypatch.setattr(locator, "screenshot", fake_screenshot)
 
-    result = mcp_server.screenshot(target="#amount")
+    result = mcp_server.screenshot(target="w5")
 
     assert locator.screenshot_calls == [{}]
     assert result["ok"] is True
-    assert result["target"] == "#amount"
+    assert result["target"] == "w5"
     assert "data" not in result
     screenshot_path = Path(result["path"])
     assert screenshot_path.exists()
@@ -2395,9 +2426,7 @@ def test_run_cli_help_click_uses_mcp_schema(capsys):
     output = capsys.readouterr().out
     assert "Allowed request shapes:" in output
     assert "Window-relative x coordinate in pixels." in output
-    assert "Prefer the stable handle returned by snapshot, find, or inspect." in output
-    assert "Selector fallback examples:" in output
-    assert "a11y-name=Submit" in output
+    assert "Use snapshot, find, or inspect to discover handles first." in output
     assert "screenshot clipping" not in output
 
 
@@ -2618,10 +2647,10 @@ def test_run_cli_typed_click_and_input(monkeypatch, capsys):
     monkeypatch.setattr(mcp_server, "click", fake_click)
     monkeypatch.setattr(mcp_server, "input", fake_input)
 
-    click_exit_code = mcp_server._run_cli(["click", "text=Start", "--count", "2", "--include-snapshot"])
+    click_exit_code = mcp_server._run_cli(["click", "w12", "--count", "2", "--include-snapshot"])
     click_payload = json.loads(capsys.readouterr().out)
 
-    input_exit_code = mcp_server._run_cli(["input", "#amount", "123.45", "--mode", "append", "--delay", "25", "--submit"])
+    input_exit_code = mcp_server._run_cli(["input", "w7", "123.45", "--mode", "append", "--delay", "25", "--submit"])
     input_payload = json.loads(capsys.readouterr().out)
 
     assert click_exit_code == 0
@@ -2631,7 +2660,7 @@ def test_run_cli_typed_click_and_input(monkeypatch, capsys):
         "count": 2,
         "include_state": False,
         "include_snapshot": True,
-        "target": "text=Start",
+        "target": "w12",
     }
     assert input_payload == {
         "ok": True,
@@ -2640,18 +2669,18 @@ def test_run_cli_typed_click_and_input(monkeypatch, capsys):
         "include_snapshot": False,
         "mode": "append",
         "submit": True,
-        "target": "#amount",
+        "target": "w7",
         "text": "123.45",
     }
     assert captured == [
         (
             "click",
-            {"target": "text=Start", "count": 2, "include_state": False, "include_snapshot": True},
+            {"target": "w12", "count": 2, "include_state": False, "include_snapshot": True},
         ),
         (
             "input",
             {
-                "target": "#amount",
+                "target": "w7",
                 "text": "123.45",
                 "mode": "append",
                 "delay": 25,
@@ -2672,19 +2701,19 @@ def test_run_cli_typed_click_supports_include_state(monkeypatch, capsys):
 
     monkeypatch.setattr(mcp_server, "click", fake_click)
 
-    exit_code = mcp_server._run_cli(["click", "text=Start", "--include-state"])
+    exit_code = mcp_server._run_cli(["click", "w12", "--include-state"])
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload == {
         "ok": True,
-        "target": "text=Start",
+        "target": "w12",
         "count": 1,
         "include_state": True,
         "include_snapshot": False,
     }
     assert captured == {
-        "target": "text=Start",
+        "target": "w12",
         "count": 1,
         "include_state": True,
         "include_snapshot": False,
@@ -2732,13 +2761,13 @@ def test_run_cli_typed_wait_supports_condition(monkeypatch, capsys):
 
     monkeypatch.setattr(mcp_server, "wait", fake_wait)
 
-    exit_code = mcp_server._run_cli(["wait", "#status", "--condition", "checked_equals", "--expected", "true", "--include-state"])
+    exit_code = mcp_server._run_cli(["wait", "w9", "--condition", "checked_equals", "--expected", "true", "--include-state"])
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload == {
         "ok": True,
-        "target": "#status",
+        "target": "w9",
         "condition": "checked_equals",
         "expected": True,
         "timeout": None,
@@ -2746,7 +2775,7 @@ def test_run_cli_typed_wait_supports_condition(monkeypatch, capsys):
         "include_snapshot": False,
     }
     assert captured == {
-        "target": "#status",
+        "target": "w9",
         "condition": "checked_equals",
         "expected": True,
         "timeout": None,

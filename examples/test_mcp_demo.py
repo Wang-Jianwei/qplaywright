@@ -136,12 +136,16 @@ async def _select_window(
     return await _call_tool(session, "window", arguments)
 
 
-def _handles_by_target(snapshot: dict[str, Any]) -> dict[str, str]:
-    return {
-        f"#{entry['object_name']}": entry["handle"]
-        for entry in snapshot.get("widgets", [])
-        if entry.get("object_name") and entry.get("handle")
-    }
+async def _discover_widget_handle(session: ClientSession, target: str) -> str:
+    result = await _call_tool(session, "inspect", {"target": target})
+    handle = result.get("handle")
+    if not isinstance(handle, str) or not handle:
+        raise KeyError(f"Inspect did not return a handle for {target}")
+    return handle
+
+
+async def _discover_widget_handles(session: ClientSession, targets: list[str]) -> dict[str, str]:
+    return {target: await _discover_widget_handle(session, target) for target in targets}
 
 
 async def main() -> None:
@@ -176,7 +180,37 @@ async def main() -> None:
                 tree = await _call_tool(session, "inspect", {"depth": 3})
                 print(f"Widget tree roots: {len(tree['tree'])}")
 
-                methods = await _call_tool(session, "inspect", {"target": "#amount_editor", "include_methods": True})
+                handles_by_target = await _discover_widget_handles(
+                    session,
+                    [
+                        "#amount_editor",
+                        "#username",
+                        "#password",
+                        "#remember",
+                        "#role",
+                        "#environment",
+                        "#notify",
+                        "#notes",
+                        "#login_btn",
+                        "#status",
+                        "#summary",
+                        "#clear_btn",
+                    ],
+                )
+                amount_handle = handles_by_target["#amount_editor"]
+                username_handle = handles_by_target["#username"]
+                password_handle = handles_by_target["#password"]
+                remember_handle = handles_by_target["#remember"]
+                role_handle = handles_by_target["#role"]
+                environment_handle = handles_by_target["#environment"]
+                notify_handle = handles_by_target["#notify"]
+                notes_handle = handles_by_target["#notes"]
+                login_handle = handles_by_target["#login_btn"]
+                status_handle = handles_by_target["#status"]
+                summary_handle = handles_by_target["#summary"]
+                clear_handle = handles_by_target["#clear_btn"]
+
+                methods = await _call_tool(session, "inspect", {"target": amount_handle, "include_methods": True})
                 method_names = [entry["name"] for entry in methods["methods"]]
                 print(f"Custom methods: {method_names}")
                 assert method_names == [
@@ -199,7 +233,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "setAmount",
                         "args": {"value": "123.45"},
                     },
@@ -208,7 +242,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "setCurrency",
                         "args": {"code": "EUR"},
                     },
@@ -217,7 +251,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "setPrecision",
                         "args": {"digits": 3},
                     },
@@ -226,7 +260,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "applyDelta",
                         "args": {"delta": 1.425},
                     },
@@ -236,7 +270,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "amount",
                         "args": {},
                     },
@@ -248,7 +282,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "currency",
                         "args": {},
                     },
@@ -260,7 +294,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "availableCurrencies",
                         "args": {},
                     },
@@ -272,7 +306,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "summary",
                         "args": {},
                     },
@@ -284,7 +318,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "snapshot",
                         "args": {},
                     },
@@ -301,53 +335,53 @@ async def main() -> None:
                 await _call_tool(
                     session,
                     "input",
-                    {"target": "#username", "text": "admin"},
+                    {"target": username_handle, "text": "admin"},
                 )
                 await _call_tool(
                     session,
                     "input",
-                    {"target": "#password", "text": "secret123"},
+                    {"target": password_handle, "text": "secret123"},
                 )
                 await _call_tool(
                     session,
                     "set_checked",
-                    {"target": "#remember", "checked": True},
+                    {"target": remember_handle, "checked": True},
                 )
                 await _call_tool(
                     session,
                     "choose",
-                    {"target": "#role", "label": "Admin"},
+                    {"target": role_handle, "label": "Admin"},
                 )
                 await _call_tool(
                     session,
                     "choose",
-                    {"target": "#environment", "label": "Production"},
+                    {"target": environment_handle, "label": "Production"},
                 )
                 await _call_tool(
                     session,
                     "set_checked",
-                    {"target": "#notify", "checked": True},
+                    {"target": notify_handle, "checked": True},
                 )
                 await _call_tool(
                     session,
                     "input",
                     {
-                        "target": "#notes",
+                        "target": notes_handle,
                         "text": "Escalate to finance reviewer",
                     },
                 )
                 await _call_tool(
                     session,
                     "click",
-                    {"target": "#login_btn"},
+                    {"target": login_handle},
                 )
 
-                status = await _call_tool(session, "inspect", {"target": "#status"})
+                status = await _call_tool(session, "inspect", {"target": status_handle})
                 print(f"Status after login: {status['text']}")
                 assert "Logged in as admin" in status["text"]
                 assert "payment=EUR 124.875 precision=3 adjustments=on" in status["text"]
 
-                summary = await _call_tool(session, "inspect", {"target": "#summary"})
+                summary = await _call_tool(session, "inspect", {"target": summary_handle})
                 print(f"Summary after login: {summary['text']}")
                 assert "last-login" in summary["text"]
                 assert "payment=EUR 124.875 precision=3 adjustments=on" in summary["text"]
@@ -355,9 +389,9 @@ async def main() -> None:
                 await _call_tool(
                     session,
                     "click",
-                    {"target": "#clear_btn"},
+                    {"target": clear_handle},
                 )
-                cleared = await _call_tool(session, "inspect", {"target": "#status"})
+                cleared = await _call_tool(session, "inspect", {"target": status_handle})
                 print(f"Status after clear: {cleared['text']}")
                 assert "cleared" in cleared["text"].lower()
 
@@ -365,7 +399,7 @@ async def main() -> None:
                     session,
                     "invoke",
                     {
-                        "target": "#amount_editor",
+                        "target": amount_handle,
                         "method": "amount",
                         "args": {},
                     },

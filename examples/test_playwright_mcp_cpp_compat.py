@@ -18,7 +18,7 @@ from examples.test_mcp_demo import (
     _attach_session,
     _call_tool,
     _close_session,
-    _handles_by_target,
+    _discover_widget_handles,
     _list_windows,
     _project_root,
 )
@@ -45,28 +45,39 @@ async def main() -> None:
 
                 await _attach_session(session, port=19876, timeout=60.0)
 
-                await _call_tool(
-                    session,
-                    "invoke",
-                    {
-                        "target": "#amount_editor",
-                        "method": "setAmount",
-                        "args": {"value": "88.50"},
-                    },
-                )
-
                 tabs = await _list_windows(session)
                 print(f"Tabs: {tabs}")
 
-                snapshot = await _call_tool(session, "snapshot", {"depth": 3})
+                snapshot = await _call_tool(session, "snapshot", {"depth": 12})
                 print(snapshot["snapshot"])
 
-                handles_by_target = _handles_by_target(snapshot)
+                handles_by_target = await _discover_widget_handles(
+                    session,
+                    [
+                        "#amount_editor",
+                        "#username",
+                        "#password",
+                        "#role",
+                        "#login_btn",
+                        "#status",
+                    ],
+                )
+                amount_handle = handles_by_target["#amount_editor"]
                 username_handle = handles_by_target["#username"]
                 password_handle = handles_by_target["#password"]
                 role_handle = handles_by_target["#role"]
                 login_handle = handles_by_target["#login_btn"]
                 status_handle = handles_by_target["#status"]
+
+                await _call_tool(
+                    session,
+                    "invoke",
+                    {
+                        "target": amount_handle,
+                        "method": "setAmount",
+                        "args": {"value": "88.50"},
+                    },
+                )
 
                 await _call_tool(
                     session,
@@ -93,7 +104,7 @@ async def main() -> None:
                 )
                 print(f"Login click snapshot: {login_result['snapshot']}")
 
-                await _call_tool(session, "wait", {"target": "#status", "condition": "text_contains", "expected": "Logged in as admin", "timeout": 5.0})
+                await _call_tool(session, "wait", {"target": status_handle, "condition": "text_contains", "expected": "Logged in as admin", "timeout": 5.0})
                 status_text = await _call_tool(session, "inspect", {"target": status_handle})
                 assert "Logged in as admin" in status_text["text"]
                 assert "amount=88.50" in status_text["text"]

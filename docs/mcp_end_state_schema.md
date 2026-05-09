@@ -11,7 +11,7 @@
 - JSON 字段统一使用 `snake_case`
 - 成功响应统一包含 `ok: true`
 - 除非特别说明，目标工具在 `target` 匹配多个控件时不报错，而是返回第一个匹配项的标量字段，同时用 `count` 暴露总匹配数
-- `target` 的 selector 语法保持原子匹配，不在终态契约中定义内联布尔组合语法；需要组合条件时，先用 `snapshot`、`find` 或 `inspect` 缩小范围，再使用 stable handle
+- widget discovery / observation scope 可以接受 stable handle 或原子 selector；exact widget action target 只接受 stable handle；需要复合条件时，先用 `snapshot`、`find` 或 `inspect` 缩小范围，再使用 stable handle
 - `target`、`root`、`owner` 表示请求里的可解析目标 spec；`handle`、`root_handle`、`owner_handle` 表示响应里的已解析 stable widget identity
 - 布尔状态字段统一使用 `visible`、`enabled`、`checked`、`selected`、`interactable` 这类形容词形式，不再并行维护 `is_visible`、`is_enabled` 一类别名
 
@@ -27,9 +27,9 @@
 
 ## Value Types
 
-### Target
+### Widget Discovery Target
 
-大多数工具使用统一的 `target` 参数。
+观察和 discovery 工具里的 widget `target` 使用统一字符串参数。
 
 类型：`string`
 
@@ -37,6 +37,8 @@
 
 1. 如果值匹配当前 stable handle 形状，例如 `w12`，按 stable handle 解析。
 2. 否则按 qplaywright selector 解析。
+
+适用范围：`snapshot.target`、`inspect.target`、`find.root` 的 widget scope，以及其他仅用于 discovery 的 widget 入口。
 
 示例：
 
@@ -51,6 +53,24 @@
 - 终态契约当前不定义 `role=button >> has-text=Submit` 或 `role=button[has-text=Submit]` 这类复合语法
 - 当需要“角色 + 文本”等复合定位时，推荐流程是先 `snapshot`、`find` 或 `inspect` 观察并拿到 stable handle，再继续动作
 
+### Widget Action Target
+
+exact widget action 也使用 `target` 这个字段名，但它只接受 stable handle。
+
+类型：`string`
+
+解释规则：
+
+1. 值必须匹配当前 stable handle 形状，例如 `w12`。
+2. 不再对 widget action target 做 selector 回退解析。
+
+适用范围：`click`、`input`、`choose`、`set_checked`、`press_key`、`hover`、`scroll`、`invoke`、`wait`、targeted `screenshot` 等 exact widget 工具。
+
+示例：
+
+- `w12`
+- `w48`
+
 ### Root / Owner
 
 `root` 和 `owner` 与 `target` 一样，都是字符串形态的可解析目标 spec。
@@ -58,7 +78,19 @@
 - `root` 用于 widget discovery 或局部观察 scope
 - `owner` 用于 table/tree/list/tab 这类 item-view owner widget
 
-它们的解析规则与 `target` 一致：优先解析 stable handle，否则按 selector 解析。
+它们的解析规则与 widget discovery target 一致：优先解析 stable handle，否则按 selector 解析。
+
+### Rect Array
+
+所有紧凑矩形数组统一使用 `[x, y, width, height]`。
+
+适用字段：
+
+- `geometry`
+- `bounding_box`
+- `global_bounding_box`
+
+该顺序是正式契约的一部分，调用方不得自行猜测或重排。
 
 ### Include Snapshot
 
@@ -108,6 +140,13 @@
   "geometry": [12, 48, 220, 80]
 }
 ```
+
+补充说明：
+
+- `handle` 是 exact widget follow-up action 的稳定标识
+- `selector_hint` 仅用于 discovery 提示，不是 exact widget action 的目标身份
+- `attribute` 为可选字段，用于承载特殊属性，例如 `{"transparent_for_mouse_events": true}`
+- `geometry` 遵循 `Rect Array` 的固定槽位语义
 
 ### WidgetTreeNode
 
@@ -492,7 +531,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 - `depth` 只在 `target=null` 时有意义
 - `topmost_only` 只在 `target=null` 时有意义
 - `include_infrastructure` 只在 `target=null` 时有意义
-- 当 `target` 匹配多个控件时，`text`、`value`、`visible`、`enabled`、`checked`、`interactable`、`geometry`、`global_bounding_box`、`bounding_box`、`property_value`、`methods`、`properties` 都取第一个匹配项；`count` 反映总匹配数
+- 当 `target` 匹配多个控件时，`text`、`value`、`visible`、`enabled`、`checked`、`interactable`、`geometry`、`attribute`、`global_bounding_box`、`bounding_box`、`property_value`、`methods`、`properties` 都取第一个匹配项；`count` 反映总匹配数
 
 ### Inspect Response: Target Mode
 
@@ -521,6 +560,8 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "methods": []
 }
 ```
+
+可选 `attribute` 字段用于暴露结构化特殊属性，例如 `{"transparent_for_mouse_events": true}`。
 
 ### Inspect Response: Debug Tree Mode
 

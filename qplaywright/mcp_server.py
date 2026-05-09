@@ -94,8 +94,8 @@ def _tighten_pointer_tool_schema(tool: Any | None, *, verb: str) -> None:
     _strip_null_schema_type(target_schema)
     target_schema.pop("default", None)
     target_schema["description"] = (
-        f"Stable widget handle or selector, or a structured item target object {{owner, item}}. "
-        f"Prefer the handle returned by snapshot, find, or inspect. Provide target to {verb} a widget or item. Omit target only when using both x and y to {verb} "
+        f"Stable widget handle, or a structured item target object {{owner, item}}. "
+        f"Use snapshot, find, or inspect to discover handles first. Provide target to {verb} a widget or item. Omit target only when using both x and y to {verb} "
         "a window-relative coordinate in the active window."
     )
 
@@ -183,29 +183,41 @@ WindowHeightArg = Annotated[
     Field(description="Target window height in pixels for resize."),
 ]
 
-WidgetTargetArg = Annotated[
+WidgetHandleArg = Annotated[
     str,
-    Field(description="Stable widget handle or selector target, such as w12, #objectName, role=button, or text=Submit. Prefer the handle returned by snapshot, find, or inspect."),
+    Field(description="Stable widget handle target, such as w12. Discover handles with snapshot, find, or inspect before precise widget actions."),
+]
+WidgetDiscoveryTargetArg = Annotated[
+    str,
+    Field(description="Stable widget handle or selector discovery target, such as w12, #objectName, role=button, or text=Submit. Use selectors to search; reuse returned handles for precise widget actions."),
 ]
 ItemTargetArg = Annotated[
     dict[str, Any],
-    Field(description="Structured item target object: {owner: <widget stable handle or selector>, item: <table_cell/tree_node/list_item descriptor>}. Prefer a stable handle for owner when available."),
+    Field(description="Structured item target object: {owner: <widget stable handle or discovery selector>, item: <table_cell/tree_node/list_item descriptor>}. Prefer a stable handle for owner when available."),
 ]
-UnifiedTargetArg = Annotated[
+ActionTargetArg = Annotated[
     str | dict[str, Any],
-    Field(description="Stable widget handle or selector, or a structured item target object {owner, item}. Prefer the handle returned by snapshot, find, or inspect."),
+    Field(description="Stable widget handle, or a structured item target object {owner, item}. Widget actions require stable handles; item actions use structured targets returned by inspect_items."),
 ]
-OptionalUnifiedTargetArg = Annotated[
+OptionalActionTargetArg = Annotated[
     str | dict[str, Any] | None,
-    Field(description="Optional stable widget handle, selector, or structured item target. Prefer the handle returned by snapshot, find, or inspect. Omit to inspect the active window when the tool supports it."),
+    Field(description="Optional stable widget handle, or a structured item target object {owner, item}. Widget actions require stable handles; item actions use structured targets returned by inspect_items. Omit only when the tool supports targetless operation."),
 ]
-OptionalWidgetTargetArg = Annotated[
+OptionalWidgetHandleArg = Annotated[
     str | None,
-    Field(description="Optional stable widget handle or selector target. Prefer the handle returned by snapshot, find, or inspect. Omit to use the active window or focused widget when supported."),
+    Field(description="Optional stable widget handle target. Discover handles with snapshot, find, or inspect before precise widget actions. Omit to use the active window or focused widget when supported."),
+]
+OptionalWidgetDiscoveryTargetArg = Annotated[
+    str | None,
+    Field(description="Optional stable widget handle or selector discovery target. Use selectors to search; reuse returned handles for precise widget actions. Omit to inspect or snapshot the active window when supported."),
+]
+OptionalDiscoveryOrItemTargetArg = Annotated[
+    str | dict[str, Any] | None,
+    Field(description="Optional stable widget handle, selector discovery target, or structured item target object {owner, item}. Omit to inspect the active window when the tool supports it."),
 ]
 FindRootArg = Annotated[
     str | None,
-    Field(description="Optional find scope root: stable widget handle or selector. Prefer the handle returned by snapshot, find, or inspect. Omit to search under the active window."),
+    Field(description="Optional find scope root: stable widget handle or selector. Use selectors to search; reuse returned handles for precise widget actions. Omit to search under the active window."),
 ]
 FindRoleArg = Annotated[
     str | None,
@@ -697,8 +709,10 @@ def _list_windows_raw(connection: ManagedConnection, *, timeout: float | None = 
     return windows
 
 
-def _window_geometry(window: dict[str, Any]) -> dict[str, Any]:
+def _window_geometry(window: dict[str, Any]) -> list[Any]:
     geometry = window.get("geometry")
+    if isinstance(geometry, list):
+        return geometry
     if not isinstance(geometry, dict):
         raise ValueError("Window payload is missing geometry")
 
@@ -712,6 +726,13 @@ def _compact_geometry(geometry: dict[str, Any] | None) -> list[Any] | None:
     if all(value is None for value in compact):
         return None
     return compact
+
+
+def _attribute_summary(node: dict[str, Any]) -> dict[str, Any] | None:
+    attribute: dict[str, Any] = {}
+    if _is_mouse_transparent(node):
+        attribute["transparent_for_mouse_events"] = True
+    return attribute or None
 
 
 def _is_mouse_transparent(node: dict[str, Any]) -> bool:
@@ -865,7 +886,18 @@ def _active_window_summary(
         )
     if active_window is None:
         active_window = windows[0]
-    return {**active_window, "is_active": True, "is_modal": active_window.get("is_modal", False)}
+
+    summary = {
+        "wid": active_window["wid"],
+        "title": active_window.get("title", ""),
+        "class": active_window.get("class", ""),
+        "geometry": _window_geometry(active_window),
+        "is_active": True,
+        "is_modal": bool(active_window.get("is_modal", False)),
+    }
+    if "index" in active_window:
+        summary["index"] = active_window.get("index")
+    return summary
 
 
 def _session_summary(connection: ManagedConnection) -> dict[str, Any]:
@@ -1058,6 +1090,24 @@ def _resolve_locator(
     return window.locator(target)
 
 
+def _resolve_widget_handle_locator(
+    connection: ManagedConnection,
+    *,
+    target: str,
+    action: str,
+) -> Any:
+    normalized_target = target.strip()
+    if not normalized_target:
+        raise ValueError("target must not be empty")
+    if not _HANDLE_PATTERN.match(normalized_target):
+        raise ValueError(
+            f"{action} requires a stable widget handle target like w12. Use snapshot, find, or inspect first and reuse the returned handle."
+        )
+
+    handle_wid = connection.wid_for_handle(normalized_target)
+    return Locator(connection.app._conn, "", widget_wid=handle_wid, timeout=connection.timeout)
+
+
 def _is_item_target(target: Any) -> bool:
     return isinstance(target, dict) and "owner" in target and "item" in target
 
@@ -1103,6 +1153,7 @@ def _resolve_item_locator(
 def _inspect_locator(
     locator: Any,
     *,
+    connection: ManagedConnection | None = None,
     property_name: str | None = None,
     include_methods: bool = False,
     include_properties: bool = False,
@@ -1114,6 +1165,11 @@ def _inspect_locator(
     }
     if count == 0:
         return result
+
+    if connection is not None:
+        handle = _widget_handle_from_locator(connection, locator)
+        if handle is not None:
+            result["handle"] = handle
 
     first = locator.first()
     properties = first.properties()
@@ -1145,8 +1201,9 @@ def _inspect_locator(
     if compact_geometry is not None:
         result["geometry"] = compact_geometry
 
-    if _is_mouse_transparent(properties):
-        result["mouse_transparent"] = True
+    attribute = _attribute_summary(properties)
+    if attribute is not None:
+        result["attribute"] = attribute
 
     text_content = first.text_content()
     if text_content not in (None, ""):
@@ -1269,6 +1326,7 @@ def _compact_action_state(connection: ManagedConnection, locator: Any) -> dict[s
         ("object_name", "object_name"),
         ("accessible_name", "accessible_name"),
         ("accessible_description", "accessible_description"),
+        ("attribute", "attribute"),
         ("class", "class"),
         ("geometry", "geometry"),
         ("bounding_box", "bounding_box"),
@@ -1423,8 +1481,7 @@ def _invoke_locator_method(
     count = locator.count()
     if count == 0:
         raise ValueError(
-            "No widget found for invoke. Use snapshot, find, or inspect first, prefer the returned stable handle, "
-            "and fall back to selectors like #objectName, role=button, text=Submit, has-text=partial, a11y-name=Submit, or .QLabel when needed."
+            "No widget found for invoke. Use snapshot, find, or inspect first and reuse the returned stable handle."
         )
 
     result = locator.first().invoke(method_name, args or {})
@@ -1562,8 +1619,9 @@ def _snapshot_entry(node: dict[str, Any], handle: str | None) -> dict[str, Any]:
     compact_geometry = _compact_geometry(node.get("geometry") if isinstance(node.get("geometry"), dict) else None)
     if compact_geometry is not None:
         entry["geometry"] = compact_geometry
-    if _is_mouse_transparent(node):
-        entry["mouse_transparent"] = True
+    attribute = _attribute_summary(node)
+    if attribute is not None:
+        entry["attribute"] = attribute
     key_map = {
         "text": "text",
         "accessibleName": "accessible_name",
@@ -2006,7 +2064,7 @@ def _observe_action_target_state(
     target: str | dict[str, Any],
 ) -> dict[str, Any]:
     if isinstance(target, str):
-        locator = _resolve_locator(managed_connection, target=target)
+        locator = _resolve_widget_handle_locator(managed_connection, target=target, action="state inspection")
         return _compact_action_state(managed_connection, locator)
 
     locator = _resolve_item_locator(managed_connection, target=target)
@@ -2337,7 +2395,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def snapshot(
-        target: OptionalWidgetTargetArg = None,
+        target: OptionalWidgetDiscoveryTargetArg = None,
         depth: DepthArg = 10,
         topmost_only: TopmostOnlyArg = False,
         include_infrastructure: IncludeInfrastructureArg = False,
@@ -2377,7 +2435,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def inspect(
-        target: OptionalUnifiedTargetArg = None,
+        target: OptionalDiscoveryOrItemTargetArg = None,
         property: PropertyArg = None,
         include_methods: IncludeMethodsArg = False,
         include_properties: IncludePropertiesArg = False,
@@ -2417,6 +2475,7 @@ if FastMCP is not None:
             locator = _resolve_locator(connection_state, target=target)
             result = _inspect_locator(
                 locator,
+                connection=connection_state,
                 property_name=property,
                 include_methods=include_methods,
                 include_properties=include_properties,
@@ -2479,7 +2538,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def click(
-        target: OptionalUnifiedTargetArg = None,
+        target: OptionalActionTargetArg = None,
         count: ClickCountArg = 1,
         x: ClipXArg = None,
         y: ClipYArg = None,
@@ -2502,7 +2561,7 @@ if FastMCP is not None:
             if coords:
                 raise ValueError("click does not accept x/y together with target")
             if isinstance(target, str):
-                locator = _resolve_locator(connection_state, target=target)
+                locator = _resolve_widget_handle_locator(connection_state, target=target, action="click")
             else:
                 locator = _resolve_item_locator(connection_state, target=target)
             if count == 2:
@@ -2526,7 +2585,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def inspect_items(
-        owner: WidgetTargetArg,
+        owner: WidgetDiscoveryTargetArg,
         max_rows: InspectItemsMaxRowsArg = 20,
         max_depth: InspectItemsMaxDepthArg = 4,
         max_items: InspectItemsMaxItemsArg = 200,
@@ -2559,7 +2618,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def input(
-        target: WidgetTargetArg,
+        target: WidgetHandleArg,
         text: InputTextArg,
         mode: InputModeArg = "replace",
         delay: InputDelayArg = 0,
@@ -2575,7 +2634,7 @@ if FastMCP is not None:
             raise ValueError("delay must be >= 0")
 
         connection_state = _get_connection(_SERVER_STATE)
-        locator = _resolve_locator(connection_state, target=target)
+        locator = _resolve_widget_handle_locator(connection_state, target=target, action="input")
         if mode == "replace":
             if delay == 0:
                 locator.fill(text)
@@ -2605,7 +2664,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def invoke(
-        target: WidgetTargetArg,
+        target: WidgetHandleArg,
         method: MethodArg,
         args: InvokeArgsArg = None,
         include_state: IncludeStateArg = False,
@@ -2614,7 +2673,7 @@ if FastMCP is not None:
         """Invoke one exposed custom widget method by exact name."""
 
         connection_state = _get_connection(_SERVER_STATE)
-        locator = _resolve_locator(connection_state, target=target)
+        locator = _resolve_widget_handle_locator(connection_state, target=target, action="invoke")
         result = _invoke_locator_method(locator, method_name=method, args=args)
         return _finalize_action_result(
             connection_state,
@@ -2631,7 +2690,7 @@ if FastMCP is not None:
     @mcp.tool()
     def press_key(
         key: KeyArg,
-        target: OptionalWidgetTargetArg = None,
+        target: OptionalWidgetHandleArg = None,
         include_state: IncludeStateArg = False,
         include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
@@ -2641,7 +2700,7 @@ if FastMCP is not None:
         if target is None:
             _press_key_without_target(connection_state, key=key)
         else:
-            locator = _resolve_locator(connection_state, target=target)
+            locator = _resolve_widget_handle_locator(connection_state, target=target, action="press_key")
             locator.press(key)
         return _finalize_action_result(
             connection_state,
@@ -2657,7 +2716,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def set_checked(
-        target: WidgetTargetArg,
+        target: WidgetHandleArg,
         checked: CheckedArg,
         include_state: IncludeStateArg = False,
         include_snapshot: IncludeSnapshotArg = False,
@@ -2665,7 +2724,7 @@ if FastMCP is not None:
         """Check or uncheck the first matched checkable widget."""
 
         connection_state = _get_connection(_SERVER_STATE)
-        locator = _resolve_locator(connection_state, target=target)
+        locator = _resolve_widget_handle_locator(connection_state, target=target, action="set_checked")
         if checked:
             locator.check()
         else:
@@ -2684,7 +2743,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def choose(
-        target: WidgetTargetArg,
+        target: WidgetHandleArg,
         value: ChooseValueArg = None,
         index: ChooseIndexArg = None,
         label: ChooseLabelArg = None,
@@ -2700,7 +2759,7 @@ if FastMCP is not None:
             raise ValueError("Exactly one of value, index, or label must be provided")
 
         connection_state = _get_connection(_SERVER_STATE)
-        locator = _resolve_locator(connection_state, target=target)
+        locator = _resolve_widget_handle_locator(connection_state, target=target, action="choose")
         locator.select_option(value=value, index=index, label=label)
         return _finalize_action_result(
             connection_state,
@@ -2718,7 +2777,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def wait(
-        target: UnifiedTargetArg,
+        target: ActionTargetArg,
         state: WaitStateArg = None,
         condition: WaitConditionArg = None,
         expected: WaitExpectedArg = None,
@@ -2749,7 +2808,7 @@ if FastMCP is not None:
         snapshot_target = _target_owner_target(target)
 
         if isinstance(target, str):
-            locator = _resolve_locator(connection_state, target=target)
+            locator = _resolve_widget_handle_locator(connection_state, target=target, action="wait")
 
             if condition is None:
                 assert state is not None
@@ -2815,7 +2874,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def screenshot(
-        target: OptionalWidgetTargetArg = None,
+        target: OptionalWidgetHandleArg = None,
         path: ScreenshotPathArg = None,
         x: ClipXArg = None,
         y: ClipYArg = None,
@@ -2845,7 +2904,7 @@ if FastMCP is not None:
             else:
                 result = window.screenshot()
         else:
-            locator = _resolve_locator(live_connection, target=target)
+            locator = _resolve_widget_handle_locator(live_connection, target=target, action="screenshot")
             if clip_kwargs:
                 result = locator.screenshot(
                     path=path,
@@ -2867,7 +2926,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def hover(
-        target: OptionalUnifiedTargetArg = None,
+        target: OptionalActionTargetArg = None,
         x: ClipXArg = None,
         y: ClipYArg = None,
         include_state: IncludeStateArg = False,
@@ -2885,7 +2944,7 @@ if FastMCP is not None:
             if coords:
                 raise ValueError("hover does not accept x/y together with target")
             if isinstance(target, str):
-                locator = _resolve_locator(connection_state, target=target)
+                locator = _resolve_widget_handle_locator(connection_state, target=target, action="hover")
             else:
                 locator = _resolve_item_locator(connection_state, target=target)
             locator.hover()
@@ -2935,7 +2994,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def scroll(
-        target: WidgetTargetArg,
+        target: WidgetHandleArg,
         delta_x: DeltaXArg = 0,
         delta_y: DeltaYArg = 0,
         include_state: IncludeStateArg = False,
@@ -2947,7 +3006,7 @@ if FastMCP is not None:
             raise ValueError("delta_x and delta_y cannot both be 0")
 
         connection_state = _get_connection(_SERVER_STATE)
-        locator = _resolve_locator(connection_state, target=target)
+        locator = _resolve_widget_handle_locator(connection_state, target=target, action="scroll")
         locator.scroll(delta_x=delta_x, delta_y=delta_y)
         return _finalize_action_result(
             connection_state,

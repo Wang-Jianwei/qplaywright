@@ -87,7 +87,7 @@ qplaywright-mcp cli hover --x 320 --y 180
 qplaywright-mcp cli input w7 123.45 --submit
 ```
 
-Prefer the stable handle returned by `snapshot`, `find`, or `inspect` for follow-up actions. Selector hints are a fallback when you still need to discover the right widget.
+Use `snapshot`, `find`, or `inspect` to discover widget handles first. Exact widget actions then reuse those stable handles; selector hints stay on the discovery side.
 
 When `click` or `hover` omits `target`, `x` and `y` are interpreted as coordinates relative to the active window.
 If the active window is not the desired scope, switch it first with `window select`.
@@ -99,7 +99,7 @@ If the active window is not the desired scope, switch it first with `window sele
 3. `window` with `action="select"` when the desired scope is not the current active window.
 4. `snapshot`, `find`, or `inspect` to understand the widget tree and obtain stable handles.
 5. `inspect_items` when the target widget is a table, tree, or list and you need structured descendant item targets.
-6. Use action tools like `click`, `input`, `invoke`, `set_checked`, `set_expanded`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and `screenshot` with those handles.
+6. Use action tools like `click`, `input`, `invoke`, `set_checked`, `set_expanded`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and targeted `screenshot` with those handles, or reuse the structured item targets returned by `inspect_items`.
 7. `session` with `action="close"` when finished.
 
 ## Exposed MCP Interfaces
@@ -159,9 +159,9 @@ use one layout field:
 
 There is no parallel top-level `width` / `height` return shape anymore.
 
-### Unified Target
+### Target Rules
 
-Targeted tools accept a single `target` value.
+Discovery and inspection tools accept a single `target` value.
 That value may be either:
 
 - a stable widget handle such as `w12`
@@ -169,9 +169,13 @@ That value may be either:
 - a structured item target object such as `{"owner": "w12", "item": {"kind": "table_cell", "row": 3, "column": 1}}`
 - a structured item target object such as `{"owner": "w9", "item": {"kind": "tree_node", "path": [0, 1]}}`
 - a structured item target object such as `{"owner": "w5", "item": {"kind": "list_item", "row": 2}}`
-- a structured item target object such as `{"owner": "w3", "item": {"kind": "tab_item", "index": 1}}`
+- a structured item target object such as `{"owner": "w3", "item": {"kind": "tab_item", "index": 1}}
 
-The selector side of `target` keeps the existing atomic qplaywright forms.
+Exact widget actions use the same `target` parameter name, but for widgets they only accept stable handles such as `w12`.
+That applies to `click`, `input`, `invoke`, `set_checked`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and targeted `screenshot`.
+Selectors remain valid for discovery scopes such as `snapshot`, `find`, `inspect`, and `inspect_items` owner resolution.
+
+The selector side keeps the existing atomic qplaywright forms.
 This contract does not define inline composite syntax such as `role=button >> has-text=Submit`.
 When you need compound disambiguation, use `snapshot`, `find`, or `inspect` first, then continue with the returned stable handle.
 When you need structured item descendants, first resolve the owner widget, then call `inspect_items` and reuse the returned item `target` objects.
@@ -191,8 +195,11 @@ Action tools also support `include_state=false` by default.
 When `include_state=true`, the response includes a compact target-level `state`
 payload.
 
-- widget targets may return compact widget fields such as `exists`, `count`, `visible`, `enabled`, `checked`, `text`, `current_text`, `value`, `object_name`, `class`, `accessible_name`, `accessible_description`, `geometry`, `bounding_box`, `global_bounding_box`, and `mouse_transparent`
-- item targets may return compact item fields such as `exists`, `count`, `kind`, `row`, `column`, `path`, `visible`, `text`, `edit_value`, `selected`, `expanded`, `bounding_box`, and `global_bounding_box`; all box fields use `[x, y, width, height]`
+- widget targets may return compact widget fields such as `exists`, `count`, `visible`, `enabled`, `checked`, `text`, `current_text`, `value`, `object_name`, `class`, `accessible_name`, `accessible_description`, `geometry`, `bounding_box`, `global_bounding_box`, and `attribute`
+- item targets may return compact item fields such as `exists`, `count`, `kind`, `row`, `column`, `path`, `visible`, `text`, `edit_value`, `selected`, `expanded`, `bounding_box`, and `global_bounding_box`
+
+All layout and box arrays use `[x, y, width, height]` in that fixed order.
+The optional `attribute` object groups exceptional widget flags such as `{"transparent_for_mouse_events": true}`.
 
 `include_state` is intentionally compact. It is not a replacement for full `snapshot`
 or the richer widget/item payloads returned by `inspect` and `inspect_items`.
@@ -316,12 +323,16 @@ Each snapshot widget entry includes:
 - `class`
 - optional `selector_hint`
 - optional compact `geometry`
-- optional `mouse_transparent`
+- optional `attribute`
 - any meaningful semantic label fields such as `text`, `accessible_name`, `current_text`, `window_title`, or `value`
 
 Snapshot text is also compact by design: entries append `@wN` for stable handles,
 `~selector` for selector hints, and `!transparent` when the widget is marked
 with `WA_TransparentForMouseEvents`.
+
+`handle` is the exact follow-up identity for widget actions.
+`selector_hint` is only a discovery hint and should not replace the stable handle for exact widget actions.
+`geometry` uses `[x, y, width, height]`, and `attribute` wraps exceptional widget flags such as `{"transparent_for_mouse_events": true}`.
 
 Stable widget handles are session-stable. They survive later `snapshot`, `find`, and `inspect` calls, and only fail
 once the widget is destroyed or the session is replaced.
@@ -392,8 +403,9 @@ For structured item targets, `inspect` returns item metadata such as `kind`, `ro
 Targeted `inspect` may include:
 
 - `geometry` for widget-local layout data
-- `globalBoundingBox` for screen-space bounds
+- `global_bounding_box` for screen-space bounds
 - `bounding_box` as the existing locator-compatible bounding box field
+- `attribute` for structured exceptional widget flags such as `{"transparent_for_mouse_events": true}`
 
 ### inspect_items
 
@@ -535,5 +547,6 @@ Supported selectors match the existing qplaywright syntax:
 - `.QLabel`
 
 Composite selector grammar is intentionally not part of the current contract.
+Selectors are for discovery scopes, not exact widget actions.
 For cases like "button whose text contains Submit", first discover the right widget with `snapshot`, `find`, or `inspect`, then reuse its stable handle.
 For structured item interactions, resolve the owner widget first and prefer its stable handle in the item target object.
