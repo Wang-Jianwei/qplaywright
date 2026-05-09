@@ -1560,9 +1560,6 @@ def _snapshot_entry(node: dict[str, Any], handle: str | None) -> dict[str, Any]:
         if value is None or value == "":
             continue
         entry[output_key] = value
-    label, _marker = _snapshot_display_label(node)
-    if label:
-        entry["label"] = label
     item_view = node.get("itemView")
     if isinstance(item_view, dict) and item_view:
         entry["item_view"] = dict(item_view)

@@ -771,9 +771,7 @@ def test_snapshot_payload_returns_v2_handle_shape():
 
     assert payload["ok"] is True
     assert payload["root_handle"] == "w1"
-    assert payload["widgets"] == [
-        {"handle": "w1", "class": "DemoWindow", "text": "Title", "label": "Title"}
-    ]
+    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title"}]
     assert "refs" not in payload
     assert "epoch" not in payload
 
@@ -1259,7 +1257,7 @@ def test_wait_can_include_snapshot(monkeypatch):
     assert result["active_window"]["wid"] == 11
     assert result["snapshot"] == "- DemoWindow [handle=w1]"
     assert result["root_handle"] == "w1"
-    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow", "label": "DemoWindow"}]
+    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
     assert "refs" not in result
 
 
@@ -1471,7 +1469,7 @@ def test_finalize_action_result_can_include_state_and_snapshot_together(monkeypa
     assert result["state"]["visible"] is True
     assert result["snapshot"] == "- DemoWindow [handle=w1]"
     assert result["root_handle"] == "w1"
-    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow", "label": "DemoWindow"}]
+    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
     assert "refs" not in result
 
 
@@ -1586,7 +1584,7 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
         assert result[key] == value
     assert result["snapshot"] == "- DemoWindow [handle=w1]"
     assert result["root_handle"] == "w1"
-    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow", "label": "DemoWindow"}]
+    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
     assert "refs" not in result
 
 
@@ -2148,7 +2146,6 @@ def test_snapshot_payload_preserves_existing_handle_bindings():
             "class": "DemoWindow",
             "geometry": {"x": 10, "y": 20, "width": 640, "height": 480},
             "window_title": "Title",
-            "label": "Title",
         }
     ]
     assert connection.handle_to_wid == {"w9": 99, "w10": 1}
@@ -2204,17 +2201,17 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
         {
             "handle": "w9",
             "class": "DemoWindow",
+            "selector_hint": ".DemoWindow",
             "geometry": {"x": 0, "y": 0, "width": 320, "height": 180},
             "text": "Dialog",
-            "label": "Dialog",
         },
         {
             "handle": "w10",
             "class": "QPushButton",
             "object_name": "confirm_btn",
+            "selector_hint": "#confirm_btn",
             "geometry": {"x": 40, "y": 60, "width": 80, "height": 24},
             "text": "Confirm",
-            "label": "Confirm",
         },
     ]
 
@@ -2275,7 +2272,7 @@ def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
         ],
     )
 
-    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title", "label": "Title"}]
+    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title"}]
     assert payload["snapshot"].count("[handle=w1]") == 1
 
 
@@ -2891,7 +2888,7 @@ def test_action_result_with_snapshot_merges_payload(monkeypatch):
     assert result["ok"] is True
     assert result["snapshot"] == "- item [handle=w1]"
     assert result["root_handle"] == "w1"
-    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow", "label": "item"}]
+    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
     assert "refs" not in result
 
 
@@ -3038,7 +3035,6 @@ def test_find_result_returns_v2_handle_shape():
                 "text": "Submit",
                 "accessible_name": "Submit payment",
                 "current_text": "Ready",
-                "label": "Submit",
                 "visible": True,
                 "enabled": False,
                 "interactable": False,
@@ -3071,7 +3067,7 @@ def test_find_tool_returns_ok_payload(monkeypatch):
             "root_handle": "w1",
             "count": 1,
             "truncated": False,
-            "results": [{"handle": "w2", "class": "QPushButton", "label": "Submit"}],
+            "results": [{"handle": "w2", "class": "QPushButton", "text": "Submit"}],
         },
     )
 
@@ -3082,7 +3078,7 @@ def test_find_tool_returns_ok_payload(monkeypatch):
         "root_handle": "w1",
         "count": 1,
         "truncated": False,
-        "results": [{"handle": "w2", "class": "QPushButton", "label": "Submit"}],
+        "results": [{"handle": "w2", "class": "QPushButton", "text": "Submit"}],
     }
 
 

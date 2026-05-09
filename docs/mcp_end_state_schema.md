@@ -495,7 +495,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
       "handle": "w48",
       "class": "QPushButton",
       "object_name": "submit_btn",
-      "label": "Submit",
+      "text": "Submit",
       "geometry": {
         "x": 310,
         "y": 412,
