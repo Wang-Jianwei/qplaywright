@@ -46,7 +46,8 @@ Inside the REPL, use one tool call per line:
 qplaywright> session {"action": "attach", "port": 19877}
 qplaywright> window {"action": "list"}
 qplaywright> snapshot {"depth": 4}
-qplaywright> click {"target": "text=Start"}
+qplaywright> inspect {"target": "text=Start"}
+qplaywright> click {"target": "w12"}
 qplaywright> exit
 ```
 
@@ -126,17 +127,17 @@ The server can be exposed through:
 | `snapshot` | Return a text snapshot and stable refs for the active window or one target |
 | `inspect` | Inspect one widget or item target, or return the active window widget tree in debug mode |
 | `inspect_items` | Enumerate structured table/tree/list/tab descendants for one owner widget |
-| `click` | Click or double-click the first matched widget, one item target, or one active-window coordinate |
+| `click` | Click or double-click one stable-handle widget, one item target, or one active-window coordinate |
 | `input` | Replace or append text, optionally submitting with Enter |
 | `invoke` | Invoke one exposed custom widget method by exact name |
-| `press_key` | Send one key press to the matched widget |
-| `set_checked` | Check or uncheck the matched widget |
+| `press_key` | Send one key press to one stable-handle widget |
+| `set_checked` | Check or uncheck one stable-handle widget |
 | `set_expanded` | Expand or collapse one structured tree node item target |
 | `choose` | Select one combobox option by `value`, `index`, or `label` |
 | `wait` | Wait until a widget or item target reaches a supported state |
-| `screenshot` | Capture a screenshot of the active window or a matched widget |
-| `hover` | Hover over the first matched widget, one item target, or one active-window coordinate |
-| `scroll` | Send a mouse wheel scroll event to the matched widget |
+| `screenshot` | Capture a screenshot of the active window or one stable-handle widget |
+| `hover` | Hover over one stable-handle widget, one item target, or one active-window coordinate |
+| `scroll` | Send a mouse wheel scroll event to one stable-handle widget |
 
 ## Core Model
 

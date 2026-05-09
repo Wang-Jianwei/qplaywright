@@ -299,7 +299,7 @@ ClickCountArg = Annotated[
 ]
 InputTextArg = Annotated[
     str,
-    Field(description="Text to input into the matched widget."),
+    Field(description="Text to input into the stable-handle target widget."),
 ]
 InputModeArg = Annotated[
     str,
@@ -335,7 +335,7 @@ KeyArg = Annotated[
 ]
 CheckedArg = Annotated[
     bool,
-    Field(description="Whether the matched checkable widget should end up checked."),
+    Field(description="Whether the stable-handle target widget should end up checked."),
 ]
 ChooseValueArg = Annotated[
     str | None,
@@ -387,11 +387,11 @@ ClipHeightArg = Annotated[
 ]
 DeltaXArg = Annotated[
     int,
-    Field(description="Horizontal mouse wheel delta to send to the matched widget."),
+    Field(description="Horizontal mouse wheel delta to send to the stable-handle target widget."),
 ]
 DeltaYArg = Annotated[
     int,
-    Field(description="Vertical mouse wheel delta to send to the matched widget."),
+    Field(description="Vertical mouse wheel delta to send to the stable-handle target widget."),
 ]
 ExpandedArg = Annotated[
     bool,
@@ -2627,7 +2627,7 @@ if FastMCP is not None:
         include_state: IncludeStateArg = False,
         include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
-        """Input text into the first matched input-like widget."""
+        """Input text into one widget resolved by stable handle."""
 
         if mode not in ("replace", "append"):
             raise ValueError("mode must be 'replace' or 'append'")
@@ -2695,7 +2695,7 @@ if FastMCP is not None:
         include_state: IncludeStateArg = False,
         include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
-        """Send a single key press to the first matched widget."""
+        """Send a single key press to one widget resolved by stable handle."""
 
         connection_state = _get_connection(_SERVER_STATE)
         if target is None:
@@ -2722,7 +2722,7 @@ if FastMCP is not None:
         include_state: IncludeStateArg = False,
         include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
-        """Check or uncheck the first matched checkable widget."""
+        """Check or uncheck one widget resolved by stable handle."""
 
         connection_state = _get_connection(_SERVER_STATE)
         locator = _resolve_widget_handle_locator(connection_state, target=target, action="set_checked")
@@ -2882,7 +2882,7 @@ if FastMCP is not None:
         width: ClipWidthArg = None,
         height: ClipHeightArg = None,
     ) -> dict[str, Any]:
-        """Capture a screenshot of a window or a matched widget, optionally clipped to a rectangle."""
+        """Capture a screenshot of the active window or one widget resolved by stable handle."""
 
         live_connection = _get_connection(_SERVER_STATE)
         clip_kwargs = _screenshot_clip_kwargs(x=x, y=y, width=width, height=height)
@@ -3001,7 +3001,7 @@ if FastMCP is not None:
         include_state: IncludeStateArg = False,
         include_snapshot: IncludeSnapshotArg = False,
     ) -> dict[str, Any]:
-        """Send a mouse wheel scroll event to the first matched widget."""
+        """Send a mouse wheel scroll event to one widget resolved by stable handle."""
 
         if delta_x == 0 and delta_y == 0:
             raise ValueError("delta_x and delta_y cannot both be 0")
@@ -3429,7 +3429,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     click_parser.add_argument("--include-state", action="store_true")
     click_parser.add_argument("--include-snapshot", action="store_true")
 
-    input_parser = subparsers.add_parser("input", help="Input text into the first matched widget.")
+    input_parser = subparsers.add_parser("input", help="Input text into one widget resolved by stable handle.")
     input_parser.add_argument("target")
     input_parser.add_argument("text")
     input_parser.add_argument("--mode", choices=("replace", "append"), default="replace")
@@ -3455,13 +3455,13 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     invoke_parser.add_argument("--include-state", action="store_true")
     invoke_parser.add_argument("--include-snapshot", action="store_true")
 
-    press_key_parser = subparsers.add_parser("press_key", help="Send a key press to the matched widget.")
+    press_key_parser = subparsers.add_parser("press_key", help="Send a key press to one widget resolved by stable handle.")
     press_key_parser.add_argument("key")
     press_key_parser.add_argument("--target")
     press_key_parser.add_argument("--include-state", action="store_true")
     press_key_parser.add_argument("--include-snapshot", action="store_true")
 
-    set_checked_parser = subparsers.add_parser("set_checked", help="Check or uncheck the matched widget.")
+    set_checked_parser = subparsers.add_parser("set_checked", help="Check or uncheck one widget resolved by stable handle.")
     set_checked_parser.add_argument("target")
     set_checked_parser.add_argument("--checked", action="store_true")
     set_checked_parser.add_argument("--unchecked", action="store_true")
@@ -3487,7 +3487,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     wait_parser.add_argument("--include-state", action="store_true")
     wait_parser.add_argument("--include-snapshot", action="store_true")
 
-    screenshot_parser = subparsers.add_parser("screenshot", help="Capture a screenshot of the window or a widget.")
+    screenshot_parser = subparsers.add_parser("screenshot", help="Capture a screenshot of the active window or one widget resolved by stable handle.")
     screenshot_parser.add_argument("--target")
     screenshot_parser.add_argument("--path")
     screenshot_parser.add_argument("--x", type=int)
@@ -3502,7 +3502,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     hover_parser.add_argument("--include-state", action="store_true")
     hover_parser.add_argument("--include-snapshot", action="store_true")
 
-    scroll_parser = subparsers.add_parser("scroll", help="Send a mouse wheel scroll event to the matched widget.")
+    scroll_parser = subparsers.add_parser("scroll", help="Send a mouse wheel scroll event to one widget resolved by stable handle.")
     scroll_parser.add_argument("target")
     scroll_parser.add_argument("--delta-x", type=int, default=0)
     scroll_parser.add_argument("--delta-y", type=int, default=0)
