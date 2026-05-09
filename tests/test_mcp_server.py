@@ -974,7 +974,7 @@ def test_format_widget_snapshot_marks_item_view_owner_for_inspect_items():
         ]
     )
 
-    assert snapshot == "- FancyOrdersTable [item-view=table; use inspect_items] target=#orders_table"
+    assert snapshot == "- FancyOrdersTable [item-view=table; use inspect_items] hint=#orders_table"
 
 
 def test_snapshot_entry_preserves_item_view_hint():
@@ -1962,7 +1962,7 @@ def test_format_widget_snapshot_includes_selector_hints():
         depth=3,
     )
 
-    assert 'QPushButton "Login" target=#login_btn' in snapshot
+    assert 'QPushButton "Login" hint=#login_btn' in snapshot
 
 
 def test_format_widget_snapshot_marks_accessibility_derived_labels():
@@ -1978,7 +1978,7 @@ def test_format_widget_snapshot_marks_accessibility_derived_labels():
         depth=3,
     )
 
-    assert 'MenuButton "功率扫描" [a11y] target=#measure_type_btn' in snapshot
+    assert 'MenuButton "功率扫描" [a11y] hint=#measure_type_btn' in snapshot
 
 
 def test_format_widget_snapshot_uses_a11y_selector_when_no_object_name():
@@ -1993,7 +1993,7 @@ def test_format_widget_snapshot_uses_a11y_selector_when_no_object_name():
         depth=3,
     )
 
-    assert 'ui_toolbar_icon_button_t "AddTraceButton" [a11y] target=a11y-name=AddTraceButton' in snapshot
+    assert 'ui_toolbar_icon_button_t "AddTraceButton" [a11y] hint=a11y-name=AddTraceButton' in snapshot
 
 
 def test_snapshot_payload_creates_stable_handles():
@@ -2031,10 +2031,12 @@ def test_snapshot_payload_creates_stable_handles():
     assert "[handle=w1]" in payload["snapshot"]
     assert "[handle=w2]" in payload["snapshot"]
     assert "target=w2" in payload["snapshot"]
+    assert "hint=#login_btn" in payload["snapshot"]
     assert connection.handle_to_wid == {"w1": 1, "w2": 2}
     assert payload["widgets"][1]["handle"] == "w2"
     assert payload["widgets"][1]["object_name"] == "login_btn"
     assert payload["widgets"][1]["target"] == "w2"
+    assert payload["widgets"][1]["selector_hint"] == "#login_btn"
 
 
 def test_snapshot_payload_filters_infrastructure_widgets_by_default():
@@ -3031,6 +3033,7 @@ def test_find_result_returns_v2_handle_shape():
             {
                 "handle": "w2",
                 "target": "w2",
+                "selector_hint": "#submit_btn",
                 "class": "QPushButton",
                 "object_name": "submit_btn",
                 "text": "Submit",
