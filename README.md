@@ -133,9 +133,11 @@ Run the direct CLI / REPL when you want to keep issuing tool calls from one term
 qplaywright-mcp cli
 qplaywright> session {"action": "attach", "port": 19877}
 qplaywright> window {"action": "list"}
-qplaywright> snapshot {"depth": 4}
-qplaywright> click {"target": "text=Start"}
+qplaywright> find {"text": "Start", "limit": 1}
+qplaywright> click {"target": "w12"}
 ```
+
+Prefer the stable handle returned by `snapshot`, `find`, or `inspect` for follow-up actions. Selector hints are a fallback when you do not yet have a handle.
 
 You can also inspect CLI help and available MCP resources directly:
 
@@ -152,10 +154,10 @@ The CLI also supports typed one-shot commands for common MCP flows:
 qplaywright-mcp cli session attach --port 19877
 qplaywright-mcp cli window select --title Dialog
 qplaywright-mcp cli snapshot --depth 4 --topmost-only
-qplaywright-mcp cli click text=Start --count 2
+qplaywright-mcp cli click w12 --count 2
 qplaywright-mcp cli click --x 320 --y 180
 qplaywright-mcp cli hover --x 320 --y 180
-qplaywright-mcp cli input #amount_editor 123.45 --submit
+qplaywright-mcp cli input w7 123.45 --submit
 ```
 
 When `click` or `hover` omits `target`, `x` and `y` are interpreted as coordinates relative to the active window.
@@ -204,6 +206,7 @@ In this repository, if you are using the checked-in virtual environment, run:
 - MCP uses a single active session and a single active window scope; use the `session` and `window` tools to switch explicitly.
 - MCP window summaries and snapshot widget entries expose layout data through `geometry {x, y, width, height}`.
 - Targeted MCP `inspect` responses expose both local `geometry` and screen-space `globalBoundingBox`.
+- MCP follow-up actions should prefer the stable widget handles returned by `snapshot`, `find`, or `inspect`; selector strings are a fallback discovery aid.
 - `topmost_only=true` is an approximate frontmost-visible filter for window-wide `snapshot` and targetless `inspect`; it may omit content.
 
 ## Additional Docs

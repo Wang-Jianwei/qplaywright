@@ -81,11 +81,13 @@ qplaywright-mcp cli session launch D:/path/to/app.exe -- --flag
 qplaywright-mcp cli window list
 qplaywright-mcp cli window select --title Dialog
 qplaywright-mcp cli snapshot --depth 4 --topmost-only
-qplaywright-mcp cli click text=Start --count 2
+qplaywright-mcp cli click w12 --count 2
 qplaywright-mcp cli click --x 320 --y 180
 qplaywright-mcp cli hover --x 320 --y 180
-qplaywright-mcp cli input #amount_editor 123.45 --submit
+qplaywright-mcp cli input w7 123.45 --submit
 ```
+
+Prefer the stable handle returned by `snapshot`, `find`, or `inspect` for follow-up actions. Selector hints are a fallback when you still need to discover the right widget.
 
 When `click` or `hover` omits `target`, `x` and `y` are interpreted as coordinates relative to the active window.
 If the active window is not the desired scope, switch it first with `window select`.
@@ -95,9 +97,9 @@ If the active window is not the desired scope, switch it first with `window sele
 1. `session` with `action="attach"` or `action="launch"` to establish the active session.
 2. `window` with `action="list"` to discover visible top-level windows.
 3. `window` with `action="select"` when the desired scope is not the current active window.
-4. `snapshot` or `inspect` to understand the widget tree and obtain stable refs.
+4. `snapshot`, `find`, or `inspect` to understand the widget tree and obtain stable handles.
 5. `inspect_items` when the target widget is a table, tree, or list and you need structured descendant item targets.
-6. Use action tools like `click`, `input`, `invoke`, `set_checked`, `set_expanded`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and `screenshot`.
+6. Use action tools like `click`, `input`, `invoke`, `set_checked`, `set_expanded`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and `screenshot` with those handles.
 7. `session` with `action="close"` when finished.
 
 ## Exposed MCP Interfaces
@@ -162,12 +164,12 @@ There is no parallel top-level `width` / `height` return shape anymore.
 Targeted tools accept a single `target` value.
 That value may be either:
 
-- a qplaywright selector such as `#amount_editor`, `role=button`, `text=Submit`, or `.QLabel`
 - a stable widget handle such as `w12`
-- a structured item target object such as `{"owner": "#orders_table", "item": {"kind": "table_cell", "row": 3, "column": 1}}`
-- a structured item target object such as `{"owner": "#settings_tree", "item": {"kind": "tree_node", "path": [0, 1]}}`
-- a structured item target object such as `{"owner": "#task_list", "item": {"kind": "list_item", "row": 2}}`
-- a structured item target object such as `{"owner": "#main_tabs", "item": {"kind": "tab_item", "index": 1}}`
+- a qplaywright selector such as `#amount_editor`, `role=button`, `text=Submit`, or `.QLabel`
+- a structured item target object such as `{"owner": "w12", "item": {"kind": "table_cell", "row": 3, "column": 1}}`
+- a structured item target object such as `{"owner": "w9", "item": {"kind": "tree_node", "path": [0, 1]}}`
+- a structured item target object such as `{"owner": "w5", "item": {"kind": "list_item", "row": 2}}`
+- a structured item target object such as `{"owner": "w3", "item": {"kind": "tab_item", "index": 1}}`
 
 The selector side of `target` keeps the existing atomic qplaywright forms.
 This contract does not define inline composite syntax such as `role=button >> has-text=Submit`.
@@ -393,7 +395,7 @@ Request:
 
 ```json
 {
-  "owner": "#settings_tree",
+  "owner": "w9",
   "max_depth": 3,
   "max_items": 50
 }
@@ -431,7 +433,7 @@ For item-view descendants, the same `target` field may be a structured object:
 ```json
 {
   "target": {
-    "owner": "#settings_tree",
+    "owner": "w9",
     "item": {"kind": "tree_node", "path": [0, 1]}
   },
   "include_state": true
@@ -528,3 +530,4 @@ Supported selectors match the existing qplaywright syntax:
 
 Composite selector grammar is intentionally not part of the current contract.
 For cases like "button whose text contains Submit", first discover the right widget with `snapshot`, `find`, or `inspect`, then reuse its stable handle.
+For structured item interactions, resolve the owner widget first and prefer its stable handle in the item target object.
