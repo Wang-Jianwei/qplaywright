@@ -11,7 +11,7 @@
 - JSON 字段统一使用 `snake_case`
 - 成功响应统一包含 `ok: true`
 - 除非特别说明，目标工具在 `target` 匹配多个控件时不报错，而是返回第一个匹配项的标量字段，同时用 `count` 暴露总匹配数
-- widget discovery / observation scope 可以接受 stable handle 或原子 selector；exact widget action target 只接受 stable handle；需要复合条件时，先用 `snapshot`、`find` 或 `inspect` 缩小范围，再使用 stable handle
+- widget discovery / observation scope 可以接受 stable handle 或原子 selector；exact widget action target 只接受 stable handle；需要复合条件时，先用 `snapshot`、`find`、`resolve_object_names` 或 `inspect` 缩小范围，再使用 stable handle
 - `target`、`root`、`owner` 表示请求里的可解析目标 spec；`handle`、`root_handle`、`owner_handle` 表示响应里的已解析 stable widget identity
 - 布尔状态字段统一使用 `visible`、`enabled`、`checked`、`selected`、`interactable` 这类形容词形式，不再并行维护 `is_visible`、`is_enabled` 一类别名
 
@@ -22,7 +22,7 @@
 终态工具分为三类：
 
 1. 资源工具：`session`、`window`
-2. 观察工具：`snapshot`、`find`、`inspect`、`inspect_items`、`screenshot`
+2. 观察工具：`snapshot`、`find`、`resolve_object_names`、`inspect`、`inspect_items`、`screenshot`
 3. 动作工具：`click`、`input`、`choose`、`set_checked`、`press_key`、`hover`、`scroll`、`invoke`、`wait`
 
 ## Value Types

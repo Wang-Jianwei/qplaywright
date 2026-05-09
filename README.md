@@ -137,8 +137,8 @@ qplaywright> find {"text": "Start", "limit": 1}
 qplaywright> click {"target": "w12"}
 ```
 
-Use `snapshot`, `find`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
-Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find` when you want a short candidate list for one predicate.
+Use `snapshot`, `find`, `resolve_object_names`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
+Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find` when you want a short candidate list for one predicate; use `resolve_object_names` when one known subtree already exposes several deliberate stable `object_name` values.
 
 You can also inspect CLI help and available MCP resources directly:
 
@@ -155,6 +155,7 @@ The CLI also supports typed one-shot commands for common MCP flows:
 qplaywright-mcp cli session attach --port 19877
 qplaywright-mcp cli window select --title Dialog
 qplaywright-mcp cli snapshot --depth 4 --topmost-only
+qplaywright-mcp cli resolve_object_names --root w5 --object-name username --object-name password --object-name login_btn
 qplaywright-mcp cli click w12 --count 2
 qplaywright-mcp cli click --x 320 --y 180
 qplaywright-mcp cli hover --x 320 --y 180
@@ -207,7 +208,7 @@ In this repository, if you are using the checked-in virtual environment, run:
 - MCP uses a single active session and a single active window scope; use the `session` and `window` tools to switch explicitly.
 - MCP window summaries and snapshot widget entries expose layout data through compact `geometry: [x, y, width, height]` arrays.
 - Targeted MCP `inspect` responses expose compact `geometry`, `bounding_box`, and `global_bounding_box` arrays in the same `[x, y, width, height]` form.
-- MCP observation/search surfaces still accept selector strings, but exact widget actions are handle-first and should reuse the stable handles returned by `snapshot`, `find`, or `inspect`.
+- MCP observation/search surfaces still accept selector strings, but exact widget actions are handle-first and should reuse the stable handles returned by `snapshot`, `find`, `resolve_object_names`, or `inspect`.
 - `topmost_only=true` is an approximate frontmost-visible filter for window-wide `snapshot` and targetless `inspect`; it may omit content.
 
 ## Additional Docs

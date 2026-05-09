@@ -2651,6 +2651,38 @@ def test_run_cli_typed_find(monkeypatch, capsys):
     }
 
 
+def test_run_cli_typed_resolve_object_names(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_server,
+        "resolve_object_names",
+        lambda **kwargs: {"ok": True, **kwargs},
+    )
+
+    exit_code = mcp_server._run_cli(
+        [
+            "resolve_object_names",
+            "--root",
+            "w12",
+            "--object-name",
+            "username",
+            "--object-name",
+            "password",
+            "--depth",
+            "4",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "root": "w12",
+        "object_names": ["username", "password"],
+        "depth": 4,
+        "include_infrastructure": False,
+    }
+
+
 def test_run_cli_typed_inspect_accepts_positional_target(monkeypatch, capsys):
     monkeypatch.setattr(
         mcp_server,
@@ -3166,6 +3198,147 @@ def test_find_tool_returns_ok_payload(monkeypatch):
         "count": 1,
         "truncated": False,
         "results": [{"handle": "w2", "class": "QPushButton", "text": "Submit"}],
+    }
+
+
+def test_resolve_object_names_result_maps_handles_and_reports_missing_and_ambiguous(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+        wid_to_handle={11: "w1"},
+        handle_to_wid={"w1": 11},
+        handle_counter=1,
+    )
+    captured = {}
+
+    def fake_widget_tree_raw(managed_connection, **kwargs):
+        captured["connection"] = managed_connection
+        captured["kwargs"] = kwargs
+        return [
+            {
+                "wid": 11,
+                "class": "QWidget",
+                "objectName": "payment_panel",
+                "children": [
+                    {"wid": 22, "class": "QLineEdit", "objectName": "username", "text": "alice"},
+                    {
+                        "wid": 30,
+                        "class": "QStackedWidget",
+                        "objectName": "qt_tabwidget_stackedwidget",
+                        "children": [
+                            {"wid": 33, "class": "QLineEdit", "objectName": "password"},
+                        ],
+                    },
+                    {"wid": 40, "class": "QPushButton", "objectName": "dup", "text": "First"},
+                    {"wid": 41, "class": "QPushButton", "objectName": "dup", "text": "Second"},
+                ],
+            }
+        ]
+
+    monkeypatch.setattr(mcp_server, "_widget_tree_raw", fake_widget_tree_raw)
+
+    result = mcp_server._resolve_object_names_result(
+        connection,
+        root="w1",
+        object_names=["username", "password", "missing", "dup", "username"],
+        depth=4,
+    )
+
+    assert captured == {
+        "connection": connection,
+        "kwargs": {
+            "max_depth": 4,
+            "window_wid": 11,
+            "topmost_only": False,
+            "timeout": None,
+        },
+    }
+    assert result == {
+        "root_handle": "w1",
+        "requested": ["username", "password", "missing", "dup"],
+        "handles": {
+            "username": "w2",
+            "password": "w3",
+        },
+        "resolved": {
+            "username": {
+                "handle": "w2",
+                "class": "QLineEdit",
+                "object_name": "username",
+                "text": "alice",
+            },
+            "password": {
+                "handle": "w3",
+                "class": "QLineEdit",
+                "object_name": "password",
+            },
+        },
+        "missing": ["missing"],
+        "ambiguous": {
+            "dup": [
+                {
+                    "handle": "w4",
+                    "class": "QPushButton",
+                    "object_name": "dup",
+                    "text": "First",
+                },
+                {
+                    "handle": "w5",
+                    "class": "QPushButton",
+                    "object_name": "dup",
+                    "text": "Second",
+                },
+            ],
+        },
+    }
+
+
+def test_resolve_object_names_tool_returns_ok_payload(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", mcp_server.ServerState(connection=connection))
+    monkeypatch.setattr(
+        mcp_server,
+        "_resolve_object_names_result",
+        lambda managed_connection, **kwargs: {
+            "root_handle": "w1",
+            "requested": ["username", "password"],
+            "handles": {"username": "w2", "password": "w3"},
+            "resolved": {
+                "username": {"handle": "w2", "class": "QLineEdit", "object_name": "username"},
+                "password": {"handle": "w3", "class": "QLineEdit", "object_name": "password"},
+            },
+            "missing": [],
+            "ambiguous": {},
+        },
+    )
+
+    result = mcp_server.resolve_object_names(root="#payment_panel", object_names=["username", "password"], depth=5)
+
+    assert result == {
+        "ok": True,
+        "root_handle": "w1",
+        "requested": ["username", "password"],
+        "handles": {"username": "w2", "password": "w3"},
+        "resolved": {
+            "username": {"handle": "w2", "class": "QLineEdit", "object_name": "username"},
+            "password": {"handle": "w3", "class": "QLineEdit", "object_name": "password"},
+        },
+        "missing": [],
+        "ambiguous": {},
     }
 
 

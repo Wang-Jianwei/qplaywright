@@ -88,8 +88,8 @@ qplaywright-mcp cli hover --x 320 --y 180
 qplaywright-mcp cli input w7 123.45 --submit
 ```
 
-Use `snapshot`, `find`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
-Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find` when you want a short candidate list for one predicate.
+Use `snapshot`, `find`, `resolve_object_names`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
+Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find` when you want a short candidate list for one predicate; use `resolve_object_names` when one known subtree already exposes several deliberate stable `object_name` values.
 
 When `click` or `hover` omits `target`, `x` and `y` are interpreted as coordinates relative to the active window.
 If the active window is not the desired scope, switch it first with `window select`.
@@ -99,7 +99,7 @@ If the active window is not the desired scope, switch it first with `window sele
 1. `session` with `action="attach"` or `action="launch"` to establish the active session.
 2. `window` with `action="list"` to list visible top-level windows.
 3. `window` with `action="select"` when the desired scope is not the current active window.
-4. `snapshot`, `find`, or `inspect` to understand the widget tree and obtain stable handles.
+4. `snapshot`, `find`, `resolve_object_names`, or `inspect` to understand the widget tree and obtain stable handles.
 5. `inspect_items` when the target widget is a table, tree, or list and you need structured descendant item targets.
 6. Use action tools like `click`, `input`, `invoke`, `set_checked`, `set_expanded`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and targeted `screenshot` with those handles, or reuse the structured item targets returned by `inspect_items`.
 7. `session` with `action="close"` when finished.
@@ -127,6 +127,7 @@ The server can be exposed through:
 | `window` | List, select, resize, or close one top-level Qt window |
 | `snapshot` | Return a text snapshot and stable refs for the active window or one target |
 | `inspect` | Inspect one widget or item target, or return the active window widget tree in debug mode |
+| `resolve_object_names` | Resolve several exact `object_name` values to stable handles under one known root scope |
 | `inspect_items` | Enumerate structured table/tree/list/tab descendants for one owner widget |
 | `click` | Click or double-click one stable-handle widget, one item target, or one active-window coordinate |
 | `input` | Replace or append text, optionally submitting with Enter |
@@ -339,6 +340,7 @@ once the widget is destroyed or the session is replaced.
 
 Use `snapshot(target=..., depth=N)` when you already know a container or owner widget and want to inspect a local subtree in one round-trip.
 Use `find` when you already have one narrowing predicate such as `object_name`, `text`, `role`, or `has_text` and want a small candidate set instead of a subtree dump.
+Use `resolve_object_names` when a known subtree exposes several deliberate `object_name` values and you want those exact handles in one round-trip.
 
 When `topmost_only=true` and `target` is omitted, the result is an approximate
 frontmost-visible view. It may omit widgets or content and returns a warning to
@@ -382,6 +384,38 @@ Typical fields include:
 
 `find` is still a search tool, not a full inspect payload. If you need methods,
 properties, or exact target-level state, follow up with `inspect` on the chosen handle.
+
+### resolve_object_names
+
+Request:
+
+```json
+{
+  "root": "#login_form",
+  "object_names": ["username", "password", "login_btn"],
+  "depth": 6
+}
+```
+
+`resolve_object_names` inspects one root subtree and resolves several exact
+`QObject::objectName()` values in one call. It is intentionally narrower than
+`find`:
+
+- use it only when the subtree already exposes deliberate stable `object_name` values
+- it does not guess between duplicates; duplicated names are returned under `ambiguous`
+- misses are returned under `missing`
+
+Response fields include:
+
+- `root_handle`
+- `requested`
+- `handles`, mapping uniquely resolved `object_name` values to stable handles
+- `resolved`, mapping uniquely resolved `object_name` values to compact widget entries
+- `missing`
+- `ambiguous`
+
+This is the fastest path when an agent already knows a form or panel root and
+needs several exact child handles before calling `input`, `click`, or `choose`.
 
 ### inspect
 

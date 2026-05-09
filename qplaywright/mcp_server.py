@@ -244,6 +244,12 @@ FindObjectNameArg = Annotated[
     str | None,
     Field(description="Exact QObject::objectName() to match."),
 ]
+ResolveObjectNamesArg = Annotated[
+    list[str],
+    Field(
+        description="One or more exact QObject::objectName() values to resolve within one known root scope. Use this only when that subtree exposes deliberate stable objectName values."
+    ),
+]
 FindAccessibleNameArg = Annotated[
     str | None,
     Field(description="Exact accessibleName to match, case-sensitive."),
@@ -1803,6 +1809,29 @@ def _normalize_find_string(name: str, value: str | None) -> str | None:
     return value
 
 
+def _normalize_object_name_batch(object_names: Sequence[str]) -> list[str]:
+    if isinstance(object_names, (str, bytes)):
+        raise ValueError("object_names must be a list of non-empty strings")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in object_names:
+        if not isinstance(value, str):
+            raise ValueError("object_names must contain only strings")
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("object_names must contain only non-empty strings")
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        normalized.append(candidate)
+
+    if not normalized:
+        raise ValueError("object_names must contain at least one non-empty string")
+
+    return normalized
+
+
 def _resolve_find_root_wid(connection: ManagedConnection, root: str | None) -> int:
     if root is None:
         return _resolve_window(connection).wid
@@ -1912,6 +1941,84 @@ def _find_result(
             for entry in results
             if isinstance(entry, dict)
         ],
+    }
+
+
+def _iter_widget_tree_nodes(nodes: Sequence[dict[str, Any]]) -> Any:
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        yield node
+        children = node.get("children")
+        if isinstance(children, list):
+            yield from _iter_widget_tree_nodes(children)
+
+
+def _resolve_object_names_result(
+    connection: ManagedConnection,
+    *,
+    root: str | None = None,
+    object_names: Sequence[str],
+    depth: int = 10,
+    include_infrastructure: bool = False,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    if depth <= 0:
+        raise ValueError("depth must be > 0")
+
+    normalized_names = _normalize_object_name_batch(object_names)
+    requested_names = set(normalized_names)
+    root_wid = _resolve_find_root_wid(connection, root)
+    nodes = _widget_tree_raw(
+        connection,
+        max_depth=depth,
+        window_wid=root_wid,
+        topmost_only=False,
+        timeout=timeout,
+    )
+    if not include_infrastructure:
+        nodes = _filter_infrastructure_nodes(nodes, preserve_roots=True)
+
+    matched_entries: dict[str, list[dict[str, Any]]] = {name: [] for name in normalized_names}
+    seen_wids: set[int] = set()
+    for node in _iter_widget_tree_nodes(nodes):
+        wid = node.get("wid")
+        if isinstance(wid, int):
+            if wid in seen_wids:
+                continue
+            seen_wids.add(wid)
+
+        object_name = node.get("objectName")
+        if not isinstance(object_name, str) or object_name not in requested_names:
+            continue
+
+        matched_entries[object_name].append(_snapshot_entry(node, connection.handle_for_wid(wid)))
+
+    handles: dict[str, str] = {}
+    resolved: dict[str, dict[str, Any]] = {}
+    missing: list[str] = []
+    ambiguous: dict[str, list[dict[str, Any]]] = {}
+
+    for name in normalized_names:
+        entries = matched_entries[name]
+        if len(entries) == 1:
+            resolved[name] = entries[0]
+            handle = entries[0].get("handle")
+            if isinstance(handle, str) and handle:
+                handles[name] = handle
+            continue
+        if not entries:
+            missing.append(name)
+            continue
+        ambiguous[name] = entries
+
+    return {
+        "root_handle": connection.handle_for_wid(root_wid),
+        "requested": normalized_names,
+        "handles": handles,
+        "resolved": resolved,
+        "missing": missing,
+        "ambiguous": ambiguous,
     }
 
 
@@ -2525,6 +2632,34 @@ if FastMCP is not None:
             **payload,
         }
 
+
+    @mcp.tool()
+    def resolve_object_names(
+        object_names: ResolveObjectNamesArg,
+        root: FindRootArg = None,
+        depth: DepthArg = 10,
+        include_infrastructure: IncludeInfrastructureArg = False,
+    ) -> dict[str, Any]:
+        """Resolve several exact objectName values to stable handles within one root scope.
+
+        Use this when one known subtree exposes deliberate stable objectName
+        values and you want several handles in one call. Missing or duplicated
+        names are reported explicitly instead of guessed.
+        """
+
+        connection_state = _get_connection(_SERVER_STATE)
+        payload = _resolve_object_names_result(
+            connection_state,
+            object_names=object_names,
+            root=root,
+            depth=depth,
+            include_infrastructure=include_infrastructure,
+        )
+        return {
+            "ok": True,
+            **payload,
+        }
+
     @mcp.tool()
     def click(
         target: OptionalActionTargetArg = None,
@@ -3023,6 +3158,7 @@ _CLI_TOOL_NAMES = (
     "window",
     "snapshot",
     "find",
+    "resolve_object_names",
     "inspect",
     "inspect_items",
     "click",
@@ -3190,7 +3326,7 @@ def _cli_tool_help_from_schema(tool_name: str) -> str | None:
         lines.extend([
             "",
             "Target guidance:",
-            "- Prefer the stable handle returned by snapshot, find, or inspect.",
+            "- Prefer the stable handle returned by snapshot, find, resolve_object_names, or inspect.",
             f"- Selector fallback examples: {_SELECTOR_EXAMPLES}",
         ])
 
@@ -3409,6 +3545,15 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     find_parser.add_argument("--include-infrastructure", action="store_true")
     find_parser.add_argument("--limit", type=int, default=5)
 
+    resolve_object_names_parser = subparsers.add_parser(
+        "resolve_object_names",
+        help="Resolve several exact objectName values to stable handles under one root.",
+    )
+    resolve_object_names_parser.add_argument("--root")
+    resolve_object_names_parser.add_argument("--object-name", action="append", required=True)
+    resolve_object_names_parser.add_argument("--depth", type=int, default=10)
+    resolve_object_names_parser.add_argument("--include-infrastructure", action="store_true")
+
     click_parser = subparsers.add_parser("click", help="Click a target or a window-relative coordinate.")
     click_parser.add_argument("target", nargs="?")
     click_parser.add_argument("--count", type=int, choices=(1, 2), default=1)
@@ -3528,6 +3673,14 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         elif namespace.not_interactable:
             arguments["interactable"] = False
         return "find", arguments
+
+    if command == "resolve_object_names":
+        return "resolve_object_names", {
+            "root": namespace.root,
+            "object_names": getattr(namespace, "object_name"),
+            "depth": namespace.depth,
+            "include_infrastructure": namespace.include_infrastructure,
+        }
 
     if command == "inspect":
         return "inspect", {
@@ -3693,7 +3846,7 @@ def _try_run_typed_cli(argv: Sequence[str]) -> int | None:
     if not argv:
         return None
     if argv[0] not in {
-        "resource", "session", "window", "snapshot", "find", "inspect", "click", "input", "invoke",
+        "resource", "session", "window", "snapshot", "find", "resolve_object_names", "inspect", "click", "input", "invoke",
         "press_key", "set_checked", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         return None
@@ -3719,7 +3872,7 @@ def _try_run_typed_cli_from_command_line(command_line: str) -> int | None:
         return None
     # If the first part is a known tool and the rest looks like flags/args (not JSON)
     if parts[0] in {
-        "resource", "session", "window", "snapshot", "find", "inspect", "click", "input", "invoke",
+        "resource", "session", "window", "snapshot", "find", "resolve_object_names", "inspect", "click", "input", "invoke",
         "press_key", "set_checked", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         if len(parts) > 1 and parts[1].lstrip().startswith("{"):
