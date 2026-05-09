@@ -4,6 +4,7 @@ import base64
 import anyio
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -1708,6 +1709,24 @@ def test_mcp_tool_input_schema_describes_all_parameters():
     assert "class_" not in find_tool["inputSchema"]["properties"]
 
 
+def test_find_tool_accepts_class_argument_via_mcp_transport(monkeypatch):
+    assert mcp_server.mcp is not None
+    tool = cast(Any, mcp_server.mcp._tool_manager.get_tool("find"))
+    assert tool is not None
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: object())
+    monkeypatch.setattr(mcp_server, "_find_result", lambda connection_state, **kwargs: kwargs)
+
+    async def run_tool():
+        return await tool.run({"class": "QPushButton", "accessible_name": "Submit"})
+
+    result = anyio.run(run_tool)
+
+    assert result["ok"] is True
+    assert result["widget_class"] == "QPushButton"
+    assert result["accessible_name"] == "Submit"
+
+
 def test_summarize_windows_uses_geometry_payload():
     connection = mcp_server.ManagedConnection(
         name="demo",
@@ -1962,6 +1981,21 @@ def test_format_widget_snapshot_marks_accessibility_derived_labels():
     assert 'MenuButton "功率扫描" [a11y] target=#measure_type_btn' in snapshot
 
 
+def test_format_widget_snapshot_uses_a11y_selector_when_no_object_name():
+    snapshot = mcp_server._format_widget_snapshot(
+        [
+            {
+                "class": "ui_toolbar_icon_button_t",
+                "accessibleName": "AddTraceButton",
+                "children": [],
+            }
+        ],
+        depth=3,
+    )
+
+    assert 'ui_toolbar_icon_button_t "AddTraceButton" [a11y] target=a11y-name=AddTraceButton' in snapshot
+
+
 def test_snapshot_payload_creates_stable_handles():
     connection = mcp_server.ManagedConnection(
         name="demo",
@@ -1999,6 +2033,7 @@ def test_snapshot_payload_creates_stable_handles():
     assert connection.handle_to_wid == {"w1": 1, "w2": 2}
     assert payload["widgets"][1]["handle"] == "w2"
     assert payload["widgets"][1]["object_name"] == "login_btn"
+    assert payload["widgets"][1]["target"] == "#login_btn"
 
 
 def test_snapshot_payload_filters_infrastructure_widgets_by_default():
@@ -2335,6 +2370,17 @@ def test_run_cli_supports_direct_help_meta_command(capsys):
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "session.attach: attach to an already running Qt app" in output
+
+
+def test_run_cli_help_click_uses_mcp_schema(capsys):
+    exit_code = mcp_server._run_cli(["help", "click"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Allowed request shapes:" in output
+    assert "Window-relative x coordinate in pixels." in output
+    assert "a11y-name=Submit" in output
+    assert "screenshot clipping" not in output
 
 
 def test_run_cli_prints_resource_list(monkeypatch, capsys):
@@ -2983,6 +3029,7 @@ def test_find_result_returns_v2_handle_shape():
         "results": [
             {
                 "handle": "w2",
+                "target": "#submit_btn",
                 "class": "QPushButton",
                 "object_name": "submit_btn",
                 "text": "Submit",

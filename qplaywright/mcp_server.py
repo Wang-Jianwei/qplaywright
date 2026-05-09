@@ -404,6 +404,7 @@ IncludeHiddenItemsArg = Annotated[
 
 try:
     from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase
     from mcp.shared.session import BaseSession, RequestResponder
     from mcp.types import (
         ClientNotification,
@@ -415,6 +416,7 @@ try:
     )
 except ImportError as exc:  # pragma: no cover - exercised only without the extra installed
     FastMCP = None  # type: ignore[assignment]
+    ArgModelBase = None  # type: ignore[assignment]
     BaseSession = None  # type: ignore[assignment]
     RequestResponder = None  # type: ignore[assignment]
     ClientNotification = None  # type: ignore[assignment]
@@ -459,6 +461,29 @@ if _MCP_IMPORT_ERROR is None:
 
 _MCP_CANCEL_NOTIFICATION_METHOD = "notifications/cancelled"
 _HANDLE_PATTERN = re.compile(r"^w\d+$")
+_SELECTOR_EXAMPLES = "role=button, text=Submit, has-text=partial, a11y-name=Submit, #objectName, name=objectName, .QLabel"
+
+
+def _patch_fastmcp_argument_dump() -> None:
+    if ArgModelBase is None:
+        return
+
+    def model_dump_one_level(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
+        for field_name, field_info in self.__class__.model_fields.items():
+            value = getattr(self, field_name)
+            output_name = field_name
+            # FastMCP renames some fields to avoid BaseModel attribute collisions.
+            # Preserve the public alias only for those synthetic field_* names.
+            if field_name.startswith("field_") and field_info.alias:
+                output_name = field_info.alias
+            kwargs[output_name] = value
+        return kwargs
+
+    ArgModelBase.model_dump_one_level = model_dump_one_level
+
+
+_patch_fastmcp_argument_dump()
 
 
 @dataclass
@@ -1443,12 +1468,8 @@ def _format_widget_snapshot(nodes: list[dict[str, Any]], *, depth: int = 10, lev
 
     lines: list[str] = []
     for node in nodes:
-        selector = ""
-        object_name = node.get("objectName") or ""
-        if object_name:
-            selector = f" target=#{object_name}"
-        elif node.get("class"):
-            selector = f" target=.{node['class']}"
+        target_hint = _snapshot_target_hint(node)
+        selector = f" target={target_hint}" if target_hint else ""
 
         label, marker = _snapshot_display_label(node)
         item_view_marker = _snapshot_item_view_marker(node)
@@ -1474,10 +1495,23 @@ def _snapshot_target_hint(node: dict[str, Any]) -> str:
     object_name = node.get("objectName") or ""
     if object_name:
         return f"#{object_name}"
+    accessible_name = node.get("accessibleName") or ""
+    if accessible_name:
+        return f"a11y-name={accessible_name}"
     widget_class = node.get("class") or ""
     if widget_class:
         return f".{widget_class}"
     return ""
+
+
+def _actionable_widget_target(node: dict[str, Any], handle: str | None) -> str:
+    object_name = node.get("objectName") or ""
+    if object_name:
+        return f"#{object_name}"
+    accessible_name = node.get("accessibleName") or ""
+    if accessible_name:
+        return f"a11y-name={accessible_name}"
+    return handle or ""
 
 
 def _snapshot_display_label(node: dict[str, Any]) -> tuple[str, str]:
@@ -1516,6 +1550,9 @@ def _snapshot_entry(node: dict[str, Any], handle: str | None) -> dict[str, Any]:
         "handle": handle,
         "class": node.get("class", ""),
     }
+    target = _actionable_widget_target(node, handle)
+    if target:
+        entry["target"] = target
     geometry = node.get("geometry")
     if isinstance(geometry, dict) and geometry:
         entry["geometry"] = geometry
@@ -1607,7 +1644,7 @@ def _render_snapshot_tree(
 
         handle = _snapshot_handle_for_widget(connection, wid)
         handle_part = f" [handle={handle}]" if handle else ""
-        target_hint = _snapshot_target_hint(node)
+        target_hint = _actionable_widget_target(node, handle) or _snapshot_target_hint(node)
         target_part = f" target={target_hint}" if target_hint else ""
         label, marker = _snapshot_display_label(node)
         text_part = f' "{label}"' if label else ""
@@ -3041,7 +3078,72 @@ def _prefix_action_lines(tool_name: str, doc: str) -> str:
     return "\n".join(lines)
 
 
+def _mcp_tool_definition(tool_name: str) -> Any | None:
+    if mcp is None:
+        return None
+    tool_manager = getattr(mcp, "_tool_manager", None)
+    get_tool = getattr(tool_manager, "get_tool", None)
+    if not callable(get_tool):
+        return None
+    return get_tool(tool_name)
+
+
+def _schema_required_shape(rule: dict[str, Any]) -> str | None:
+    required = rule.get("required")
+    if not isinstance(required, list) or not required:
+        return None
+    return ", ".join(str(item) for item in required)
+
+
+def _cli_tool_help_from_schema(tool_name: str) -> str | None:
+    tool = _mcp_tool_definition(tool_name)
+    if tool is None:
+        return None
+
+    description = _prefix_action_lines(tool_name, (tool.description or "No description available.").strip())
+    schema = tool.parameters if isinstance(tool.parameters, dict) else {}
+    properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+
+    lines = [tool_name]
+    if description:
+        lines.extend(["", description])
+
+    if isinstance(schema.get("oneOf"), list):
+        shapes = [
+            shape
+            for entry in schema["oneOf"]
+            if isinstance(entry, dict)
+            for shape in [_schema_required_shape(entry)]
+            if shape is not None
+        ]
+        if shapes:
+            lines.extend(["", "Allowed request shapes:"])
+            lines.extend(f"- {shape}" for shape in shapes)
+
+    if isinstance(properties, dict) and properties:
+        lines.extend(["", "Parameters:"])
+        for name, property_schema in properties.items():
+            if not isinstance(property_schema, dict):
+                continue
+            line = f"- {name}"
+            property_description = str(property_schema.get("description") or "").strip()
+            if property_description:
+                line += f": {property_description}"
+            if "default" in property_schema and property_schema["default"] is not None:
+                line += f" Default: {property_schema['default']!r}."
+            lines.append(line)
+
+    if isinstance(properties, dict) and any(name in properties for name in ("target", "root", "owner")):
+        lines.extend(["", "Selector examples:", f"- {_SELECTOR_EXAMPLES}"])
+
+    return "\n".join(lines)
+
+
 def _cli_tool_help(tool_name: str, func: Any) -> str:
+    schema_help = _cli_tool_help_from_schema(tool_name)
+    if schema_help is not None:
+        return schema_help
+
     signature = pyinspect.signature(func)
     doc = _prefix_action_lines(tool_name, (pyinspect.getdoc(func) or "No description available.").strip())
     return f"{tool_name}{signature}\n\n{doc}"
