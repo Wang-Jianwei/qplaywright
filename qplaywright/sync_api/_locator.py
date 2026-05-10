@@ -193,13 +193,22 @@ class Locator:
             if self._parent_wid is not None:
                 p["parent_wid"] = self._parent_wid
             if self._is_last:
-                # Call _conn.send directly (not _send) to avoid recursion:
-                # _send → _params → _send.  We need the bare selector params
-                # without nth to count all matches, then pick the last index.
-                count = self._conn.send(METHOD_COUNT, p, timeout=self._timeout)
+                count = self._conn.send(METHOD_COUNT, dict(p), timeout=self._timeout)
                 p["nth"] = max(0, count - 1)
             elif self._nth_index is not None:
                 p["nth"] = self._nth_index
+        p.update(extra)
+        return p
+
+    def _base_params(self, **extra) -> dict:
+        if self._widget_wid is not None:
+            p: dict[str, Any] = {"wid": self._widget_wid}
+        else:
+            p = {"selector": self._selector}
+            if self._has_text is not None:
+                p["has_text"] = self._has_text
+            if self._parent_wid is not None:
+                p["parent_wid"] = self._parent_wid
         p.update(extra)
         return p
 
@@ -311,7 +320,7 @@ class Locator:
             has_text=self._has_text,
             parent_wid=self._parent_wid,
             nth_index=index,
-            widget_wid=self._widget_wid,
+            widget_wid=None,
             timeout=self._timeout,
         )
 
@@ -334,7 +343,7 @@ class Locator:
 
     def count(self) -> int:
         """Return the number of matching widgets."""
-        return self._send(METHOD_COUNT)
+        return self._conn.send(METHOD_COUNT, self._base_params(), timeout=self._timeout)
 
     def text_content(self) -> str:
         """Get the text content of the widget."""
@@ -395,7 +404,7 @@ class Locator:
 
     def all(self) -> list[Locator]:
         """Return a list of Locators, one per matching widget."""
-        results = self._send(METHOD_FIND_ALL)
+        results = self._conn.send(METHOD_FIND_ALL, self._base_params(), timeout=self._timeout)
         return [
             Locator(self._conn, self._selector, has_text=self._has_text,
                     parent_wid=self._parent_wid, widget_wid=r["wid"], timeout=self._timeout)
@@ -404,7 +413,7 @@ class Locator:
 
     def all_text_contents(self) -> list[str]:
         """Return the text content of all matching widgets."""
-        results = self._send(METHOD_FIND_ALL)
+        results = self._conn.send(METHOD_FIND_ALL, self._base_params(), timeout=self._timeout)
         return [r.get("text", "") for r in results]
 
     # -- Actions -------------------------------------------------------------

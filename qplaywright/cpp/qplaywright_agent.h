@@ -2127,7 +2127,7 @@ private:
         if (method == "get_property") {
             QWidget *w = resolveOne(params);
             QString prop = params["property"].toString();
-            QVariant val = w->property(prop.toLatin1().constData());
+            QVariant val = w->property(prop.toUtf8().constData());
             return jsonValueFromVariant(val);
         }
 
@@ -3878,6 +3878,8 @@ private:
         QWidget *target = clickTarget.widget;
         target->setFocus(Qt::MouseFocusReason);
         QApplication::processEvents();
+        QPointer<QWidget> guard(target);
+        if (!guard) return;
         updateVisualFeedback(target, clickTarget.localPos, doubleClick ? 2 : 1);
         if (doubleClick)
             QTest::mouseDClick(target, Qt::LeftButton, Qt::NoModifier, clickTarget.localPos);
@@ -3901,6 +3903,8 @@ private:
         
         target->setFocus(Qt::MouseFocusReason);
         QApplication::processEvents();
+        QPointer<QWidget> guard(target);
+        if (!guard) return;
         updateVisualFeedback(target, localPos, doubleClick ? 2 : 1);
         if (doubleClick)
             QTest::mouseDClick(target, Qt::LeftButton, Qt::NoModifier, localPos);
@@ -3973,6 +3977,8 @@ private:
         moveVisualCursorToWidget(w);
         w->setFocus();
         QApplication::processEvents();
+        QPointer<QWidget> guard(w);
+        if (!guard) return;
         QTest::keyClicks(w, text, Qt::NoModifier, delay);
         QApplication::processEvents();
     }
@@ -3999,6 +4005,8 @@ private:
         moveVisualCursorToWidget(w);
         w->setFocus();
         QApplication::processEvents();
+        QPointer<QWidget> guard(w);
+        if (!guard) return;
 
         auto it = keyMap.find(keyStr);
         if (it != keyMap.end()) {
@@ -4508,7 +4516,7 @@ private:
             QPointF(center), QPointF(globalPos),
             QPoint(dx, dy), QPoint(dx, dy),
             Qt::NoButton, Qt::NoModifier,
-            Qt::ScrollBegin, false
+            Qt::NoScrollPhase, false
         );
 #else
         QWheelEvent event(
@@ -4565,7 +4573,10 @@ private:
                 if (widgets.isEmpty()) return true;
             }
 
-            QThread::msleep(pollInterval);
+            QElapsedTimer waitTimer;
+            waitTimer.start();
+            while (waitTimer.elapsed() < pollInterval)
+                QApplication::processEvents(QEventLoop::AllEvents, qMin(pollInterval - (int)waitTimer.elapsed(), 16));
         }
 
         throw std::runtime_error(("Timed out waiting for " + selector + " to be " + state).toStdString());
@@ -4585,9 +4596,10 @@ class QPlaywrightClientConnection : public QObject
 {
     Q_OBJECT
 public:
-    QPlaywrightClientConnection(QTcpSocket *socket, QPlaywrightHandler *handler, QObject *parent = nullptr)
-        : QObject(parent), m_socket(socket), m_handler(handler), m_sessionId(QString::number(socket->socketDescriptor()))
+    QPlaywrightClientConnection(QTcpSocket *socket, QPlaywrightHandler *handler, const QString &sessionId, QObject *parent = nullptr)
+        : QObject(parent), m_socket(socket), m_handler(handler), m_sessionId(sessionId)
     {
+        m_socket->setParent(this);
         connect(m_socket, &QTcpSocket::readyRead, this, &QPlaywrightClientConnection::onReadyRead);
         connect(m_socket, &QTcpSocket::disconnected, this, &QPlaywrightClientConnection::onDisconnected);
     }
@@ -4742,12 +4754,12 @@ private slots:
             QTcpSocket *socket = m_server->nextPendingConnection();
             qDebug() << "[QPlaywright] Client connected:" << socket->peerAddress().toString();
 
-            // Each client gets handled in its own thread for concurrent access
+            QString sessionId = QString::number(socket->socketDescriptor());
+
             QThread *thread = new QThread(this);
-            socket->setParent(nullptr);
             socket->moveToThread(thread);
 
-            auto *conn = new QPlaywrightClientConnection(socket, m_handler);
+            auto *conn = new QPlaywrightClientConnection(socket, m_handler, sessionId);
             conn->moveToThread(thread);
 
             connect(thread, &QThread::started, []{});

@@ -38,6 +38,7 @@ from qplaywright.protocol import (
     METHOD_FIND,
     METHOD_FIND_WIDGETS,
     METHOD_HOVER,
+    METHOD_IS_VISIBLE,
     METHOD_ITEM_VIEW_INSPECT,
     METHOD_LIST_WINDOWS,
     METHOD_PING,
@@ -536,10 +537,20 @@ class ManagedConnection:
     def wid_for_handle(self, handle: str) -> int:
         wid = self.handle_to_wid.get(handle)
         if wid is not None:
+            try:
+                self.app._conn.send(METHOD_IS_VISIBLE, {"wid": wid}, timeout=2.0)
+            except Exception:
+                self._mark_stale(handle, wid)
+                raise ValueError(f"Stable handle {handle!r} is stale because its widget no longer exists.")
             return wid
         if handle in self.stale_handles:
             raise ValueError(f"Stable handle {handle!r} is stale because its widget no longer exists.")
         raise ValueError(f"Unknown stable handle {handle!r}. Run snapshot, find, or inspect to discover handles.")
+
+    def _mark_stale(self, handle: str, wid: int) -> None:
+        self.stale_handles.add(handle)
+        self.handle_to_wid.pop(handle, None)
+        self.wid_to_handle.pop(wid, None)
 
 
 @dataclass
@@ -2801,12 +2812,12 @@ if FastMCP is not None:
 
             if condition is None:
                 assert state is not None
-                locator.wait_for(state=state, timeout=timeout)
+                locator.wait_for(state=state, timeout=effective_timeout)
                 payload = {
                     "ok": True,
                     "target": target,
                     "state": state,
-                    "timeout": timeout,
+                    "timeout": effective_timeout,
                 }
             else:
                 assert normalized_expected is not None
@@ -2821,7 +2832,7 @@ if FastMCP is not None:
                     "target": target,
                     "condition": condition,
                     "expected": normalized_expected,
-                    "timeout": timeout,
+                    "timeout": effective_timeout,
                 }
         else:
             locator = _resolve_item_locator(connection_state, target=target)
@@ -2832,7 +2843,7 @@ if FastMCP is not None:
                     "ok": True,
                     "target": target,
                     "state": state,
-                    "timeout": timeout,
+                    "timeout": effective_timeout,
                 }
             else:
                 if not isinstance(normalized_expected, str):
@@ -2848,7 +2859,7 @@ if FastMCP is not None:
                     "target": target,
                     "condition": condition,
                     "expected": normalized_expected,
-                    "timeout": timeout,
+                    "timeout": effective_timeout,
                 }
 
         return _finalize_action_result(

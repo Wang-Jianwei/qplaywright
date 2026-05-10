@@ -1185,6 +1185,7 @@ def _find_widgets_payload(params: dict[str, Any]) -> dict[str, Any]:
     root_wid = _registry.register(root)
     include_infrastructure = bool(params.get("include_infrastructure", False))
     limit = int(params.get("limit", 5))
+    max_depth = int(params.get("max_depth", 50))
     if limit <= 0:
         raise ValueError("limit must be > 0")
 
@@ -1194,8 +1195,11 @@ def _find_widgets_payload(params: dict[str, Any]) -> dict[str, Any]:
     explicit_visible = params.get("visible") is not None
     explicit_interactable = params.get("interactable") is not None
 
-    def _walk(widget, ancestors: list) -> None:
+    def _walk(widget, ancestors: list, depth: int = 0) -> None:
         nonlocal preorder
+
+        if depth > max_depth:
+            return
 
         current_order = preorder
         preorder += 1
@@ -1228,7 +1232,7 @@ def _find_widgets_payload(params: dict[str, Any]) -> dict[str, Any]:
             )
 
         for child in _iter_widget_children(widget):
-            _walk(child, [*ancestors, widget])
+            _walk(child, [*ancestors, widget], depth + 1)
 
     _walk(root, [])
 
@@ -3728,7 +3732,10 @@ def _wait_for(params: dict) -> bool:
             if not widgets:
                 return True
 
-        time.sleep(poll_interval / 1000.0)
+        wait_start = time.monotonic()
+        while time.monotonic() - wait_start < poll_interval / 1000.0:
+            _process_events()
+            time.sleep(0.016)
 
     raise TimeoutError(f"Timed out waiting for {selector!r} to be {state}")
 
