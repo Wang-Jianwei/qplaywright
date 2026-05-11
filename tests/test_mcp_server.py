@@ -973,6 +973,7 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
         active_window_wid=11,
     )
     captured = {}
+    written = {}
 
     def fake_snapshot_result(managed_connection, **kwargs):
         captured["kwargs"] = kwargs
@@ -980,7 +981,11 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
     monkeypatch.setattr(mcp_server, "_snapshot_result", fake_snapshot_result)
-    monkeypatch.setattr(mcp_server, "_write_text_file", lambda path, content: path)
+    monkeypatch.setattr(
+        mcp_server,
+        "_write_text_file",
+        lambda path, content: written.update({"path": path, "content": content}) or path,
+    )
 
     result = mcp_server.snapshot(depth=4, topmost_only=True, save_to="snapshot.txt")
 
@@ -990,6 +995,8 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
     assert result["topmost_only"] is True
     assert result["warnings"] == [mcp_server._TOPMOST_ONLY_WARNING]
     assert result["save_to"] == "snapshot.txt"
+    assert "snapshot" not in result
+    assert written == {"path": "snapshot.txt", "content": "- Main @w1"}
 
 
 def test_format_widget_snapshot_marks_item_view_owner_for_inspect_items():
@@ -1212,6 +1219,7 @@ def test_snapshot_omits_topmost_warning_for_targeted_snapshot(monkeypatch):
 
     result = mcp_server.snapshot(target="#amount", topmost_only=True)
 
+    assert "snapshot" not in result
     assert "warnings" not in result
 
 

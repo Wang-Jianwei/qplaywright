@@ -2537,10 +2537,14 @@ if FastMCP is not None:
         include_infrastructure: IncludeInfrastructureArg = False,
         save_to: SaveToArg = None,
     ) -> dict[str, Any]:
-        """Return a text snapshot of the current active window or one target.
+        """Return a structured snapshot of the current active window or one target.
 
         Use target plus depth when you want to inspect one subtree and capture
         several child handles in one call.
+
+        The returned payload is JSON-first. Use `widgets` and `root_handle` as
+        the primary observation surface. `save_to` can still export the internal
+        text snapshot for external debugging.
 
         When topmost_only is true, the window-wide snapshot becomes an approximate
         frontmost-visible view and may be incomplete.
@@ -2564,6 +2568,9 @@ if FastMCP is not None:
             topmost_only=topmost_only,
             include_infrastructure=include_infrastructure,
         )
+        text_snapshot = payload.get("snapshot")
+        public_payload = dict(payload)
+        public_payload.pop("snapshot", None)
         result = {
             "ok": True,
             "session": _session_summary(connection_state),
@@ -2571,13 +2578,13 @@ if FastMCP is not None:
             "target": target,
             "topmost_only": topmost_only,
             "include_infrastructure": include_infrastructure,
-            **payload,
+            **public_payload,
         }
         warnings = _topmost_only_warnings(topmost_only=topmost_only, target=target)
         if warnings:
             result["warnings"] = warnings
         if save_to is not None:
-            result["save_to"] = _write_text_file(save_to, payload["snapshot"])
+            result["save_to"] = _write_text_file(save_to, text_snapshot if isinstance(text_snapshot, str) else "")
         return result
 
 

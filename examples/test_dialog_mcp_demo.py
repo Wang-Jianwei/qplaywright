@@ -93,9 +93,9 @@ async def main() -> None:
                 await _select_window(session, index=1)
 
                 dialog_snapshot = await _call_tool(session, "snapshot", {"depth": 12})
-                print(f"Dialog scoped snapshot: {dialog_snapshot['snapshot']}")
-                assert "Payment Review" in dialog_snapshot["snapshot"]
-                assert "QPlaywright Demo App" not in dialog_snapshot["snapshot"]
+                print(f"Dialog scoped widgets: {dialog_snapshot['widgets']}")
+                assert any(widget.get("window_title") == "Payment Review" for widget in dialog_snapshot["widgets"])
+                assert all(widget.get("window_title") != "QPlaywright Demo App" for widget in dialog_snapshot["widgets"])
 
                 dialog_handles = await _discover_widget_handles(
                     session,

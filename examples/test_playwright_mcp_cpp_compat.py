@@ -49,7 +49,7 @@ async def main() -> None:
                 print(f"Tabs: {tabs}")
 
                 snapshot = await _call_tool(session, "snapshot", {"depth": 12})
-                print(snapshot["snapshot"])
+                print(snapshot["widgets"])
 
                 handles_by_target = await _discover_widget_handles(
                     session,

@@ -322,7 +322,6 @@ Response includes:
 - `window`
 - `target`
 - `root_handle`
-- `snapshot`
 - `widgets`
 - optional `warnings`
 - optional `save_to`
@@ -336,10 +335,8 @@ Each snapshot widget entry includes:
 - optional sparse negative-state fields `visible`, `enabled`, and `interactable`, emitted only when the value is `false`
 - any meaningful semantic label fields such as `text`, `accessible_name`, `current_text`, `window_title`, or `value`
 
-Snapshot text is also compact by design: entries append `@wN` for stable handles
-and `!transparent` when the widget is marked
-with `WA_TransparentForMouseEvents`.
-When a widget has a negative state, snapshot text also appends `[hidden]`, `[disabled]`, or `[non-interactable]`.
+`snapshot` is JSON-first: use `widgets` plus `root_handle` as the primary observation result.
+When `save_to` is provided, qplaywright also writes an internal text snapshot export to the target file.
 
 `handle` is the exact follow-up identity for widget actions.
 `geometry` uses `[x, y, width, height]`, and `attribute` wraps exceptional widget flags such as `{"transparent_for_mouse_events": true}`.

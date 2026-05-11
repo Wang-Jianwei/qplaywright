@@ -53,7 +53,7 @@ async def main() -> None:
                 await _attach_session(session, port=DEMO_PORT, timeout=60.0)
 
                 snapshot = await _call_tool(session, "snapshot", {"depth": 12})
-                print(snapshot["snapshot"])
+                print(snapshot["widgets"])
 
                 handles_by_target = await _discover_widget_handles(
                     session,

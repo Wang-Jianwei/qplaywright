@@ -443,7 +443,6 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   },
   "target": null,
   "root_handle": "w1",
-  "snapshot": "...",
   "widgets": [],
   "warnings": [
     "topmost_only is an approximate frontmost-visible filter and may omit widgets or content. Rerun with topmost_only=false when you need a complete tree."
