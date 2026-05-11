@@ -16,11 +16,41 @@ class FakePoint:
 
 
 class FakeRect:
-    def __init__(self, center: FakePoint):
+    def __init__(self, center: FakePoint, width: int = 1, height: int = 1):
         self._center = center
+        self._width = width
+        self._height = height
 
     def center(self) -> FakePoint:
         return self._center
+
+    def width(self) -> int:
+        return self._width
+
+    def height(self) -> int:
+        return self._height
+
+    def isEmpty(self) -> bool:
+        return self._width <= 0 or self._height <= 0
+
+
+class FakeStyleOptionButton:
+    def __init__(self):
+        self.widget = None
+        self.text = ""
+        self.icon = None
+        self.iconSize = None
+
+    def initFrom(self, widget) -> None:
+        self.widget = widget
+
+
+class FakeStyle:
+    def __init__(self, rects: dict[object, FakeRect]):
+        self._rects = rects
+
+    def subElementRect(self, sub_element, _option, _widget):
+        return self._rects.get(sub_element, FakeRect(FakePoint(0, 0), width=0, height=0))
 
 
 class FakeMetaObject:
@@ -58,6 +88,8 @@ class FakeClickWidget:
         size: tuple[int, int] = (40, 40),
         mask_region: FakeMaskRegion | None = None,
         mouse_transparent: bool = False,
+        text: str = "",
+        style_rects: dict[object, FakeRect] | None = None,
     ):
         self._class_name = class_name
         self._parent = parent
@@ -68,6 +100,8 @@ class FakeClickWidget:
         self._size = size
         self._mask_region = mask_region or FakeMaskRegion()
         self._mouse_transparent = mouse_transparent
+        self._text = text
+        self._style = FakeStyle(style_rects or {}) if style_rects is not None else None
         self._child = None
         self._viewport = None
         self.focus_calls: list[tuple[object, ...]] = []
@@ -92,6 +126,18 @@ class FakeClickWidget:
 
     def mask(self):
         return self._mask_region
+
+    def style(self):
+        return self._style
+
+    def text(self) -> str:
+        return self._text
+
+    def icon(self):
+        return None
+
+    def iconSize(self):
+        return None
 
     def testAttribute(self, attribute) -> bool:
         return attribute == "transparent" and self._mouse_transparent
@@ -162,6 +208,19 @@ def _install_fake_qt(monkeypatch, *, widget_at=None):
     FakeQTest.calls = []
 
     monkeypatch.setattr(server, "_import_qt", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_QtWidgets",
+        SimpleNamespace(
+            QStyleOptionButton=FakeStyleOptionButton,
+            QStyle=SimpleNamespace(
+                SE_CheckBoxIndicator="checkbox-indicator",
+                SE_CheckBoxContents="checkbox-contents",
+                SE_RadioButtonIndicator="radio-indicator",
+                SE_RadioButtonContents="radio-contents",
+            ),
+        ),
+    )
     monkeypatch.setattr(server, "_QApplication", FakeApplication)
     monkeypatch.setattr(server, "_QtGui", SimpleNamespace(QCursor=object, QMouseEvent=FakeQMouseEvent))
     monkeypatch.setattr(server, "_QtTest", SimpleNamespace(QTest=FakeQTest))
@@ -221,23 +280,28 @@ def test_click_widget_uses_hit_target_and_local_position(monkeypatch):
     assert FakeApplication.process_events_calls >= 2
 
 
-def test_resolve_click_target_prefers_checkable_hit_area_over_wide_center(monkeypatch):
+def test_resolve_click_target_uses_style_reported_checkable_hit_area(monkeypatch):
     widget = FakeClickWidget(
         "QCheckBox",
         global_origin=FakePoint(100, 200),
         center=FakePoint(200, 8),
         size=(400, 16),
+        text="Remember me",
+        style_rects={
+            "checkbox-indicator": FakeRect(FakePoint(320, 8), width=16, height=16),
+            "checkbox-contents": FakeRect(FakePoint(260, 8), width=120, height=16),
+        },
     )
 
     _install_fake_qt(
         monkeypatch,
-        widget_at=lambda point: widget if point == FakePoint(124, 208) else None,
+        widget_at=lambda point: widget if point == FakePoint(420, 208) else None,
     )
 
     target, pos = server._resolve_click_target(widget)
 
     assert target is widget
-    assert pos == FakePoint(24, 8)
+    assert pos == FakePoint(320, 8)
 
 
 def test_handle_command_click_accepts_window_relative_coordinates(monkeypatch):

@@ -46,6 +46,8 @@
 #include <QKeyEvent>
 #include <QWheelEvent>
 #include <QTest>
+#include <QStyle>
+#include <QStyleOptionButton>
 #include <QAbstractButton>
 #include <QLineEdit>
 #include <QTextEdit>
@@ -3724,10 +3726,6 @@ private:
 
     QVector<QPoint> preferredClickPoints(QWidget *target)
     {
-        const QPoint center = target->rect().center();
-        const int width = target->width();
-        const int maxX = qMax(0, width - 1);
-
         QVector<QPoint> candidates;
         auto appendUnique = [&](const QPoint &point) {
             if (candidates.contains(point))
@@ -3735,13 +3733,35 @@ private:
             candidates.append(point);
         };
 
-        if (qobject_cast<QCheckBox *>(target) || qobject_cast<QRadioButton *>(target)) {
-            const int smallInset = qMin(width > 1 ? qMax(1, width / 8) : 0, 24);
-            const int largeInset = qMin(width > 1 ? qMax(1, width / 4) : 0, 48);
-            for (int inset : {smallInset, largeInset}) {
-                appendUnique(QPoint(qMin(maxX, inset), center.y()));
-                appendUnique(QPoint(qMax(0, maxX - inset), center.y()));
-            }
+        auto appendStylePoint = [&](QStyle::SubElement subElement, QStyleOptionButton &option) {
+            QStyle *style = target->style();
+            if (!style)
+                return;
+            const QRect rect = style->subElementRect(subElement, &option, target);
+            if (!rect.isValid() || rect.isEmpty())
+                return;
+            const QPoint center = rect.center();
+            if (!target->rect().contains(center))
+                return;
+            appendUnique(center);
+        };
+
+        if (auto *cb = qobject_cast<QCheckBox *>(target)) {
+            QStyleOptionButton option;
+            option.initFrom(cb);
+            option.text = cb->text();
+            option.icon = cb->icon();
+            option.iconSize = cb->iconSize();
+            appendStylePoint(QStyle::SE_CheckBoxIndicator, option);
+            appendStylePoint(QStyle::SE_CheckBoxContents, option);
+        } else if (auto *rb = qobject_cast<QRadioButton *>(target)) {
+            QStyleOptionButton option;
+            option.initFrom(rb);
+            option.text = rb->text();
+            option.icon = rb->icon();
+            option.iconSize = rb->iconSize();
+            appendStylePoint(QStyle::SE_RadioButtonIndicator, option);
+            appendStylePoint(QStyle::SE_RadioButtonContents, option);
         }
 
         const QVector<QPoint> samples = sampleLocalPoints(target);

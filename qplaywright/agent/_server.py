@@ -3353,10 +3353,81 @@ def _sample_local_points(widget) -> list:
     return samples
 
 
-def _preferred_click_points(widget) -> list:
-    center = _widget_center_point(widget)
+def _checkable_style_click_points(widget) -> list:
+    class_name = _widget_class_name(widget)
+    if class_name not in {"QCheckBox", "QRadioButton"} or _QtWidgets is None:
+        return []
+
+    style_fn = getattr(widget, "style", None)
+    if not callable(style_fn):
+        return []
+    style = style_fn()
+    if style is None:
+        return []
+
+    qstyle = getattr(_QtWidgets, "QStyle", None)
+    option_type = getattr(_QtWidgets, "QStyleOptionButton", None)
+    if qstyle is None or option_type is None:
+        return []
+
+    sub_element_rect = getattr(style, "subElementRect", None)
+    if not callable(sub_element_rect):
+        return []
+
+    option = option_type()
+    init_from = getattr(option, "initFrom", None)
+    if callable(init_from):
+        init_from(widget)
+
+    for attribute in ("text", "icon", "iconSize"):
+        getter = getattr(widget, attribute, None)
+        if not callable(getter) or not hasattr(option, attribute):
+            continue
+        try:
+            setattr(option, attribute, getter())
+        except Exception:
+            continue
+
+    sub_elements = (
+        ("SE_CheckBoxIndicator", "SE_CheckBoxContents")
+        if class_name == "QCheckBox"
+        else ("SE_RadioButtonIndicator", "SE_RadioButtonContents")
+    )
+
     width = _widget_dimension(widget, "width")
     height = _widget_dimension(widget, "height")
+    candidates = []
+    seen: set[tuple[int, int]] = set()
+    point_type = type(_widget_center_point(widget))
+
+    for sub_element_name in sub_elements:
+        sub_element = getattr(qstyle, sub_element_name, None)
+        if sub_element is None:
+            continue
+        try:
+            rect = sub_element_rect(sub_element, option, widget)
+        except Exception:
+            continue
+        if _rect_is_empty(rect):
+            continue
+
+        center = _rect_center(rect)
+        x_value = _point_coordinate(center, "x")
+        y_value = _point_coordinate(center, "y")
+        if x_value < 0 or y_value < 0 or x_value >= width or y_value >= height:
+            continue
+
+        key = (x_value, y_value)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(point_type(x_value, y_value))
+
+    return candidates
+
+
+def _preferred_click_points(widget) -> list:
+    center = _widget_center_point(widget)
 
     candidates = []
     seen: set[tuple[int, int]] = set()
@@ -3369,15 +3440,8 @@ def _preferred_click_points(widget) -> list:
         point_type = type(center)
         candidates.append(point_type(x_value, y_value))
 
-    class_name = _widget_class_name(widget)
-    if class_name in {"QCheckBox", "QRadioButton"}:
-        max_x = max(0, width - 1)
-        center_y = _point_coordinate(center, "y")
-        small_inset = min(max(1, width // 8) if width > 1 else 0, 24)
-        large_inset = min(max(1, width // 4) if width > 1 else 0, 48)
-        for inset in (small_inset, large_inset):
-            add_point(min(max_x, inset), center_y)
-            add_point(max(0, max_x - inset), center_y)
+    for point in _checkable_style_click_points(widget):
+        add_point(_point_coordinate(point, "x"), _point_coordinate(point, "y"))
 
     for point in _sample_local_points(widget):
         add_point(_point_coordinate(point, "x"), _point_coordinate(point, "y"))
