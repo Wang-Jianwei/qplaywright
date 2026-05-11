@@ -123,8 +123,8 @@ class FakeLocator:
     def is_checked(self) -> bool:
         return True
 
-    def bounding_box(self) -> dict[str, int]:
-        return {"x": 1, "y": 2, "width": 3, "height": 4}
+    def bounding_box(self) -> list[int]:
+        return [1, 2, 3, 4]
 
     def get_attribute(self, name: str) -> str:
         return f"attr:{name}"
@@ -135,7 +135,7 @@ class FakeLocator:
             "objectName": self._target or "amount_editor",
             "accessibleName": "Amount editor",
             "accessibleDescription": "输入金额",
-            "geometry": {"x": 11, "y": 22, "width": 130, "height": 28},
+            "geometry": [11, 22, 130, 28],
             "myText": "pressme",
         }
 

@@ -317,7 +317,7 @@ def test_find_widgets_payload_returns_match_reason_and_ancestor_summary():
             "text": "Submit",
             "visible": True,
             "enabled": True,
-            "geometry": {"x": 0, "y": 0, "width": 100, "height": 30},
+            "geometry": [0, 0, 100, 30],
             "interactable": False,
             "matchReason": ["role=button", "has_text~=Submit"],
             "ancestorSummary": [
@@ -326,7 +326,7 @@ def test_find_widgets_payload_returns_match_reason_and_ancestor_summary():
                     "class": "DemoWindow",
                     "visible": True,
                     "enabled": True,
-                    "geometry": {"x": 0, "y": 0, "width": 100, "height": 30},
+                    "geometry": [0, 0, 100, 30],
                     "objectName": "main_window",
                 },
                 {
@@ -334,7 +334,7 @@ def test_find_widgets_payload_returns_match_reason_and_ancestor_summary():
                     "class": "QGroupBox",
                     "visible": True,
                     "enabled": True,
-                    "geometry": {"x": 0, "y": 0, "width": 100, "height": 30},
+                    "geometry": [0, 0, 100, 30],
                     "objectName": "payment_panel",
                 },
             ],

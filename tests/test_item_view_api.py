@@ -1065,7 +1065,7 @@ def test_handle_command_item_bounding_box_uses_viewport_global_coordinates(monke
 
     result = server._handle_command(Request(method="item_bounding_box", params={"wid": wid, "item": {"kind": "table_cell", "row": 0, "column": 1}}))
 
-    assert result == {"x": 110, "y": 220, "width": 40, "height": 18}
+    assert result == [110, 220, 40, 18]
     assert table.scroll_calls == [(0, 1, ("ensure_visible",))]
 
 

@@ -117,7 +117,7 @@ class ItemLocator:
     def is_selected(self) -> bool:
         return bool(self._send(METHOD_ITEM_SELECTED))
 
-    def bounding_box(self) -> dict[str, int]:
+    def bounding_box(self) -> list[int]:
         return self._send(METHOD_ITEM_BOUNDING_BOX)
 
     def click(self) -> None:
@@ -382,8 +382,8 @@ class Locator:
         """Check if the widget is disabled."""
         return not self.is_enabled()
 
-    def bounding_box(self) -> dict[str, int]:
-        """Get the bounding box {x, y, width, height} in screen coordinates."""
+    def bounding_box(self) -> list[int]:
+        """Get the bounding box as [x, y, width, height] in screen coordinates."""
         return self._send(METHOD_BOUNDING_BOX)
 
     def all(self) -> list[Locator]:

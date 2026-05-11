@@ -698,12 +698,7 @@ def _list_windows_raw(connection: ManagedConnection, *, timeout: float | None = 
                 "wid": window.wid,
                 "title": window.title(),
                 "class": "",
-                "geometry": {
-                    "x": None,
-                    "y": None,
-                    "width": None,
-                    "height": None,
-                },
+                "geometry": [None, None, None, None],
                 "is_modal": bool(window.isModal()) if hasattr(window, "isModal") else False,
                 "index": index,
             }
@@ -721,7 +716,13 @@ def _window_geometry(window: dict[str, Any]) -> list[Any]:
     return _compact_geometry(geometry) or [None, None, None, None]
 
 
-def _compact_geometry(geometry: dict[str, Any] | None) -> list[Any] | None:
+def _compact_geometry(geometry: Any) -> list[Any] | None:
+    if isinstance(geometry, list):
+        if len(geometry) != 4:
+            return None
+        if all(value is None for value in geometry):
+            return None
+        return geometry
     if not isinstance(geometry, dict):
         return None
     compact = [geometry.get("x"), geometry.get("y"), geometry.get("width"), geometry.get("height")]
@@ -1201,7 +1202,7 @@ def _inspect_locator(
         result["class"] = widget_class
 
     geometry = properties.get("geometry")
-    compact_geometry = _compact_geometry(geometry if isinstance(geometry, dict) else None)
+    compact_geometry = _compact_geometry(geometry)
     if compact_geometry is not None:
         result["geometry"] = compact_geometry
 
@@ -1218,7 +1219,7 @@ def _inspect_locator(
         result["value"] = input_value
 
     bounding_box = first.bounding_box()
-    compact_bounding_box = _compact_geometry(bounding_box if isinstance(bounding_box, dict) else None)
+    compact_bounding_box = _compact_geometry(bounding_box)
     if compact_bounding_box is not None:
         result["global_bounding_box"] = compact_bounding_box
 

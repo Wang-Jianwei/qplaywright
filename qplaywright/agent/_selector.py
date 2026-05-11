@@ -17,6 +17,10 @@ _QWIDGET_CLASS = None
 _QWIDGET_CLASS_LOOKUP_DONE = False
 
 
+def _rect4(x: int, y: int, width: int, height: int) -> list[int]:
+    return [x, y, width, height]
+
+
 def _qt_widget_class():
     global _QWIDGET_CLASS, _QWIDGET_CLASS_LOOKUP_DONE
     if _QWIDGET_CLASS_LOOKUP_DONE:
@@ -600,12 +604,7 @@ def widget_to_dict(widget, *, depth: int = 0, max_depth: int = 50) -> dict:
         "class": _widget_class_name(widget),
         "visible": widget.isVisible(),
         "enabled": widget.isEnabled(),
-        "geometry": {
-            "x": widget.x(),
-            "y": widget.y(),
-            "width": widget.width(),
-            "height": widget.height(),
-        },
+        "geometry": _rect4(widget.x(), widget.y(), widget.width(), widget.height()),
     }
 
     _set_if_meaningful(info, "objectName", widget.objectName())

@@ -1554,15 +1554,19 @@ def _widget_set_focus(widget, reason=None) -> None:
         set_focus()
 
 
-def _rect_bounding_box(viewport, rect) -> dict[str, int]:
+def _rect4(x: int, y: int, width: int, height: int) -> list[int]:
+    return [x, y, width, height]
+
+
+def _rect_bounding_box(viewport, rect) -> list[int]:
     top_left = _rect_top_left(rect)
     global_pos = _widget_map_to_global(viewport, top_left)
-    return {
-        "x": _point_coordinate(global_pos, "x"),
-        "y": _point_coordinate(global_pos, "y"),
-        "width": _rect_dimension(rect, "width"),
-        "height": _rect_dimension(rect, "height"),
-    }
+    return _rect4(
+        _point_coordinate(global_pos, "x"),
+        _point_coordinate(global_pos, "y"),
+        _rect_dimension(rect, "width"),
+        _rect_dimension(rect, "height"),
+    )
 
 
 def _tab_rect(tab_bar, index: int):
@@ -2089,19 +2093,19 @@ def _tab_item_properties(owner_widget, resolved_target) -> dict[str, Any]:
     return props
 
 
-def _tab_item_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
+def _tab_item_bounding_box(owner_widget, resolved_target) -> list[int]:
     tab_bar = resolved_target.get("tabBar") or _tab_bar_from_owner(owner_widget)
     rect = _tab_rect(tab_bar, int(resolved_target["index"]))
     map_to_global = getattr(tab_bar, "mapToGlobal", None)
     if not callable(map_to_global):
         raise ValueError("Tab owner does not expose mapToGlobal()")
     global_pos = map_to_global(_rect_top_left(rect))
-    return {
-        "x": _point_coordinate(global_pos, "x"),
-        "y": _point_coordinate(global_pos, "y"),
-        "width": _rect_dimension(rect, "width"),
-        "height": _rect_dimension(rect, "height"),
-    }
+    return _rect4(
+        _point_coordinate(global_pos, "x"),
+        _point_coordinate(global_pos, "y"),
+        _rect_dimension(rect, "width"),
+        _rect_dimension(rect, "height"),
+    )
 
 
 def _rect_is_empty(rect) -> bool:
@@ -2185,7 +2189,7 @@ def _table_index_properties(owner_widget, resolved_target) -> dict[str, Any]:
     return payload
 
 
-def _table_index_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
+def _table_index_bounding_box(owner_widget, resolved_target) -> list[int]:
     view = _table_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _table_index_rect(view, resolved_target)
@@ -2270,7 +2274,7 @@ def _tree_index_properties(owner_widget, resolved_target) -> dict[str, Any]:
     return payload
 
 
-def _tree_index_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
+def _tree_index_bounding_box(owner_widget, resolved_target) -> list[int]:
     view = _tree_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _tree_index_rect(view, resolved_target)
@@ -2334,7 +2338,7 @@ def _list_index_properties(owner_widget, resolved_target) -> dict[str, Any]:
     return payload
 
 
-def _list_index_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
+def _list_index_bounding_box(owner_widget, resolved_target) -> list[int]:
     view = _list_view(owner_widget)
     viewport = _primary_event_target(view)
     rect = _list_index_rect(owner_widget, resolved_target)
@@ -2383,7 +2387,7 @@ def _item_selected(owner_widget, resolved_target) -> bool:
     return bool(selected)
 
 
-def _item_bounding_box(owner_widget, resolved_target) -> dict[str, int]:
+def _item_bounding_box(owner_widget, resolved_target) -> list[int]:
     if resolved_target["kind"] == "table_cell":
         return _table_index_bounding_box(owner_widget, resolved_target)
     if resolved_target["kind"] == "list_item":
@@ -2975,12 +2979,7 @@ def _handle_command(req: Request) -> Any:
         w = _resolve_one(params)
         g = w.geometry()
         global_pos = w.mapToGlobal(w.rect().topLeft())
-        return {
-            "x": global_pos.x(),
-            "y": global_pos.y(),
-            "width": g.width(),
-            "height": g.height(),
-        }
+        return _rect4(global_pos.x(), global_pos.y(), g.width(), g.height())
 
     if method == METHOD_ITEM_TEXT:
         owner = _resolve_item_owner(params)
@@ -3211,12 +3210,7 @@ def _handle_command(req: Request) -> Any:
                     "wid": wid,
                     "title": w.windowTitle() if hasattr(w, "windowTitle") else "",
                     "class": _widget_class_name(w),
-                    "geometry": {
-                        "x": w.x(),
-                        "y": w.y(),
-                        "width": w.width(),
-                        "height": w.height(),
-                    },
+                    "geometry": _rect4(w.x(), w.y(), w.width(), w.height()),
                     "is_active": w is active_window,
                     "is_modal": bool(w.isModal()) if hasattr(w, "isModal") else False,
                     "blocked_by_modal": _is_window_blocked_by_modal(w),

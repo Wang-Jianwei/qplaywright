@@ -206,7 +206,7 @@ Qt 业务自动化的中心应当是：
 
 - 当服务端检测到 active window 变化时，应自动更新当前窗口作用域
 - 对动作工具，返回值可包含 `window_changed` 和新的 `active_window` 摘要
-- window 摘要应统一使用 `geometry {x, y, width, height}`，不要再并行维护顶层 `width` / `height` 返回形状
+- window 摘要应统一使用 `geometry: Rect4`，也就是 `[x, y, width, height]`，不要再并行维护顶层 `width` / `height` 返回形状
 
 ### 3. snapshot
 

@@ -1002,11 +1002,11 @@ inline QJsonObject widgetToJson(const QWidget *w, int depth = 0, int maxDepth = 
         obj["roles"] = roleArray;
     }
 
-    QJsonObject geo;
-    geo["x"] = w->x();
-    geo["y"] = w->y();
-    geo["width"] = w->width();
-    geo["height"] = w->height();
+    QJsonArray geo;
+    geo.append(w->x());
+    geo.append(w->y());
+    geo.append(w->width());
+    geo.append(w->height());
     obj["geometry"] = geo;
 
     if (auto *cb = qobject_cast<const QCheckBox *>(w))
@@ -2013,11 +2013,11 @@ private:
             obj["itemView"] = itemView;
         }
 
-        QJsonObject geo;
-        geo["x"] = w->x();
-        geo["y"] = w->y();
-        geo["width"] = w->width();
-        geo["height"] = w->height();
+        QJsonArray geo;
+        geo.append(w->x());
+        geo.append(w->y());
+        geo.append(w->width());
+        geo.append(w->height());
         obj["geometry"] = geo;
 
         if (auto *cb = qobject_cast<const QCheckBox *>(w))
@@ -2163,11 +2163,11 @@ private:
         if (method == "bounding_box") {
             QWidget *w = resolveOne(params);
             QPoint global = w->mapToGlobal(QPoint(0, 0));
-            QJsonObject r;
-            r["x"] = global.x();
-            r["y"] = global.y();
-            r["width"] = w->width();
-            r["height"] = w->height();
+            QJsonArray r;
+            r.append(global.x());
+            r.append(global.y());
+            r.append(w->width());
+            r.append(w->height());
             return r;
         }
 
@@ -2564,14 +2564,14 @@ private:
                 if (!w->isVisible()) continue;
                 int wid = reg.registerWidget(w);
                 QJsonObject r;
-                QJsonObject geometry;
                 r["wid"] = wid;
                 r["title"] = w->windowTitle();
                 r["class"] = QString::fromLatin1(w->metaObject()->className());
-                geometry["x"] = w->x();
-                geometry["y"] = w->y();
-                geometry["width"] = w->width();
-                geometry["height"] = w->height();
+                QJsonArray geometry;
+                geometry.append(w->x());
+                geometry.append(w->y());
+                geometry.append(w->width());
+                geometry.append(w->height());
                 r["geometry"] = geometry;
                 r["is_active"] = w == activeWindow;
                 r["is_modal"] = w->isModal();
@@ -3610,49 +3610,49 @@ private:
         return payload;
     }
     
-    QJsonObject tableIndexBoundingBox(QWidget *owner, const ResolvedTableItem &target)
+    QJsonArray tableIndexBoundingBox(QWidget *owner, const ResolvedTableItem &target)
     {
         QTableView *view = tableView(owner);
         QWidget *targetWidget = primaryEventTarget(view);
         const QRect rect = tableIndexRect(owner, target);
         const QPoint global = targetWidget->mapToGlobal(rect.topLeft());
-        QJsonObject payload;
-        payload["x"] = global.x();
-        payload["y"] = global.y();
-        payload["width"] = rect.width();
-        payload["height"] = rect.height();
+        QJsonArray payload;
+        payload.append(global.x());
+        payload.append(global.y());
+        payload.append(rect.width());
+        payload.append(rect.height());
         return payload;
     }
 
-    QJsonObject listIndexBoundingBox(QWidget *owner, const ResolvedListItem &target)
+    QJsonArray listIndexBoundingBox(QWidget *owner, const ResolvedListItem &target)
     {
         QListView *view = listView(owner);
         QWidget *targetWidget = primaryEventTarget(view);
         const QRect rect = listIndexRect(owner, target);
         const QPoint global = targetWidget->mapToGlobal(rect.topLeft());
-        QJsonObject payload;
-        payload["x"] = global.x();
-        payload["y"] = global.y();
-        payload["width"] = rect.width();
-        payload["height"] = rect.height();
+        QJsonArray payload;
+        payload.append(global.x());
+        payload.append(global.y());
+        payload.append(rect.width());
+        payload.append(rect.height());
         return payload;
     }
 
-    QJsonObject treeIndexBoundingBox(QWidget *owner, const ResolvedTreeItem &target)
+    QJsonArray treeIndexBoundingBox(QWidget *owner, const ResolvedTreeItem &target)
     {
         QTreeView *view = treeView(owner);
         QWidget *targetWidget = primaryEventTarget(view);
         const QRect rect = treeIndexRect(owner, target);
         const QPoint global = targetWidget->mapToGlobal(rect.topLeft());
-        QJsonObject payload;
-        payload["x"] = global.x();
-        payload["y"] = global.y();
-        payload["width"] = rect.width();
-        payload["height"] = rect.height();
+        QJsonArray payload;
+        payload.append(global.x());
+        payload.append(global.y());
+        payload.append(rect.width());
+        payload.append(rect.height());
         return payload;
     }
 
-    QJsonObject tabItemBoundingBox(QWidget *owner, const ResolvedTabItem &target)
+    QJsonArray tabItemBoundingBox(QWidget *owner, const ResolvedTabItem &target)
     {
         Q_UNUSED(owner);
         if (!target.tabBar)
@@ -3660,11 +3660,11 @@ private:
 
         const QRect rect = tabItemRect(owner, target);
         const QPoint global = target.tabBar->mapToGlobal(rect.topLeft());
-        QJsonObject payload;
-        payload["x"] = global.x();
-        payload["y"] = global.y();
-        payload["width"] = rect.width();
-        payload["height"] = rect.height();
+        QJsonArray payload;
+        payload.append(global.x());
+        payload.append(global.y());
+        payload.append(rect.width());
+        payload.append(rect.height());
         return payload;
     }
 
