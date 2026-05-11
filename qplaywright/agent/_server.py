@@ -62,8 +62,6 @@ from qplaywright.protocol import (
     METHOD_FILL,
     METHOD_INVOKE,
     METHOD_CLEAR,
-    METHOD_CHECK,
-    METHOD_UNCHECK,
     METHOD_SELECT_OPTION,
     METHOD_TYPE,
     METHOD_PRESS,
@@ -3072,20 +3070,6 @@ def _handle_command(req: Request) -> Any:
         w = _resolve_one(params)
         _move_visual_cursor_to_widget(w)
         _fill_widget(w, "")
-        return True
-
-    if method == METHOD_CHECK:
-        w = _resolve_one(params)
-        _move_visual_cursor_to_widget(w, pulse_count=1)
-        if hasattr(w, "setChecked"):
-            w.setChecked(True)
-        return True
-
-    if method == METHOD_UNCHECK:
-        w = _resolve_one(params)
-        _move_visual_cursor_to_widget(w, pulse_count=1)
-        if hasattr(w, "setChecked"):
-            w.setChecked(False)
         return True
 
     if method == METHOD_SELECT_OPTION:

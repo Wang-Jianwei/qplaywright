@@ -404,24 +404,26 @@ Qt 业务自动化的中心应当是：
 - 选择行为不是 click 的变体，而是稳定的状态设定
 - 名称使用 `choose` 而不是 `select`，用于避免和 `window(action="select")` 混淆
 
-### 10. set_checked
+### 10. checkable widgets
 
-职责：显式设置目标的勾选状态。
+职责：对 checkable 控件坚持真实交互路径，而不是直接设定状态。
 
-建议参数：
+建议参数组合：
 
-- `target`
-- `checked`
-- `include_snapshot`
+- `press_key.target`
+- `press_key.key="Space"`
+- `wait.target`
+- `wait.condition="checked_equals"`
 
-为什么保留：
+为什么这样设计：
 
-- 对 checkable 控件，设定目标状态比“点一次试试看”更准确
+- 直接调用 checked setter 可能绕过应用依赖的事件机制
+- 对 checkable widget，`press_key Space` 是更明确的用户路径，也更容易保持 UI 状态机一致
 
 扩展说明：
 
-- 对外仍保留 `set_checked`
-- 内部实现应为未来扩展到更广义的 `set_state` 预留空间
+- 对外不再保留单独的 checked-state setter
+- 勾选结果应通过 `wait` 或 `inspect` 确认，而不是假定状态已经稳定
 
 ### 11. press_key
 

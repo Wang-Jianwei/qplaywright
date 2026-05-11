@@ -23,8 +23,6 @@ from qplaywright.protocol import (
     METHOD_FILL,
     METHOD_INVOKE,
     METHOD_CLEAR,
-    METHOD_CHECK,
-    METHOD_UNCHECK,
     METHOD_SELECT_OPTION,
     METHOD_TYPE,
     METHOD_PRESS,
@@ -441,14 +439,6 @@ class Locator:
     def press(self, key: str) -> None:
         """Press a key (e.g., 'Enter', 'Tab', 'a')."""
         self._send(METHOD_PRESS, key=key)
-
-    def check(self) -> None:
-        """Check a checkbox."""
-        self._send(METHOD_CHECK)
-
-    def uncheck(self) -> None:
-        """Uncheck a checkbox."""
-        self._send(METHOD_UNCHECK)
 
     def select_option(
         self,

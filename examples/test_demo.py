@@ -32,7 +32,7 @@ def main():
         print("Test 1: Filling login form...")
         window.locator("#username").fill("admin")
         window.locator("#password").fill("secret123")
-        window.locator("#remember").check()
+        window.locator("#remember").press("Space")
         window.locator("#role").select_option(label="Admin")
         print("  Form filled!")
 

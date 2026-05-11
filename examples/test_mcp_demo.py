@@ -344,8 +344,13 @@ async def main() -> None:
                 )
                 await _call_tool(
                     session,
-                    "set_checked",
-                    {"target": remember_handle, "checked": True},
+                    "press_key",
+                    {"target": remember_handle, "key": "Space"},
+                )
+                await _call_tool(
+                    session,
+                    "wait",
+                    {"target": remember_handle, "condition": "checked_equals", "expected": True},
                 )
                 await _call_tool(
                     session,
@@ -359,8 +364,13 @@ async def main() -> None:
                 )
                 await _call_tool(
                     session,
-                    "set_checked",
-                    {"target": notify_handle, "checked": True},
+                    "press_key",
+                    {"target": notify_handle, "key": "Space"},
+                )
+                await _call_tool(
+                    session,
+                    "wait",
+                    {"target": notify_handle, "condition": "checked_equals", "expected": True},
                 )
                 await _call_tool(
                     session,

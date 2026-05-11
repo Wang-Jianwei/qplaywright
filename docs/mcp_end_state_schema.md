@@ -23,7 +23,7 @@
 
 1. 资源工具：`session`、`window`
 2. 观察工具：`snapshot`、`find`、`resolve_object_names`、`inspect`、`inspect_items`、`screenshot`
-3. 动作工具：`click`、`input`、`choose`、`set_checked`、`press_key`、`hover`、`scroll`、`invoke`、`wait`
+3. 动作工具：`click`、`input`、`choose`、`press_key`、`hover`、`scroll`、`invoke`、`wait`
 
 ## Value Types
 
@@ -64,7 +64,7 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 1. 值必须匹配当前 stable handle 形状，例如 `w12`。
 2. 不再对 widget action target 做 selector 回退解析。
 
-适用范围：`click`、`input`、`choose`、`set_checked`、`press_key`、`hover`、`scroll`、`invoke`、`wait`、targeted `screenshot` 等 exact widget 工具。
+适用范围：`click`、`input`、`choose`、`press_key`、`hover`、`scroll`、`invoke`、`wait`、targeted `screenshot` 等 exact widget 工具。
 
 示例：
 
@@ -770,41 +770,16 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
-## Set Checked
+## Checkable Widgets
 
-工具名：`set_checked`
+终态接口不再提供单独的 checked-state setter。
 
-职责：显式设置 checkable 控件状态。
+对 checkable widget，推荐路径是：
 
-### Set Checked Request
+1. 优先使用 `press_key` 且 `key="Space"` 触发真实交互
+2. 使用 `wait(condition="checked_equals", expected=true|false)` 或 `inspect` 确认结果状态
 
-```json
-{
-  "target": "#remember_me",
-  "checked": true,
-  "include_snapshot": false
-}
-```
-
-### Set Checked Response
-
-```json
-{
-  "ok": true,
-  "target": "#remember_me",
-  "checked": true,
-  "window_changed": false,
-  "active_window": {
-    "wid": 1,
-    "title": "QPlaywright Demo App",
-    "class": "DemoWindow",
-    "index": 0,
-    "is_active": true,
-    "is_modal": false,
-    "geometry": [0, 0, 640, 720]
-  }
-}
-```
+这样可以避免直接调用 setter 绕过应用依赖的事件链。
 
 ## Press Key
 

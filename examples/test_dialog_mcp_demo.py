@@ -139,10 +139,19 @@ async def main() -> None:
                 )
                 await _call_tool(
                     session,
-                    "set_checked",
+                    "press_key",
                     {
                         "target": review_escalate_handle,
-                        "checked": True,
+                        "key": "Space",
+                    },
+                )
+                await _call_tool(
+                    session,
+                    "wait",
+                    {
+                        "target": review_escalate_handle,
+                        "condition": "checked_equals",
+                        "expected": True,
                     },
                 )
                 await _call_tool(

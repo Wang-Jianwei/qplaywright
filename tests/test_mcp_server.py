@@ -1624,8 +1624,6 @@ def test_choose_ignores_blank_unused_string_values(monkeypatch):
         ("invoke", {"target": "w3", "method": "setAmount", "args": {"value": "88.00"}, "include_snapshot": True}, [("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}})], {"target": "w3", "method": "setAmount", "args": {"value": "88.00"}}),
         ("input", {"target": "w3", "text": "abc", "mode": "append", "delay": 25, "submit": True, "include_snapshot": True}, [("type", {"text": "abc", "delay": 25}), ("press", {"key": "Enter"})], {"target": "w3", "text": "abc", "mode": "append", "delay": 25, "submitted": True}),
         ("press_key", {"target": "w3", "key": "Enter", "include_snapshot": True}, [("press", {"key": "Enter"})], {"target": "w3", "key": "Enter"}),
-        ("set_checked", {"target": "w4", "checked": True, "include_snapshot": True}, [("check", {})], {"target": "w4", "checked": True}),
-        ("set_checked", {"target": "w4", "checked": False, "include_snapshot": True}, [("uncheck", {})], {"target": "w4", "checked": False}),
         ("choose", {"target": "w5", "label": "CNY", "include_snapshot": True}, [("select_option", {"value": None, "index": None, "label": "CNY"})], {"target": "w5", "label": "CNY", "value": None, "index": None}),
         ("hover", {"target": "w6", "include_snapshot": True}, [("hover", {})], {"target": "w6"}),
         ("scroll", {"target": "w6", "delta_x": 5, "delta_y": 10, "include_snapshot": True}, [("scroll", {"delta_x": 5, "delta_y": 10})], {"target": "w6", "delta_x": 5, "delta_y": 10}),

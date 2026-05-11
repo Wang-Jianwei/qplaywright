@@ -339,10 +339,6 @@ KeyArg = Annotated[
     str,
     Field(description="Qt or keyboard key name to press, such as Enter, Tab, Escape, or Ctrl+A."),
 ]
-CheckedArg = Annotated[
-    bool,
-    Field(description="Whether the stable-handle target widget should end up checked."),
-]
 ChooseValueArg = Annotated[
     str | None,
     Field(description="Combobox option value to select. Provide exactly one of value, index, or label."),
@@ -1538,7 +1534,7 @@ def _selector_help_text() -> str:
         "2. window list and window select when multiple windows are visible\n"
         "3. use snapshot with target+depth when you want one subtree and several child handles; use find when you want a small candidate set for one predicate\n"
         "4. inspect one chosen handle when you need methods, properties, or exact state; inspect_items for table/tree/list/tab descendants\n"
-        "5. click, hover, wait, set_expanded, input, set_checked, press_key, choose, screenshot, or invoke with those handles\n"
+        "5. click, hover, wait, set_expanded, input, press_key, choose, screenshot, or invoke with those handles\n"
         "6. session close when finished"
     )
 
@@ -2839,34 +2835,6 @@ if FastMCP is not None:
             key=key,
         )
 
-
-    @mcp.tool()
-    def set_checked(
-        target: WidgetHandleArg,
-        checked: CheckedArg,
-        include_state: IncludeStateArg = False,
-        include_snapshot: IncludeSnapshotArg = False,
-    ) -> dict[str, Any]:
-        """Check or uncheck one widget resolved by stable handle."""
-
-        connection_state = _get_connection(_SERVER_STATE)
-        locator = _resolve_widget_handle_locator(connection_state, target=target, action="set_checked")
-        if checked:
-            locator.check()
-        else:
-            locator.uncheck()
-        return _finalize_action_result(
-            connection_state,
-            include_state=include_state,
-            include_snapshot=include_snapshot,
-            state_target=target,
-            snapshot_target=target,
-            ok=True,
-            target=target,
-            checked=checked,
-        )
-
-
     @mcp.tool()
     def choose(
         target: WidgetHandleArg,
@@ -3167,7 +3135,6 @@ _CLI_TOOL_NAMES = (
     "input",
     "invoke",
     "press_key",
-    "set_checked",
     "set_expanded",
     "choose",
     "wait",
@@ -3596,13 +3563,6 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     press_key_parser.add_argument("--include-state", action="store_true")
     press_key_parser.add_argument("--include-snapshot", action="store_true")
 
-    set_checked_parser = subparsers.add_parser("set_checked", help="Check or uncheck one widget resolved by stable handle.")
-    set_checked_parser.add_argument("target")
-    set_checked_parser.add_argument("--checked", action="store_true")
-    set_checked_parser.add_argument("--unchecked", action="store_true")
-    set_checked_parser.add_argument("--include-state", action="store_true")
-    set_checked_parser.add_argument("--include-snapshot", action="store_true")
-
     choose_parser = subparsers.add_parser("choose", help="Select a combobox option by value, index, or label.")
     choose_parser.add_argument("target")
     choose_group = choose_parser.add_mutually_exclusive_group()
@@ -3708,17 +3668,6 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         return "press_key", {
             "key": namespace.key,
             "target": namespace.target,
-            "include_state": namespace.include_state,
-            "include_snapshot": namespace.include_snapshot,
-        }
-
-    if command == "set_checked":
-        checked = getattr(namespace, "checked", None)
-        if checked is None:
-            checked = not getattr(namespace, "unchecked", False)
-        return "set_checked", {
-            "target": namespace.target,
-            "checked": checked,
             "include_state": namespace.include_state,
             "include_snapshot": namespace.include_snapshot,
         }
@@ -3849,7 +3798,7 @@ def _try_run_typed_cli(argv: Sequence[str]) -> int | None:
         return None
     if argv[0] not in {
         "resource", "session", "window", "snapshot", "find", "resolve_object_names", "inspect", "click", "input", "invoke",
-        "press_key", "set_checked", "choose", "wait", "screenshot", "hover", "scroll",
+        "press_key", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         return None
     if len(argv) > 1 and _looks_like_json_object_argument(argv[1]):
@@ -3875,7 +3824,7 @@ def _try_run_typed_cli_from_command_line(command_line: str) -> int | None:
     # If the first part is a known tool and the rest looks like flags/args (not JSON)
     if parts[0] in {
         "resource", "session", "window", "snapshot", "find", "resolve_object_names", "inspect", "click", "input", "invoke",
-        "press_key", "set_checked", "choose", "wait", "screenshot", "hover", "scroll",
+        "press_key", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         if len(parts) > 1 and parts[1].lstrip().startswith("{"):
             return None

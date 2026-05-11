@@ -2329,19 +2329,6 @@ private:
             return true;
         }
 
-        if (method == "check") {
-            QWidget *w = resolveOne(params);
-            moveVisualCursorToWidget(w, 1);
-            if (auto *btn = qobject_cast<QAbstractButton *>(w)) btn->setChecked(true);
-            return true;
-        }
-        if (method == "uncheck") {
-            QWidget *w = resolveOne(params);
-            moveVisualCursorToWidget(w, 1);
-            if (auto *btn = qobject_cast<QAbstractButton *>(w)) btn->setChecked(false);
-            return true;
-        }
-
         if (method == "select_option") {
             QWidget *w = resolveOne(params);
             selectOption(w, params);
