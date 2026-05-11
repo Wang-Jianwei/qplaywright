@@ -1128,6 +1128,28 @@ def _resolve_widget_handle_locator(
     return Locator(connection.app._conn, "", widget_wid=handle_wid, timeout=connection.timeout)
 
 
+def _raise_if_hidden_click_target(locator: Any, *, target: str, action: str, exc: Exception) -> None:
+    try:
+        exists = locator.count() > 0
+    except Exception:
+        exists = False
+
+    if not exists:
+        return
+
+    try:
+        visible = locator.is_visible()
+    except Exception:
+        visible = False
+
+    if not visible:
+        raise ValueError(
+            f"{action} target {target!r} still exists but is not visible. "
+            "The stable handle is valid, but the widget is currently hidden in the active UI scope. "
+            "Use inspect, snapshot, or window select to confirm the current window before retrying."
+        ) from exc
+
+
 def _is_item_target(target: Any) -> bool:
     return isinstance(target, dict) and "owner" in target and "item" in target
 
@@ -2839,10 +2861,20 @@ if FastMCP is not None:
                 locator = _resolve_widget_handle_locator(connection_state, target=target, action="click")
             else:
                 locator = _resolve_item_locator(connection_state, target=target)
-            if count == 2:
-                locator.dblclick()
-            else:
-                locator.click()
+            try:
+                if count == 2:
+                    locator.dblclick()
+                else:
+                    locator.click()
+            except RuntimeError as exc:
+                if isinstance(target, str):
+                    _raise_if_hidden_click_target(
+                        locator,
+                        target=target,
+                        action="dblclick" if count == 2 else "click",
+                        exc=exc,
+                    )
+                raise
 
         snapshot_target = _target_owner_target(target) if target is not None else None
         return _finalize_action_result(

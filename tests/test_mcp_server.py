@@ -667,6 +667,35 @@ def test_click_rejects_mixed_target_and_coordinates(monkeypatch):
         mcp_server.click(target="w2", x=1, y=2)
 
 
+def test_click_hidden_stable_handle_reports_clearer_error(monkeypatch):
+    class HiddenLocator(FakeLocator):
+        def click(self):
+            raise RuntimeError("Agent error: Cannot click widget of type: QPushButton; event target is not visible")
+
+        def count(self) -> int:
+            return 1
+
+        def is_visible(self) -> bool:
+            return False
+
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=FakeApp([FakeWindow(11, "Main")]),
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: HiddenLocator(count=1))
+
+    with pytest.raises(ValueError, match="still exists but is not visible"):
+        mcp_server.click(target="w5")
+
+
 def test_hover_without_target_uses_active_window_transport(monkeypatch):
     window = FakeWindow(11, "Main")
     app = FakeApp([window])
