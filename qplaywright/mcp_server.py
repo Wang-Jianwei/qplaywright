@@ -3347,6 +3347,8 @@ def _cli_usage_text() -> str:
         "  session attach|launch|status|close\n"
         "  window list|select\n"
         "  snapshot [--target TARGET] [--depth N] [--topmost-only] [--save-to PATH]\n"
+        "  find [--root ROOT] [--role ROLE] [--text TEXT] [--class CLASS] [--object-name NAME] [--accessible-name NAME] [--limit N]\n"
+        "  find_fuzzy KEYWORD [--root ROOT] [--role ROLE] [--limit N]\n"
         "  click [TARGET] [--count 1|2] [--x X --y Y] [--include-snapshot]\n"
         "  hover [TARGET] [--x X --y Y] [--include-snapshot]\n"
         "  input TARGET TEXT [--mode replace|append] [--delay MS] [--submit]\n"
@@ -4003,7 +4005,7 @@ def _try_run_typed_cli_from_command_line(command_line: str) -> int | None:
         return None
     # If the first part is a known tool and the rest looks like flags/args (not JSON)
     if parts[0] in {
-        "resource", "session", "window", "snapshot", "find", "resolve_object_names", "inspect", "click", "input", "invoke",
+        "resource", "session", "window", "snapshot", "find", "find_fuzzy", "resolve_object_names", "inspect", "click", "input", "invoke",
         "press_key", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         if len(parts) > 1 and parts[1].lstrip().startswith("{"):
