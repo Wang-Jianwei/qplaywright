@@ -189,9 +189,10 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
     "is_modal": true,
     "geometry": [120, 80, 480, 320]
   },
-  "snapshot": "...",
-  "root_handle": "w9",
-  "widgets": []
+  "observation": {
+    "root_handle": "w9",
+    "widgets": []
+  }
 }
 ```
 
@@ -201,9 +202,8 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 
 - `window_changed`: 本次动作后 active window 是否变化
 - `active_window`: 当前 active window 摘要
-- `snapshot`: post-action 文本快照
-- `root_handle`: post-action snapshot 的根 handle
-- `widgets`: 与该快照一致的 widget handle 集
+- `observation.root_handle`: post-action observation 的根 handle
+- `observation.widgets`: 与该 observation 一致的 widget handle 集
 
 ## Error Model
 
@@ -682,7 +682,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
-当 `include_snapshot=true` 时，附加 `ActionObservation` 中的 `snapshot`、`root_handle` 和 `widgets`。
+当 `include_snapshot=true` 时，附加 `ActionObservation` 中的 `observation`。
 
 ## Input
 
@@ -868,9 +868,10 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "is_modal": false,
     "geometry": [0, 0, 640, 720]
   },
-  "snapshot": "...",
-  "root_handle": "w1",
-  "widgets": []
+  "observation": {
+    "root_handle": "w1",
+    "widgets": []
+  }
 }
 ```
 
@@ -916,9 +917,10 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "is_modal": false,
     "geometry": [0, 0, 640, 720]
   },
-  "snapshot": "...",
-  "root_handle": "w1",
-  "widgets": []
+  "observation": {
+    "root_handle": "w1",
+    "widgets": []
+  }
 }
 ```
 
@@ -1047,7 +1049,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
-当 `include_snapshot=true` 时，附加 `ActionObservation` 中的 `snapshot`、`root_handle` 和 `widgets`。
+当 `include_snapshot=true` 时，附加 `ActionObservation` 中的 `observation`。
 
 ## Screenshot
 

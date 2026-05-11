@@ -325,7 +325,7 @@ IncludeStateArg = Annotated[
 ]
 IncludeSnapshotArg = Annotated[
     bool,
-    Field(description="When true, include a post-action snapshot in the V2 stable-handle shape. If the action changes windows, the snapshot falls back to the active window."),
+    Field(description="When true, include a post-action observation in result.observation. If the action changes windows, the observation falls back to the active window."),
 ]
 MethodArg = Annotated[
     str,
@@ -2099,6 +2099,12 @@ def _snapshot_result(
     )
 
 
+def _public_observation_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    public_payload = dict(payload)
+    public_payload.pop("snapshot", None)
+    return public_payload
+
+
 def _topmost_only_warnings(*, topmost_only: bool, target: str | None = None) -> list[str]:
     if not topmost_only:
         return []
@@ -2156,7 +2162,9 @@ def _action_result_with_snapshot(
         q_application = _qt_application_instance(required=False)
         if q_application is not None:
             q_application.processEvents()
-    result.update(_snapshot_result(managed_connection, target=target, depth=depth, timeout=timeout))
+    result["observation"] = _public_observation_payload(
+        _snapshot_result(managed_connection, target=target, depth=depth, timeout=timeout)
+    )
     return result
 
 
@@ -2340,7 +2348,7 @@ def _finalize_action_result(
             )
         )
     except Exception as exc:
-        post_action_warnings.append(f"post-action snapshot unavailable: {exc}")
+        post_action_warnings.append(f"post-action observation unavailable: {exc}")
 
     if post_action_warnings:
         result["warnings"] = post_action_warnings
@@ -2569,8 +2577,7 @@ if FastMCP is not None:
             include_infrastructure=include_infrastructure,
         )
         text_snapshot = payload.get("snapshot")
-        public_payload = dict(payload)
-        public_payload.pop("snapshot", None)
+        public_payload = _public_observation_payload(payload)
         result = {
             "ok": True,
             "session": _session_summary(connection_state),

@@ -102,7 +102,7 @@ async def main() -> None:
                     "click",
                     {"target": login_handle, "include_snapshot": True},
                 )
-                print(f"Login click snapshot: {login_result['snapshot']}")
+                print(f"Login click observation: {login_result['observation']}")
 
                 await _call_tool(session, "wait", {"target": status_handle, "condition": "text_contains", "expected": "Logged in as admin", "timeout": 5.0})
                 status_text = await _call_tool(session, "inspect", {"target": status_handle})

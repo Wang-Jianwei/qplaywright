@@ -160,7 +160,7 @@ async def main() -> None:
                     "click",
                     {"target": login_handle, "include_snapshot": True},
                 )
-                print(f"Login click snapshot: {login_result['snapshot']}")
+                print(f"Login click observation: {login_result['observation']}")
 
                 status_text = await _call_tool(session, "inspect", {"target": status_handle})
                 assert "Logged in as admin" in status_text["text"]
@@ -170,8 +170,8 @@ async def main() -> None:
                 assert login_button["exists"] is True
 
                 status = await _call_tool(session, "snapshot", {"target": status_handle, "depth": 0})
-                print(f"Status snapshot: {status['snapshot']}")
-                assert "payment=JPY 90.9 precision=1 adjustments=on" in status["snapshot"]
+                print(f"Status snapshot: {status['widgets']}")
+                assert any(widget.get("text") == "payment=JPY 90.9 precision=1 adjustments=on" for widget in status["widgets"])
 
                 screenshot = await _call_tool(
                     session,

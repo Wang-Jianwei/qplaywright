@@ -190,13 +190,12 @@ When you need structured item descendants, first resolve the owner widget, then 
 ### Optional Post-Action Observation
 
 Action tools support `include_snapshot=false` by default.
-When `include_snapshot=true`, the response also includes:
+When `include_snapshot=true`, the response also includes `observation`, where:
 
-- `window_changed`
-- `active_window`
-- `snapshot`
-- `root_handle`
-- `widgets`
+- `observation.root_handle`
+- `observation.widgets`
+
+`window_changed` and `active_window` remain top-level action result fields.
 
 Action tools also support `include_state=false` by default.
 When `include_state=true`, the response includes a compact target-level `state`

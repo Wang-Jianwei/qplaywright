@@ -225,6 +225,12 @@ def _v2_snapshot_payload(label: str, *, handle: str = "w1", class_name: str = "D
     }
 
 
+def _v2_observation_payload(label: str, *, handle: str = "w1", class_name: str = "DemoWindow") -> dict[str, object]:
+    payload = _v2_snapshot_payload(label, handle=handle, class_name=class_name)
+    payload.pop("snapshot", None)
+    return payload
+
+
 def test_connect_connection_replaces_existing(monkeypatch):
     created: list[FakeQPlaywright] = []
 
@@ -1335,7 +1341,7 @@ def test_wait_can_include_snapshot(monkeypatch):
     monkeypatch.setattr(
         mcp_server,
         "_action_result_with_snapshot",
-        lambda managed_connection, **payload: payload | _v2_snapshot_payload("DemoWindow"),
+        lambda managed_connection, **payload: payload | {"observation": _v2_observation_payload("DemoWindow")},
     )
 
     result = mcp_server.wait(target="w7", state="visible", timeout=5.0, include_snapshot=True)
@@ -1345,9 +1351,7 @@ def test_wait_can_include_snapshot(monkeypatch):
     assert result["target"] == "w7"
     assert result["window_changed"] is False
     assert result["active_window"]["wid"] == 11
-    assert result["snapshot"] == "- DemoWindow @w1"
-    assert result["root_handle"] == "w1"
-    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
+    assert result["observation"] == _v2_observation_payload("DemoWindow")
     assert "refs" not in result
 
 
@@ -1543,7 +1547,7 @@ def test_finalize_action_result_can_include_state_and_snapshot_together(monkeypa
     monkeypatch.setattr(
         mcp_server,
         "_action_result_with_snapshot",
-        lambda managed_connection, **payload: payload | _v2_snapshot_payload("DemoWindow"),
+        lambda managed_connection, **payload: payload | {"observation": _v2_observation_payload("DemoWindow")},
     )
 
     result = mcp_server._finalize_action_result(
@@ -1557,9 +1561,7 @@ def test_finalize_action_result_can_include_state_and_snapshot_together(monkeypa
     )
 
     assert result["state"]["visible"] is True
-    assert result["snapshot"] == "- DemoWindow @w1"
-    assert result["root_handle"] == "w1"
-    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
+    assert result["observation"] == _v2_observation_payload("DemoWindow")
     assert "refs" not in result
 
 
@@ -1659,7 +1661,7 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
     monkeypatch.setattr(
         mcp_server,
         "_action_result_with_snapshot",
-        lambda managed_connection, **payload: payload | _v2_snapshot_payload("DemoWindow"),
+        lambda managed_connection, **payload: payload | {"observation": _v2_observation_payload("DemoWindow")},
     )
 
     result = getattr(mcp_server, tool_name)(**call_kwargs)
@@ -1670,9 +1672,7 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
     assert result["active_window"]["wid"] == 11
     for key, value in expected_payload.items():
         assert result[key] == value
-    assert result["snapshot"] == "- DemoWindow @w1"
-    assert result["root_handle"] == "w1"
-    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
+    assert result["observation"] == _v2_observation_payload("DemoWindow")
     assert "refs" not in result
 
 
@@ -1760,7 +1760,7 @@ def test_mcp_tool_input_schema_describes_all_parameters():
             assert schema.get("description"), f"{tool['name']}.{property_name} is missing description"
 
     click_tool = next(tool for tool in dumped if tool["name"] == "click")
-    assert "post-action snapshot" in click_tool["inputSchema"]["properties"]["include_snapshot"]["description"]
+    assert "post-action observation" in click_tool["inputSchema"]["properties"]["include_snapshot"]["description"]
     click_schema = click_tool["inputSchema"]
     click_target_any_of = click_schema["properties"]["target"]["anyOf"]
     assert {entry["type"] for entry in click_target_any_of} == {"string", "object"}
@@ -3158,9 +3158,7 @@ def test_action_result_with_snapshot_merges_payload(monkeypatch):
     )
 
     assert result["ok"] is True
-    assert result["snapshot"] == "- item @w1"
-    assert result["root_handle"] == "w1"
-    assert result["widgets"] == [{"handle": "w1", "class": "DemoWindow"}]
+    assert result["observation"] == _v2_observation_payload("item")
     assert "refs" not in result
 
 
