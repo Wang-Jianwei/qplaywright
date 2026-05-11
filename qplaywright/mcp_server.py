@@ -227,9 +227,9 @@ FindTextArg = Annotated[
     str | None,
     Field(description="Exact primary widget text to match, case-sensitive."),
 ]
-FindHasTextArg = Annotated[
-    str | None,
-    Field(description="Case-insensitive primary-text substring to match."),
+FindKeywordArg = Annotated[
+    str,
+    Field(description="Approximate keyword clue for broad fuzzy discovery across multiple readable widget fields."),
 ]
 FindClassArg = Annotated[
     str | None,
@@ -766,9 +766,9 @@ def _find_widgets_raw(
     connection: ManagedConnection,
     *,
     root_wid: int,
+    keyword: str | None = None,
     role: str | None = None,
     text: str | None = None,
-    has_text: str | None = None,
     widget_class: str | None = None,
     object_name: str | None = None,
     accessible_name: str | None = None,
@@ -785,9 +785,9 @@ def _find_widgets_raw(
         "limit": limit,
     }
     optional_params = {
+        "keyword": keyword,
         "role": role,
         "text": text,
-        "has_text": has_text,
         "class": widget_class,
         "object_name": object_name,
         "accessible_name": accessible_name,
@@ -1934,9 +1934,9 @@ def _find_result(
     connection: ManagedConnection,
     *,
     root: str | None = None,
+    keyword: str | None = None,
     role: str | None = None,
     text: str | None = None,
-    has_text: str | None = None,
     widget_class: str | None = None,
     object_name: str | None = None,
     accessible_name: str | None = None,
@@ -1951,9 +1951,9 @@ def _find_result(
     raw = _find_widgets_raw(
         connection,
         root_wid=root_wid,
+        keyword=_normalize_find_string("keyword", keyword),
         role=_normalize_find_string("role", role),
         text=_normalize_find_string("text", text),
-        has_text=_normalize_find_string("has_text", has_text),
         widget_class=_normalize_find_string("class", widget_class),
         object_name=_normalize_find_string("object_name", object_name),
         accessible_name=_normalize_find_string("accessible_name", accessible_name),
@@ -1977,6 +1977,33 @@ def _find_result(
             if isinstance(entry, dict)
         ],
     }
+
+
+def _find_fuzzy_result(
+    connection: ManagedConnection,
+    *,
+    keyword: str,
+    root: str | None = None,
+    role: str | None = None,
+    visible: bool | None = None,
+    enabled: bool | None = None,
+    interactable: bool | None = None,
+    include_infrastructure: bool = False,
+    limit: int = 5,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    return _find_result(
+        connection,
+        root=root,
+        keyword=keyword,
+        role=role,
+        visible=visible,
+        enabled=enabled,
+        interactable=interactable,
+        include_infrastructure=include_infrastructure,
+        limit=limit,
+        timeout=timeout,
+    )
 
 
 def _iter_widget_tree_nodes(nodes: Sequence[dict[str, Any]]) -> Any:
@@ -2668,7 +2695,6 @@ if FastMCP is not None:
         root: FindRootArg = None,
         role: FindRoleArg = None,
         text: FindTextArg = None,
-        has_text: FindHasTextArg = None,
         class_: FindClassArg = None,
         object_name: FindObjectNameArg = None,
         accessible_name: FindAccessibleNameArg = None,
@@ -2680,8 +2706,9 @@ if FastMCP is not None:
     ) -> dict[str, Any]:
         """Return a small, deterministic set of widget candidates within one root scope.
 
-        Prefer find when you already have one predicate and want a short
-        candidate list instead of a full subtree snapshot.
+        Prefer find when you already know deterministic constraints such as
+        exact text, role, class, or object_name and want a short candidate
+        list instead of a full subtree snapshot.
         """
 
         if limit <= 0:
@@ -2693,10 +2720,48 @@ if FastMCP is not None:
             root=root,
             role=role,
             text=text,
-            has_text=has_text,
             widget_class=class_,
             object_name=object_name,
             accessible_name=accessible_name,
+            visible=visible,
+            enabled=enabled,
+            interactable=interactable,
+            include_infrastructure=include_infrastructure,
+            limit=limit,
+        )
+        return {
+            "ok": True,
+            **payload,
+        }
+
+
+    @mcp.tool()
+    def find_fuzzy(
+        keyword: FindKeywordArg,
+        root: FindRootArg = None,
+        role: FindRoleArg = None,
+        visible: FindVisibleArg = None,
+        enabled: FindEnabledArg = None,
+        interactable: FindInteractableArg = None,
+        include_infrastructure: IncludeInfrastructureArg = False,
+        limit: FindLimitArg = 5,
+    ) -> dict[str, Any]:
+        """Return a small candidate set for one approximate textual clue.
+
+        Prefer find_fuzzy when you only know an approximate visible phrase,
+        semantic label, window title, or object name and want typo-tolerant,
+        multi-field discovery.
+        """
+
+        if limit <= 0:
+            raise ValueError("limit must be > 0")
+
+        connection_state = _get_connection(_SERVER_STATE)
+        payload = _find_fuzzy_result(
+            connection_state,
+            keyword=keyword,
+            root=root,
+            role=role,
             visible=visible,
             enabled=enabled,
             interactable=interactable,
@@ -3206,6 +3271,7 @@ _CLI_TOOL_NAMES = (
     "window",
     "snapshot",
     "find",
+    "find_fuzzy",
     "resolve_object_names",
     "inspect",
     "inspect_items",
@@ -3578,11 +3644,10 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("--include-infrastructure", action="store_true")
     snapshot_parser.add_argument("--save-to")
 
-    find_parser = subparsers.add_parser("find", help="Run server-side widget search under one scope.")
+    find_parser = subparsers.add_parser("find", help="Run deterministic server-side widget search under one scope.")
     find_parser.add_argument("--root")
     find_parser.add_argument("--role")
     find_parser.add_argument("--text")
-    find_parser.add_argument("--has-text")
     find_parser.add_argument("--class")
     find_parser.add_argument("--object-name")
     find_parser.add_argument("--accessible-name")
@@ -3594,6 +3659,19 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     find_parser.add_argument("--not-interactable", action="store_true")
     find_parser.add_argument("--include-infrastructure", action="store_true")
     find_parser.add_argument("--limit", type=int, default=5)
+
+    find_fuzzy_parser = subparsers.add_parser("find_fuzzy", help="Run broad fuzzy widget search under one scope.")
+    find_fuzzy_parser.add_argument("keyword")
+    find_fuzzy_parser.add_argument("--root")
+    find_fuzzy_parser.add_argument("--role")
+    find_fuzzy_parser.add_argument("--visible", action="store_true")
+    find_fuzzy_parser.add_argument("--not-visible", action="store_true")
+    find_fuzzy_parser.add_argument("--enabled", action="store_true")
+    find_fuzzy_parser.add_argument("--disabled", action="store_true")
+    find_fuzzy_parser.add_argument("--interactable", action="store_true")
+    find_fuzzy_parser.add_argument("--not-interactable", action="store_true")
+    find_fuzzy_parser.add_argument("--include-infrastructure", action="store_true")
+    find_fuzzy_parser.add_argument("--limit", type=int, default=5)
 
     resolve_object_names_parser = subparsers.add_parser(
         "resolve_object_names",
@@ -3696,7 +3774,6 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "root": namespace.root,
             "role": namespace.role,
             "text": namespace.text,
-            "has_text": getattr(namespace, "has_text"),
             "class_": getattr(namespace, "class"),
             "object_name": getattr(namespace, "object_name"),
             "accessible_name": getattr(namespace, "accessible_name"),
@@ -3716,6 +3793,28 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         elif namespace.not_interactable:
             arguments["interactable"] = False
         return "find", arguments
+
+    if command == "find_fuzzy":
+        arguments = {
+            "keyword": namespace.keyword,
+            "root": namespace.root,
+            "role": namespace.role,
+            "include_infrastructure": namespace.include_infrastructure,
+            "limit": namespace.limit,
+        }
+        if namespace.visible:
+            arguments["visible"] = True
+        elif namespace.not_visible:
+            arguments["visible"] = False
+        if namespace.enabled:
+            arguments["enabled"] = True
+        elif namespace.disabled:
+            arguments["enabled"] = False
+        if namespace.interactable:
+            arguments["interactable"] = True
+        elif namespace.not_interactable:
+            arguments["interactable"] = False
+        return "find_fuzzy", arguments
 
     if command == "resolve_object_names":
         return "resolve_object_names", {
@@ -3878,7 +3977,7 @@ def _try_run_typed_cli(argv: Sequence[str]) -> int | None:
     if not argv:
         return None
     if argv[0] not in {
-        "resource", "session", "window", "snapshot", "find", "resolve_object_names", "inspect", "click", "input", "invoke",
+        "resource", "session", "window", "snapshot", "find", "find_fuzzy", "resolve_object_names", "inspect", "click", "input", "invoke",
         "press_key", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         return None

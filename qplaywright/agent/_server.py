@@ -1129,14 +1129,115 @@ def _resolve_find_root_widget(params: dict):
     return matches[0]
 
 
+def _normalize_search_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return " ".join(str(value).strip().lower().split())
+
+
+def _edit_distance(left: str, right: str) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+
+    previous = list(range(len(right) + 1))
+    for left_index, left_char in enumerate(left, start=1):
+        current = [left_index]
+        for right_index, right_char in enumerate(right, start=1):
+            substitution_cost = 0 if left_char == right_char else 1
+            current.append(
+                min(
+                    previous[right_index] + 1,
+                    current[right_index - 1] + 1,
+                    previous[right_index - 1] + substitution_cost,
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def _best_fuzzy_window_distance(text: str, keyword: str) -> int | None:
+    if not text or not keyword:
+        return None
+
+    keyword_length = len(keyword)
+    min_length = max(1, keyword_length - 1)
+    max_length = min(len(text), keyword_length + 1)
+    best: int | None = None
+    for window_length in range(min_length, max_length + 1):
+        for start in range(0, len(text) - window_length + 1):
+            candidate = text[start : start + window_length]
+            distance = _edit_distance(keyword, candidate)
+            if best is None or distance < best:
+                best = distance
+                if best == 0:
+                    return 0
+    return best
+
+
+def _keyword_fuzzy_threshold(keyword: str) -> int:
+    keyword_length = len(keyword)
+    if keyword_length <= 4:
+        return 1
+    if keyword_length <= 8:
+        return 2
+    return max(2, keyword_length // 4)
+
+
+def _keyword_field_candidates(widget) -> list[tuple[int, str, str]]:
+    return [
+        (0, "text", _normalize_search_text(_widget_text(widget))),
+        (1, "accessible_name", _normalize_search_text(widget.accessibleName() if hasattr(widget, "accessibleName") else "")),
+        (2, "current_text", _normalize_search_text(widget.currentText() if hasattr(widget, "currentText") else "")),
+        (3, "window_title", _normalize_search_text(widget.windowTitle() if hasattr(widget, "windowTitle") else "")),
+        (4, "object_name", _normalize_search_text(widget.objectName() if hasattr(widget, "objectName") else "")),
+    ]
+
+
+def _find_keyword_match(widget, keyword: str) -> dict[str, Any] | None:
+    normalized_keyword = _normalize_search_text(keyword)
+    if not normalized_keyword:
+        return None
+
+    best_match: dict[str, Any] | None = None
+    for field_rank, field_name, field_value in _keyword_field_candidates(widget):
+        if not field_value:
+            continue
+
+        candidate: dict[str, Any] | None = None
+        if field_value == normalized_keyword:
+            candidate = {"mode_rank": 0, "field_rank": field_rank, "distance": 0, "field": field_name, "mode": "exact"}
+        elif normalized_keyword in field_value:
+            candidate = {"mode_rank": 1, "field_rank": field_rank, "distance": 0, "field": field_name, "mode": "substring"}
+        else:
+            distance = _best_fuzzy_window_distance(field_value, normalized_keyword)
+            if distance is None or distance > _keyword_fuzzy_threshold(normalized_keyword):
+                continue
+            candidate = {"mode_rank": 2, "field_rank": field_rank, "distance": distance, "field": field_name, "mode": "fuzzy"}
+
+        if best_match is None or (
+            candidate["mode_rank"],
+            candidate["field_rank"],
+            candidate["distance"],
+        ) < (
+            best_match["mode_rank"],
+            best_match["field_rank"],
+            best_match["distance"],
+        ):
+            best_match = candidate
+
+    return best_match
+
+
 def _find_match_reasons(params: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
     if params.get("role") is not None:
         reasons.append(f"role={params['role']}")
     if params.get("text") is not None:
         reasons.append(f"text={params['text']}")
-    if params.get("has_text") is not None:
-        reasons.append(f"has_text~={params['has_text']}")
     if params.get("class") is not None:
         reasons.append(f"class={params['class']}")
     if params.get("object_name") is not None:
@@ -1150,41 +1251,44 @@ def _find_match_reasons(params: dict[str, Any]) -> list[str]:
     return reasons
 
 
-def _find_widget_matches(widget, params: dict[str, Any], *, visible: bool, enabled: bool, interactable: bool) -> bool:
+def _find_widget_matches(widget, params: dict[str, Any], *, visible: bool, enabled: bool, interactable: bool) -> dict[str, Any] | None:
     role = params.get("role")
     if role is not None and not _matches_role(widget, role):
-        return False
+        return None
 
     text = params.get("text")
     if text is not None and not _matches_text_exact(widget, text):
-        return False
+        return None
 
-    has_text = params.get("has_text")
-    if has_text is not None and not _matches_has_text(widget, has_text):
-        return False
+    keyword = params.get("keyword")
+    keyword_match = None
+    if keyword is not None:
+        keyword_match = _find_keyword_match(widget, keyword)
+        if keyword_match is None:
+            return None
 
     widget_class = params.get("class")
     if widget_class is not None and not _matches_class(widget, widget_class):
-        return False
+        return None
 
     object_name = params.get("object_name")
     if object_name is not None and not _matches_object_name(widget, object_name):
-        return False
+        return None
 
     accessible_name = params.get("accessible_name")
     if accessible_name is not None and not _matches_accessible_name(widget, accessible_name):
-        return False
+        return None
 
     if params.get("visible") is not None and visible is not bool(params["visible"]):
-        return False
+        return None
 
     if params.get("enabled") is not None and enabled is not bool(params["enabled"]):
-        return False
+        return None
 
     if params.get("interactable") is not None and interactable is not bool(params["interactable"]):
-        return False
+        return None
 
-    return True
+    return keyword_match if keyword is not None else {}
 
 
 def _find_ancestor_summary(ancestors: list) -> list[dict[str, Any]]:
@@ -1204,9 +1308,10 @@ def _find_widgets_payload(params: dict[str, Any]) -> dict[str, Any]:
 
     matches: list[dict[str, Any]] = []
     preorder = 0
-    match_reason = _find_match_reasons(params)
+    base_match_reason = _find_match_reasons(params)
     explicit_visible = params.get("visible") is not None
     explicit_interactable = params.get("interactable") is not None
+    keyword = params.get("keyword")
 
     def _walk(widget, ancestors: list) -> None:
         nonlocal preorder
@@ -1218,20 +1323,27 @@ def _find_widgets_payload(params: dict[str, Any]) -> dict[str, Any]:
         interactable = _find_interactable(widget)
         is_infrastructure = _is_find_infrastructure_widget(widget)
 
-        if (include_infrastructure or not is_infrastructure) and _find_widget_matches(
+        keyword_match = _find_widget_matches(
             widget,
             params,
             visible=visible,
             enabled=enabled,
             interactable=interactable,
-        ):
+        )
+        if (include_infrastructure or not is_infrastructure) and keyword_match is not None:
             wid = _registry.register(widget)
-            entry = {"wid": wid, **widget_to_dict(widget, max_depth=0), "matchReason": list(match_reason)}
+            match_reason = list(base_match_reason)
+            if keyword is not None:
+                match_reason.append(f"keyword~={keyword} via {keyword_match['field']}:{keyword_match['mode']}")
+            entry = {"wid": wid, **widget_to_dict(widget, max_depth=0), "matchReason": match_reason}
             entry["interactable"] = interactable
             if ancestors:
                 entry["ancestorSummary"] = _find_ancestor_summary(ancestors)
             matches.append(
                 {
+                    "keyword_mode_rank": keyword_match["mode_rank"] if keyword_match is not None else 0,
+                    "keyword_field_rank": keyword_match["field_rank"] if keyword_match is not None else 0,
+                    "keyword_distance": keyword_match["distance"] if keyword_match is not None else 0,
                     "depth": len(ancestors),
                     "interactable": interactable,
                     "visible": visible,
@@ -1248,6 +1360,9 @@ def _find_widgets_payload(params: dict[str, Any]) -> dict[str, Any]:
 
     matches.sort(
         key=lambda item: (
+            item["keyword_mode_rank"],
+            item["keyword_field_rank"],
+            item["keyword_distance"],
             item["depth"],
             0 if explicit_interactable else (0 if item["interactable"] else 1),
             0 if explicit_visible else (0 if item["visible"] else 1),

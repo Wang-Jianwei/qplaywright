@@ -301,7 +301,7 @@ def test_find_widgets_payload_returns_match_reason_and_ancestor_summary():
         {
             "wid": root_wid,
             "role": "button",
-            "has_text": "Submit",
+            "keyword": "submt",
             "limit": 5,
         }
     )
@@ -319,7 +319,7 @@ def test_find_widgets_payload_returns_match_reason_and_ancestor_summary():
             "enabled": True,
             "geometry": [0, 0, 100, 30],
             "interactable": False,
-            "matchReason": ["role=button", "has_text~=Submit"],
+            "matchReason": ["role=button", "keyword~=submt via text:fuzzy"],
             "ancestorSummary": [
                 {
                     "wid": root_wid,
@@ -358,7 +358,7 @@ def test_find_widgets_payload_applies_limit_and_truncated_flag():
         {
             "wid": root_wid,
             "role": "button",
-            "has_text": "Submit",
+            "keyword": "submit",
             "limit": 1,
         }
     )

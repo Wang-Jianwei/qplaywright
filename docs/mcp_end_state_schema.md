@@ -458,7 +458,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 工具名：`find`
 
-职责：在给定 scope 下做结构化 widget 搜索。
+职责：在给定 scope 下做确定性的结构化 widget 搜索。
 
 ### Find Request
 
@@ -466,8 +466,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 {
   "root": "w12",
   "role": "button",
-  "text": null,
-  "has_text": "Submit",
+  "text": "Submit",
   "class": null,
   "object_name": null,
   "accessible_name": null,
@@ -501,10 +500,51 @@ MCP 工具失败时应返回明确、可操作的错误信息。
       "object_name": "submit_btn",
       "text": "Submit",
       "geometry": [310, 412, 96, 28],
-      "match_reason": ["role=button", "has_text~=Submit", "visible=true", "enabled=true", "interactable=true"],
+      "match_reason": ["role=button", "text=Submit", "visible=true", "enabled=true", "interactable=true"],
       "ancestor_summary": [
         {"handle": "w12", "class": "QGroupBox", "label": "Payment"}
       ]
+    }
+  ]
+}
+```
+
+## Find Fuzzy
+
+工具名：`find_fuzzy`
+
+职责：在给定 scope 下做近似关键词搜索，适合只有模糊文本线索时使用。
+
+### Find Fuzzy Request
+
+```json
+{
+  "keyword": "submt",
+  "root": "w12",
+  "role": "button",
+  "visible": true,
+  "limit": 5
+}
+```
+
+### Find Fuzzy Response
+
+响应结构与 `find` 相同，但 `match_reason` 会标明关键词命中来源，例如：
+
+```json
+{
+  "ok": true,
+  "root_handle": "w12",
+  "count": 1,
+  "truncated": false,
+  "results": [
+    {
+      "handle": "w48",
+      "class": "QPushButton",
+      "object_name": "submit_btn",
+      "text": "Submit",
+      "geometry": [310, 412, 96, 28],
+      "match_reason": ["role=button", "visible=true", "keyword~=submt via text:fuzzy"]
     }
   ]
 }

@@ -93,8 +93,8 @@ part of connection setup. A reachable agent with a mismatched
 `protocol_version` is rejected immediately; attach does not fall through to a
 partially connected session.
 
-Use `snapshot`, `find`, `resolve_object_names`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
-Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find` when you want a short candidate list for one predicate; use `resolve_object_names` when one known subtree already exposes several deliberate stable `object_name` values.
+Use `snapshot`, `find`, `find_fuzzy`, `resolve_object_names`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
+Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find` when you already know deterministic constraints; use `find_fuzzy` when you only have an approximate textual clue; use `resolve_object_names` when one known subtree already exposes several deliberate stable `object_name` values.
 
 When `click` or `hover` omits `target`, `x` and `y` are interpreted as coordinates relative to the active window.
 If the active window is not the desired scope, switch it first with `window select`.
@@ -132,6 +132,7 @@ The server can be exposed through:
 | `window` | List, select, resize, or close one top-level Qt window |
 | `snapshot` | Return a text snapshot and stable refs for the active window or one target |
 | `inspect` | Inspect one widget or item target, or return the active window widget tree in debug mode |
+| `find_fuzzy` | Return a small candidate set for one approximate keyword across several readable widget fields |
 | `resolve_object_names` | Resolve several exact `object_name` values to stable handles under one known root scope |
 | `inspect_items` | Enumerate structured table/tree/list/tab descendants for one owner widget |
 | `click` | Click or double-click one stable-handle widget, one item target, or one active-window coordinate |
@@ -344,7 +345,8 @@ Stable widget handles are session-stable. They survive later `snapshot`, `find`,
 once the widget is destroyed or the session is replaced.
 
 Use `snapshot(target=..., depth=N)` when you already know a container or owner widget and want to inspect a local subtree in one round-trip.
-Use `find` when you already have one narrowing predicate such as `object_name`, `text`, `role`, or `has_text` and want a small candidate set instead of a subtree dump.
+Use `find` when you already have deterministic predicates such as `object_name`, exact `text`, `role`, or `class` and want a small candidate set instead of a subtree dump.
+Use `find_fuzzy` when you only know an approximate phrase, semantic label, window title, or object name fragment.
 Use `resolve_object_names` when a known subtree exposes several deliberate `object_name` values and you want those exact handles in one round-trip.
 
 When `topmost_only=true` and `target` is omitted, the result is an approximate
@@ -362,7 +364,7 @@ Request:
 {
   "root": "#payment_panel",
   "role": "button",
-  "has_text": "Submit",
+  "text": "Submit",
   "visible": true,
   "limit": 5
 }
@@ -386,6 +388,25 @@ Typical fields include:
 - `geometry`
 - `match_reason`
 - `ancestor_summary`
+
+### find_fuzzy
+
+Request:
+
+```json
+{
+  "keyword": "submt",
+  "root": "#payment_panel",
+  "role": "button",
+  "visible": true,
+  "limit": 5
+}
+```
+
+`find_fuzzy` performs approximate multi-field widget search within one root
+scope. It searches readable fields such as widget text, accessible name,
+current text, window title, and object name, then returns a small ranked
+candidate set using the same response shape as `find`.
 
 `find` is still a search tool, not a full inspect payload. If you need methods,
 properties, or exact target-level state, follow up with `inspect` on the chosen handle.

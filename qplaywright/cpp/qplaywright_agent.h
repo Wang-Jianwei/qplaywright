@@ -2738,6 +2738,155 @@ private:
         return matches.first();
     }
 
+    QString normalizeSearchText(const QString &value)
+    {
+        return value.simplified().toLower();
+    }
+
+    int editDistance(const QString &left, const QString &right)
+    {
+        if (left == right)
+            return 0;
+        if (left.isEmpty())
+            return right.size();
+        if (right.isEmpty())
+            return left.size();
+
+        QVector<int> previous(right.size() + 1);
+        for (int index = 0; index <= right.size(); ++index)
+            previous[index] = index;
+
+        for (int leftIndex = 0; leftIndex < left.size(); ++leftIndex) {
+            QVector<int> current(right.size() + 1);
+            current[0] = leftIndex + 1;
+            for (int rightIndex = 0; rightIndex < right.size(); ++rightIndex) {
+                const int substitutionCost = left[leftIndex] == right[rightIndex] ? 0 : 1;
+                current[rightIndex + 1] = std::min(
+                    std::min(previous[rightIndex + 1] + 1, current[rightIndex] + 1),
+                    previous[rightIndex] + substitutionCost);
+            }
+            previous = current;
+        }
+        return previous[right.size()];
+    }
+
+    int bestFuzzyWindowDistance(const QString &text, const QString &keyword, bool *ok)
+    {
+        if (ok)
+            *ok = false;
+        if (text.isEmpty() || keyword.isEmpty())
+            return 0;
+
+        const int keywordLength = keyword.size();
+        const int minLength = std::max(1, keywordLength - 1);
+        const int maxLength = std::min(text.size(), keywordLength + 1);
+        int bestDistance = 0;
+        bool found = false;
+
+        for (int windowLength = minLength; windowLength <= maxLength; ++windowLength) {
+            for (int start = 0; start + windowLength <= text.size(); ++start) {
+                const int distance = editDistance(keyword, text.mid(start, windowLength));
+                if (!found || distance < bestDistance) {
+                    bestDistance = distance;
+                    found = true;
+                    if (bestDistance == 0) {
+                        if (ok)
+                            *ok = true;
+                        return 0;
+                    }
+                }
+            }
+        }
+
+        if (ok)
+            *ok = found;
+        return bestDistance;
+    }
+
+    int keywordFuzzyThreshold(const QString &keyword)
+    {
+        const int keywordLength = keyword.size();
+        if (keywordLength <= 4)
+            return 1;
+        if (keywordLength <= 8)
+            return 2;
+        return std::max(2, keywordLength / 4);
+    }
+
+    struct FindKeywordMatch
+    {
+        bool matched = false;
+        int modeRank = 0;
+        int fieldRank = 0;
+        int distance = 0;
+        QString field;
+        QString mode;
+    };
+
+    bool keywordMatchLess(const FindKeywordMatch &left, const FindKeywordMatch &right)
+    {
+        if (left.modeRank != right.modeRank)
+            return left.modeRank < right.modeRank;
+        if (left.fieldRank != right.fieldRank)
+            return left.fieldRank < right.fieldRank;
+        return left.distance < right.distance;
+    }
+
+    FindKeywordMatch findKeywordMatch(QWidget *widget, const QString &keyword)
+    {
+        FindKeywordMatch best;
+        const QString normalizedKeyword = normalizeSearchText(keyword);
+        if (!widget || normalizedKeyword.isEmpty())
+            return best;
+
+        struct KeywordFieldCandidate
+        {
+            int fieldRank;
+            QString field;
+            QString value;
+        };
+
+        QList<KeywordFieldCandidate> candidates;
+        candidates.append(KeywordFieldCandidate{0, QString::fromLatin1("text"), normalizeSearchText(QPlaywrightRoles::widgetText(widget))});
+        candidates.append(KeywordFieldCandidate{1, QString::fromLatin1("accessible_name"), normalizeSearchText(widget->accessibleName())});
+        candidates.append(KeywordFieldCandidate{2, QString::fromLatin1("current_text"), normalizeSearchText(QPlaywrightRoles::widgetCurrentText(widget))});
+        candidates.append(KeywordFieldCandidate{3, QString::fromLatin1("window_title"), normalizeSearchText(widget->windowTitle())});
+        candidates.append(KeywordFieldCandidate{4, QString::fromLatin1("object_name"), normalizeSearchText(widget->objectName())});
+
+        for (const KeywordFieldCandidate &candidateField : candidates) {
+            if (candidateField.value.isEmpty())
+                continue;
+
+            FindKeywordMatch candidate;
+            candidate.matched = true;
+            candidate.fieldRank = candidateField.fieldRank;
+            candidate.field = candidateField.field;
+
+            if (candidateField.value == normalizedKeyword) {
+                candidate.modeRank = 0;
+                candidate.distance = 0;
+                candidate.mode = QString::fromLatin1("exact");
+            } else if (candidateField.value.contains(normalizedKeyword)) {
+                candidate.modeRank = 1;
+                candidate.distance = 0;
+                candidate.mode = QString::fromLatin1("substring");
+            } else {
+                bool ok = false;
+                const int distance = bestFuzzyWindowDistance(candidateField.value, normalizedKeyword, &ok);
+                if (!ok || distance > keywordFuzzyThreshold(normalizedKeyword))
+                    continue;
+                candidate.modeRank = 2;
+                candidate.distance = distance;
+                candidate.mode = QString::fromLatin1("fuzzy");
+            }
+
+            if (!best.matched || keywordMatchLess(candidate, best))
+                best = candidate;
+        }
+
+        return best;
+    }
+
     QJsonArray findMatchReasons(const QJsonObject &params)
     {
         QJsonArray reasons;
@@ -2745,8 +2894,6 @@ private:
             reasons.append(QString::fromLatin1("role=") + params.value("role").toString());
         if (params.contains("text"))
             reasons.append(QString::fromLatin1("text=") + params.value("text").toString());
-        if (params.contains("has_text"))
-            reasons.append(QString::fromLatin1("has_text~=") + params.value("has_text").toString());
         if (params.contains("class"))
             reasons.append(QString::fromLatin1("class=") + params.value("class").toString());
         if (params.contains("object_name"))
@@ -2761,7 +2908,7 @@ private:
         return reasons;
     }
 
-    bool findWidgetMatches(QWidget *widget, const QJsonObject &params, bool visible, bool enabled, bool interactable)
+    bool findWidgetMatches(QWidget *widget, const QJsonObject &params, bool visible, bool enabled, bool interactable, FindKeywordMatch *keywordMatch = nullptr)
     {
         if (!widget)
             return false;
@@ -2770,8 +2917,15 @@ private:
             return false;
         if (params.contains("text") && QPlaywrightRoles::widgetText(widget) != params.value("text").toString())
             return false;
-        if (params.contains("has_text") && !QPlaywrightRoles::widgetText(widget).contains(params.value("has_text").toString(), Qt::CaseInsensitive))
-            return false;
+        if (params.contains("keyword")) {
+            const FindKeywordMatch matchedKeyword = findKeywordMatch(widget, params.value("keyword").toString());
+            if (!matchedKeyword.matched)
+                return false;
+            if (keywordMatch)
+                *keywordMatch = matchedKeyword;
+        } else if (keywordMatch) {
+            *keywordMatch = FindKeywordMatch();
+        }
 
         if (params.contains("class")) {
             const QString className = params.value("class").toString();
@@ -2819,6 +2973,9 @@ private:
 
     struct FindWidgetCandidate
     {
+        int keywordModeRank = 0;
+        int keywordFieldRank = 0;
+        int keywordDistance = 0;
         int depth = 0;
         bool interactable = false;
         bool visible = false;
@@ -2838,9 +2995,10 @@ private:
         if (limit <= 0)
             throw std::runtime_error("limit must be > 0");
 
-        const QJsonArray matchReason = findMatchReasons(params);
+        const QJsonArray baseMatchReason = findMatchReasons(params);
         const bool explicitVisible = params.contains("visible");
         const bool explicitInteractable = params.contains("interactable");
+        const QString keyword = params.value("keyword").toString();
         QList<FindWidgetCandidate> matches;
         int preorder = 0;
 
@@ -2854,18 +3012,27 @@ private:
                 const bool enabled = widget->isEnabled();
                 const bool interactable = findInteractable(widget);
                 const bool infrastructure = isFindInfrastructureWidget(widget);
+                FindKeywordMatch keywordMatch;
 
                 if ((includeInfrastructure || !infrastructure) &&
-                    findWidgetMatches(widget, params, visible, enabled, interactable)) {
+                    findWidgetMatches(widget, params, visible, enabled, interactable, &keywordMatch)) {
                     QJsonObject entry = serializeWidgetTree(widget, 0, 0, false);
                     const int wid = reg.registerWidget(widget);
                     entry["wid"] = wid;
                     entry["interactable"] = interactable;
+                    QJsonArray matchReason = baseMatchReason;
+                    if (params.contains("keyword")) {
+                        matchReason.append(
+                            QString::fromLatin1("keyword~=") + keyword + QString::fromLatin1(" via ") + keywordMatch.field + QString::fromLatin1(":") + keywordMatch.mode);
+                    }
                     entry["matchReason"] = matchReason;
                     if (!ancestors.isEmpty())
                         entry["ancestorSummary"] = findAncestorSummary(ancestors);
 
                     FindWidgetCandidate candidate;
+                    candidate.keywordModeRank = params.contains("keyword") ? keywordMatch.modeRank : 0;
+                    candidate.keywordFieldRank = params.contains("keyword") ? keywordMatch.fieldRank : 0;
+                    candidate.keywordDistance = params.contains("keyword") ? keywordMatch.distance : 0;
                     candidate.depth = ancestors.size();
                     candidate.interactable = interactable;
                     candidate.visible = visible;
@@ -2888,6 +3055,12 @@ private:
 
         std::sort(matches.begin(), matches.end(),
                   [&](const FindWidgetCandidate &left, const FindWidgetCandidate &right) {
+                      if (left.keywordModeRank != right.keywordModeRank)
+                          return left.keywordModeRank < right.keywordModeRank;
+                      if (left.keywordFieldRank != right.keywordFieldRank)
+                          return left.keywordFieldRank < right.keywordFieldRank;
+                      if (left.keywordDistance != right.keywordDistance)
+                          return left.keywordDistance < right.keywordDistance;
                       if (left.depth != right.depth)
                           return left.depth < right.depth;
                       if (!explicitInteractable && left.interactable != right.interactable)

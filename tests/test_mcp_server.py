@@ -2785,7 +2785,7 @@ def test_run_cli_typed_find(monkeypatch, capsys):
         lambda **kwargs: {"ok": True, **kwargs},
     )
 
-    exit_code = mcp_server._run_cli(["find", "--root", "w12", "--role", "button", "--has-text", "submit", "--limit", "3"])
+    exit_code = mcp_server._run_cli(["find", "--root", "w12", "--role", "button", "--text", "Submit", "--limit", "3"])
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
@@ -2793,13 +2793,33 @@ def test_run_cli_typed_find(monkeypatch, capsys):
         "ok": True,
         "root": "w12",
         "role": "button",
-        "has_text": "submit",
-        "text": None,
+        "text": "Submit",
         "class_": None,
         "object_name": None,
         "accessible_name": None,
         "include_infrastructure": False,
         "limit": 3,
+    }
+
+
+def test_run_cli_typed_find_fuzzy(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_server,
+        "find_fuzzy",
+        lambda **kwargs: {"ok": True, **kwargs},
+    )
+
+    exit_code = mcp_server._run_cli(["find_fuzzy", "submt", "--root", "w12", "--role", "button", "--limit", "2"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "keyword": "submt",
+        "root": "w12",
+        "role": "button",
+        "include_infrastructure": False,
+        "limit": 2,
     }
 
 
@@ -3212,8 +3232,8 @@ def test_find_widgets_raw_uses_protocol_method_and_root_wid():
     result = mcp_server._find_widgets_raw(
         connection,
         root_wid=12,
+        keyword="submt",
         role="button",
-        has_text="Submit",
         widget_class="QPushButton",
         object_name="submit_btn",
         accessible_name="Submit",
@@ -3231,8 +3251,8 @@ def test_find_widgets_raw_uses_protocol_method_and_root_wid():
             "wid": 12,
             "include_infrastructure": True,
             "limit": 7,
+            "keyword": "submt",
             "role": "button",
-            "has_text": "Submit",
             "class": "QPushButton",
             "object_name": "submit_btn",
             "accessible_name": "Submit",
@@ -3263,7 +3283,7 @@ def test_find_result_returns_v2_handle_shape():
                         "enabled": False,
                         "interactable": False,
                         "geometry": {"x": 310, "y": 412, "width": 96, "height": 28},
-                        "matchReason": ["role=button", "has_text~=Submit", "visible=true"],
+                        "matchReason": ["role=button", "visible=true", "keyword~=submt via text:fuzzy"],
                         "ancestorSummary": [
                             {"wid": 11, "class": "QGroupBox", "text": "Payment"},
                         ],
@@ -3286,12 +3306,12 @@ def test_find_result_returns_v2_handle_shape():
         handle_counter=1,
     )
 
-    result = mcp_server._find_result(connection, root="w1", role="button", has_text="Submit", visible=True, limit=5)
+    result = mcp_server._find_result(connection, root="w1", keyword="submt", role="button", visible=True, limit=5)
 
     assert transport.calls == [
         {
             "method": "find_widgets",
-            "params": {"wid": 11, "include_infrastructure": False, "limit": 5, "role": "button", "has_text": "Submit", "visible": True},
+            "params": {"wid": 11, "include_infrastructure": False, "limit": 5, "keyword": "submt", "role": "button", "visible": True},
             "timeout": 30.0,
         }
     ]
@@ -3311,7 +3331,7 @@ def test_find_result_returns_v2_handle_shape():
                 "enabled": False,
                 "interactable": False,
                 "geometry": [310, 412, 96, 28],
-                "match_reason": ["role=button", "has_text~=Submit", "visible=true"],
+                "match_reason": ["role=button", "visible=true", "keyword~=submt via text:fuzzy"],
                 "ancestor_summary": [
                     {"handle": "w1", "class": "QGroupBox", "label": "Payment"},
                 ],
@@ -3343,7 +3363,41 @@ def test_find_tool_returns_ok_payload(monkeypatch):
         },
     )
 
-    result = mcp_server.find(root="#payment_panel", role="button", has_text="Submit", limit=3)
+    result = mcp_server.find(root="#payment_panel", role="button", text="Submit", limit=3)
+
+    assert result == {
+        "ok": True,
+        "root_handle": "w1",
+        "count": 1,
+        "truncated": False,
+        "results": [{"handle": "w2", "class": "QPushButton", "text": "Submit"}],
+    }
+
+
+def test_find_fuzzy_tool_returns_ok_payload(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", mcp_server.ServerState(connection=connection))
+    monkeypatch.setattr(
+        mcp_server,
+        "_find_fuzzy_result",
+        lambda managed_connection, **kwargs: {
+            "root_handle": "w1",
+            "count": 1,
+            "truncated": False,
+            "results": [{"handle": "w2", "class": "QPushButton", "text": "Submit"}],
+        },
+    )
+
+    result = mcp_server.find_fuzzy(keyword="submt", root="#payment_panel", role="button", limit=3)
 
     assert result == {
         "ok": True,
