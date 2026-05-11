@@ -318,6 +318,7 @@ def test_find_widgets_payload_returns_match_reason_and_ancestor_summary():
             "visible": True,
             "enabled": True,
             "geometry": {"x": 0, "y": 0, "width": 100, "height": 30},
+            "interactable": False,
             "matchReason": ["role=button", "has_text~=Submit"],
             "ancestorSummary": [
                 {
