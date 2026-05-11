@@ -456,7 +456,7 @@ def test_inspect_accepts_item_target(monkeypatch):
             },
             "item_text": "Advanced",
             "item_visible": True,
-            "item_bounding_box": {"x": 10, "y": 20, "width": 30, "height": 12},
+            "item_bounding_box": [10, 20, 30, 12],
         }
     )
     state = mcp_server.ServerState(
@@ -2268,14 +2268,14 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
                 "class": "DemoWindow",
                 "objectName": "",
                 "text": "Dialog",
-                "geometry": {"x": 0, "y": 0, "width": 320, "height": 180},
+                "geometry": [0, 0, 320, 180],
                 "children": [
                     {
                         "wid": 43,
                         "class": "QPushButton",
                         "objectName": "confirm_btn",
                         "text": "Confirm",
-                        "geometry": {"x": 40, "y": 60, "width": 80, "height": 24},
+                        "geometry": [40, 60, 80, 24],
                         "children": [],
                     }
                 ],
@@ -2494,6 +2494,7 @@ def test_run_cli_help_snapshot_mentions_targeted_subtree_capture(capsys):
     output = capsys.readouterr().out
     assert "inspect one subtree and capture" in output
     assert "frontmost-visible view" in output
+    assert "widget-local" in output
     assert "        Use target plus depth" not in output
 
 
@@ -2503,7 +2504,13 @@ def test_run_cli_prints_resource_list(monkeypatch, capsys):
 
         return "selector docs"
 
+    def fake_geometry_help():
+        """Geometry field semantics for Rect4 response values."""
+
+        return "geometry docs"
+
     monkeypatch.setattr(mcp_server, "selector_help", fake_selector_help)
+    monkeypatch.setattr(mcp_server, "geometry_help", fake_geometry_help)
 
     exit_code = mcp_server._run_cli(["resource"])
 
@@ -2512,6 +2519,10 @@ def test_run_cli_prints_resource_list(monkeypatch, capsys):
     assert payload == {
         "ok": True,
         "resources": [
+            {
+                "uri": "qplaywright://help/geometry",
+                "description": "Geometry field semantics for Rect4 response values.",
+            },
             {
                 "uri": "qplaywright://help/selectors",
                 "description": "Selector syntax and recommended qplaywright MCP workflow.",
@@ -2526,7 +2537,13 @@ def test_run_cli_reads_named_resource(monkeypatch, capsys):
 
         return "selector docs"
 
+    def fake_geometry_help():
+        """Geometry field semantics for Rect4 response values."""
+
+        return "geometry docs"
+
     monkeypatch.setattr(mcp_server, "selector_help", fake_selector_help)
+    monkeypatch.setattr(mcp_server, "geometry_help", fake_geometry_help)
 
     exit_code = mcp_server._run_cli(["resource", '{"uri": "qplaywright://help/selectors"}'])
 
@@ -2545,13 +2562,20 @@ def test_run_cli_supports_direct_resources_meta_command(monkeypatch, capsys):
 
         return "selector docs"
 
+    def fake_geometry_help():
+        """Geometry field semantics for Rect4 response values."""
+
+        return "geometry docs"
+
     monkeypatch.setattr(mcp_server, "selector_help", fake_selector_help)
+    monkeypatch.setattr(mcp_server, "geometry_help", fake_geometry_help)
 
     exit_code = mcp_server._run_cli(["resources"])
 
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "Available resources:" in output
+    assert "qplaywright://help/geometry" in output
     assert "qplaywright://help/selectors" in output
 
 
@@ -2561,7 +2585,13 @@ def test_run_cli_typed_resource_read(monkeypatch, capsys):
 
         return "selector docs"
 
+    def fake_geometry_help():
+        """Geometry field semantics for Rect4 response values."""
+
+        return "geometry docs"
+
     monkeypatch.setattr(mcp_server, "selector_help", fake_selector_help)
+    monkeypatch.setattr(mcp_server, "geometry_help", fake_geometry_help)
 
     exit_code = mcp_server._run_cli(["resource", "read", "qplaywright://help/selectors"])
 
@@ -2571,6 +2601,25 @@ def test_run_cli_typed_resource_read(monkeypatch, capsys):
         "ok": True,
         "uri": "qplaywright://help/selectors",
         "content": "selector docs",
+    }
+
+
+def test_run_cli_reads_geometry_resource(monkeypatch, capsys):
+    def fake_geometry_help():
+        """Geometry field semantics for Rect4 response values."""
+
+        return "geometry docs"
+
+    monkeypatch.setattr(mcp_server, "geometry_help", fake_geometry_help)
+
+    exit_code = mcp_server._run_cli(["resource", "read", "qplaywright://help/geometry"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "uri": "qplaywright://help/geometry",
+        "content": "geometry docs",
     }
 
 
@@ -3466,16 +3515,29 @@ def test_selector_help_text_prefers_handles_for_repeatable_actions():
     text = mcp_server._selector_help_text()
 
     assert "observe the UI and capture stable handles for repeatable actions" in text
+    assert "qplaywright://help/geometry" in text
     assert "use snapshot with target+depth when you want one subtree and several child handles" in text
     assert '{"owner": "w12", "item": {"kind": "table_cell", "row": 3, "column": 1}}' in text
     assert "invoke with those handles" in text
 
 
+def test_geometry_help_text_explains_coordinate_spaces():
+    text = mcp_server._geometry_help_text()
+
+    assert "Rect4 arrays in the exact form [x, y, width, height]" in text
+    assert "For child widgets this is widget-local" in text
+    assert "global_bounding_box: screen-space rectangle" in text
+    assert "currently identical to global_bounding_box" in text
+
+
 def test_cli_tool_help_includes_action_level_session_and_window_guidance():
     session_help = mcp_server._cli_tool_help("session", mcp_server.session)
     window_help = mcp_server._cli_tool_help("window", mcp_server.window)
+    inspect_help = mcp_server._cli_tool_help("inspect", mcp_server.inspect)
 
     assert "session.attach: attach to an already running Qt app" in session_help
     assert "session.status: report current session and active window" in session_help
+    assert "window.geometry is Rect4" in window_help
     assert "window.select: switch active window" in window_help
     assert "window.close: close one window or the active window" in window_help
+    assert "geometry is Rect4 [x, y, width, height] in widget-local coordinates" in inspect_help

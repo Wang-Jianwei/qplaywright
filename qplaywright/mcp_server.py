@@ -1285,7 +1285,7 @@ def _inspect_item_locator(
         bounding_box = locator.bounding_box()
     except Exception:
         bounding_box = None
-    compact_bounding_box = _compact_geometry(bounding_box if isinstance(bounding_box, dict) else None)
+    compact_bounding_box = _compact_geometry(bounding_box)
     if compact_bounding_box is not None:
         result["bounding_box"] = compact_bounding_box
         result["global_bounding_box"] = compact_bounding_box
@@ -1530,6 +1530,8 @@ def _selector_help_text() -> str:
         "- {\"owner\": \"w9\", \"item\": {\"kind\": \"tree_node\", \"path\": [0, 1]}}\n"
         "- {\"owner\": \"w5\", \"item\": {\"kind\": \"list_item\", \"row\": 2}}\n"
         "- {\"owner\": \"w3\", \"item\": {\"kind\": \"tab_item\", \"index\": 1}}\n\n"
+        "Geometry help:\n"
+        "- Read qplaywright://help/geometry when you need the exact meaning of geometry, bounding_box, and global_bounding_box\n\n"
         "Typical workflow:\n"
         "1. session attach or session launch\n"
         "2. window list and window select when multiple windows are visible\n"
@@ -1537,6 +1539,20 @@ def _selector_help_text() -> str:
         "4. inspect one chosen handle when you need methods, properties, or exact state; inspect_items for table/tree/list/tab descendants\n"
         "5. click, hover, wait, set_expanded, input, press_key, choose, screenshot, or invoke with those handles\n"
         "6. session close when finished"
+    )
+
+
+def _geometry_help_text() -> str:
+    return (
+        "All geometry-like response fields use Rect4 arrays in the exact form [x, y, width, height].\n\n"
+        "Field meanings:\n"
+        "- geometry: layout rectangle for a widget or window. For child widgets this is widget-local, usually relative to the parent widget. For top-level windows this is screen-space.\n"
+        "- global_bounding_box: screen-space rectangle for the resolved widget or item target.\n"
+        "- bounding_box: existing locator-compatible screen-space rectangle. It is currently identical to global_bounding_box and kept as a separate field for compatibility.\n\n"
+        "Examples:\n"
+        "- geometry [12, 48, 220, 80] means x=12, y=48, width=220, height=80 in the field's coordinate space.\n"
+        "- global_bounding_box [300, 220, 220, 80] means the same size positioned at screen coordinate (300, 220).\n\n"
+        "Do not reorder Rect4 slots and do not assume geometry uses screen coordinates unless the field description says so."
     )
 
 
@@ -1604,7 +1620,7 @@ def _snapshot_entry(node: dict[str, Any], handle: str | None) -> dict[str, Any]:
         "handle": handle,
         "class": node.get("class", ""),
     }
-    compact_geometry = _compact_geometry(node.get("geometry") if isinstance(node.get("geometry"), dict) else None)
+    compact_geometry = _compact_geometry(node.get("geometry"))
     if compact_geometry is not None:
         entry["geometry"] = compact_geometry
     attribute = _attribute_summary(node)
@@ -2316,7 +2332,7 @@ if FastMCP is not None:
         instructions=(
             "Automate Qt QWidget applications through qplaywright. "
             "Use session, window, snapshot, inspect, and inspect_items to observe the UI before "
-            "performing destructive UI actions."
+            "performing destructive UI actions. Geometry fields use Rect4 arrays in the form [x, y, width, height]."
         ),
         json_response=True,
     )
@@ -2327,6 +2343,13 @@ if FastMCP is not None:
         """Selector syntax and recommended qplaywright MCP workflow."""
 
         return _selector_help_text()
+
+
+    @mcp.resource("qplaywright://help/geometry")
+    def geometry_help() -> str:
+        """Geometry field semantics for Rect4 response values."""
+
+        return _geometry_help_text()
 
 
     @mcp.tool()
@@ -2417,6 +2440,10 @@ if FastMCP is not None:
         - select: switch active window
         - resize: resize one window or the active window
         - close: close one window or the active window
+
+        Geometry semantics:
+        - window.geometry is Rect4: [x, y, width, height]
+        - for top-level windows, x and y are screen-space coordinates
         """
 
         connection_state = _get_connection(_SERVER_STATE)
@@ -2496,6 +2523,11 @@ if FastMCP is not None:
 
         When topmost_only is true, the window-wide snapshot becomes an approximate
         frontmost-visible view and may be incomplete.
+
+        Geometry semantics:
+        - widget geometry fields use Rect4: [x, y, width, height]
+        - subtree widget geometry is widget-local, usually relative to the parent widget
+        - top-level window geometry is screen-space
         """
 
         connection_state = _get_connection(_SERVER_STATE)
@@ -2538,6 +2570,12 @@ if FastMCP is not None:
 
         When topmost_only is true and target is omitted, the returned tree is an
         approximate frontmost-visible view and may be incomplete.
+
+                Geometry semantics for targeted inspect:
+                - geometry is Rect4 [x, y, width, height] in widget-local coordinates
+                - global_bounding_box is Rect4 in screen coordinates
+                - bounding_box is the existing locator-compatible screen-space Rect4 and is
+                    currently identical to global_bounding_box
         """
 
         connection_state = _get_connection(_SERVER_STATE)
@@ -3146,6 +3184,7 @@ _CLI_TOOL_NAMES = (
 
 _CLI_RESOURCE_NAMES = {
     "qplaywright://help/selectors": "selector_help",
+    "qplaywright://help/geometry": "geometry_help",
 }
 
 
@@ -3180,6 +3219,7 @@ def _cli_usage_text() -> str:
         "  qplaywright-mcp cli resources\n"
         "  qplaywright-mcp cli resource list\n"
         "  qplaywright-mcp cli resource read qplaywright://help/selectors\n"
+        "  qplaywright-mcp cli resource read qplaywright://help/geometry\n"
         "  qplaywright-mcp cli session attach --port 19877\n"
         "  qplaywright-mcp cli window select --title Dialog\n"
         "  qplaywright-mcp cli snapshot --depth 4 --topmost-only\n"
@@ -3189,6 +3229,7 @@ def _cli_usage_text() -> str:
         "  qplaywright-mcp cli input w7 123.45 --submit\n"
         "  qplaywright-mcp cli session '{\"action\": \"attach\", \"port\": 19877}'\n"
         "  qplaywright-mcp cli resource '{\"uri\": \"qplaywright://help/selectors\"}'\n"
+        "  qplaywright-mcp cli resource '{\"uri\": \"qplaywright://help/geometry\"}'\n"
         "  qplaywright-mcp cli snapshot '{\"depth\": 4}'\n\n"
         "REPL commands:\n"
         "  .tools                List available tools\n"
