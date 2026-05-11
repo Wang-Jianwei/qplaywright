@@ -39,7 +39,6 @@ from qplaywright.protocol import (
     METHOD_ITEM_CLICK,
     METHOD_ITEM_DBLCLICK,
     METHOD_ITEM_HOVER,
-    METHOD_ITEM_SELECT,
     METHOD_ITEM_EXPAND,
     METHOD_ITEM_COLLAPSE,
 )
@@ -129,10 +128,6 @@ class ItemLocator:
 
     def hover(self) -> None:
         self._send(METHOD_ITEM_HOVER)
-
-    def select(self) -> None:
-        self._require_kind("tab_item", action="select")
-        self._send(METHOD_ITEM_SELECT)
 
     def expand(self) -> None:
         self._require_kind("tree_node", action="expand")

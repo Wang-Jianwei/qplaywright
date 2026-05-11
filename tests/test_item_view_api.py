@@ -278,16 +278,16 @@ def test_locator_list_item_builds_numeric_descriptor_for_properties():
     ]
 
 
-def test_locator_tab_resolves_owner_widget_before_select():
-    conn = SequencedConnection({"find": {"wid": 52}, "item_select": True})
+def test_locator_tab_resolves_owner_widget_before_click():
+    conn = SequencedConnection({"find": {"wid": 52}, "item_click": True})
     locator = Locator(cast(Any, conn), "#main_tabs", timeout=6.0)
 
-    locator.tab("Data").select()
+    locator.tab("Data").click()
 
     assert conn.calls == [
         ("find", {"selector": "#main_tabs"}, 6.0),
         (
-            "item_select",
+            "item_click",
             {
                 "wid": 52,
                 "item": {
@@ -320,16 +320,6 @@ def test_item_locator_is_selected_sends_item_selected_request():
             4.0,
         )
     ]
-
-
-def test_list_item_select_is_rejected_locally():
-    conn = FakeConnection()
-    item = ItemLocator(cast(Any, conn), 9, {"kind": "list_item", "row": 1}, timeout=2.5)
-
-    with pytest.raises(ValueError, match=r"select\(\) is only supported for tab_item items"):
-        item.select()
-
-    assert conn.calls == []
 
 
 @dataclass(eq=True)
@@ -365,6 +355,9 @@ class FakeRect:
 
     def isEmpty(self) -> bool:
         return self._width <= 0 or self._height <= 0
+
+    def contains(self, point: FakePoint) -> bool:
+        return self._x <= point.x_value < self._x + self._width and self._y <= point.y_value < self._y + self._height
 
 
 class FakeMetaObject:
@@ -866,6 +859,12 @@ class FakeQTest:
 
     @staticmethod
     def mouseClick(widget, button, modifier=None, pos=None):
+        if isinstance(widget, FakeTabBar) and isinstance(pos, FakePoint):
+            for index in range(widget.count()):
+                rect = widget.tabRect(index)
+                if rect.contains(pos):
+                    widget.setCurrentIndex(index)
+                    break
         FakeQTest.calls.append(("click", widget, button, modifier, pos))
 
     @staticmethod
@@ -1316,7 +1315,7 @@ def test_handle_command_item_text_reads_tab_item(monkeypatch):
     assert result == "Data"
 
 
-def test_handle_command_item_properties_and_select_support_tab_item(monkeypatch):
+def test_handle_command_item_properties_and_click_support_tab_item(monkeypatch):
     _install_fake_item_view_qt(monkeypatch)
     server._registry.clear()
     tabs = FakeTabWidget(["Login", "Data", "Settings"], current_index=0, page_object_names=["tab_login", "tab_data", "tab_settings"])
@@ -1328,8 +1327,8 @@ def test_handle_command_item_properties_and_select_support_tab_item(monkeypatch)
     selected_before = server._handle_command(
         Request(method="item_selected", params={"wid": wid, "item": {"kind": "tab_item", "index": 1}})
     )
-    select_result = server._handle_command(
-        Request(method="item_select", params={"wid": wid, "item": {"kind": "tab_item", "label": "Data"}})
+    click_result = server._handle_command(
+        Request(method="item_click", params={"wid": wid, "item": {"kind": "tab_item", "label": "Data"}})
     )
     selected_after = server._handle_command(
         Request(method="item_selected", params={"wid": wid, "item": {"kind": "tab_item", "index": 1}})
@@ -1345,7 +1344,7 @@ def test_handle_command_item_properties_and_select_support_tab_item(monkeypatch)
         "pageObjectName": "tab_data",
     }
     assert selected_before is False
-    assert select_result is True
+    assert click_result is True
     assert selected_after is True
     assert tabs.currentIndex() == 1
 

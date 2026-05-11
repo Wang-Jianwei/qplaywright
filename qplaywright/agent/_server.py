@@ -48,7 +48,6 @@ from qplaywright.protocol import (
     METHOD_ITEM_CLICK,
     METHOD_ITEM_DBLCLICK,
     METHOD_ITEM_HOVER,
-    METHOD_ITEM_SELECT,
     METHOD_ITEM_EXPAND,
     METHOD_ITEM_COLLAPSE,
     METHOD_ITEM_VIEW_INSPECT,
@@ -2540,24 +2539,6 @@ def _hover_tab_item(owner_widget, resolved_target):
     _hover_widget(tab_bar, local_pos)
 
 
-def _select_tab_item(owner_widget, resolved_target):
-    index = int(resolved_target["index"])
-    set_current_index = getattr(owner_widget, "setCurrentIndex", None)
-    if callable(set_current_index):
-        set_current_index(index)
-        _process_events()
-        return
-
-    tab_bar = resolved_target.get("tabBar") or _tab_bar_from_owner(owner_widget)
-    set_current_index = getattr(tab_bar, "setCurrentIndex", None)
-    if callable(set_current_index):
-        set_current_index(index)
-        _process_events()
-        return
-
-    raise ValueError("Tab owner does not expose setCurrentIndex()")
-
-
 def _click_item(owner_widget, resolved_target, *, double: bool = False):
     if resolved_target["kind"] == "table_cell":
         _click_table_index(owner_widget, resolved_target, double=double)
@@ -3123,12 +3104,6 @@ def _handle_command(req: Request) -> Any:
         owner = _resolve_item_owner(params)
         target = _resolve_item_target(owner, params.get("item") or {})
         _hover_item(owner, target)
-        return True
-
-    if method == METHOD_ITEM_SELECT:
-        owner = _resolve_item_owner(params)
-        target = _resolve_item_target(owner, params.get("item") or {})
-        _select_tab_item(owner, target)
         return True
 
     if method == METHOD_ITEM_EXPAND:

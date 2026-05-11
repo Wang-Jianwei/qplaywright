@@ -2445,18 +2445,6 @@ private:
             throw std::runtime_error(("Unsupported item kind: " + kind).toStdString());
         }
 
-        if (method == "item_select") {
-            QWidget *owner = resolveItemOwner(params);
-            const QJsonObject item = params.value("item").toObject();
-            const QString kind = item.value("kind").toString();
-            if (kind != "tab_item")
-                throw std::runtime_error("select() is only supported for tab_item items");
-
-            ResolvedTabItem target = resolveTabItem(owner, item);
-            selectTabItem(owner, target);
-            return true;
-        }
-
         if (method == "item_expand") {
             QWidget *owner = resolveItemOwner(params);
             const QJsonObject item = params.value("item").toObject();
@@ -4226,19 +4214,6 @@ private:
         );
 #endif
         QApplication::sendEvent(target.tabBar, &event);
-        QApplication::processEvents();
-    }
-
-    void selectTabItem(QWidget *owner, const ResolvedTabItem &target)
-    {
-        if (auto *widget = qobject_cast<QTabWidget *>(owner)) {
-            widget->setCurrentIndex(target.index);
-            QApplication::processEvents();
-            return;
-        }
-
-        QTabBar *bar = target.tabBar ? target.tabBar : tabBarFromOwner(owner);
-        bar->setCurrentIndex(target.index);
         QApplication::processEvents();
     }
 
