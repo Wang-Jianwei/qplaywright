@@ -512,6 +512,7 @@ class ManagedConnection:
     timeout: float
     launched_executable: str | None = None
     active_window_wid: int | None = None
+    window_scope_override_wid: int | None = None
     handle_counter: int = 0
     wid_to_handle: dict[int, str] = field(default_factory=dict)
     handle_to_wid: dict[str, int] = field(default_factory=dict)
@@ -816,6 +817,18 @@ def _effective_active_window_wid(
     if not windows:
         return None
 
+    scoped_window = next(
+        (window for window in windows if window.get("wid") == connection.window_scope_override_wid),
+        None,
+    )
+    if scoped_window is not None and isinstance(connection.window_scope_override_wid, int):
+        return connection.window_scope_override_wid
+
+    stored_window = next(
+        (window for window in windows if window.get("wid") == connection.active_window_wid),
+        None,
+    )
+
     explicit_active = next(
         (
             window.get("wid")
@@ -827,10 +840,6 @@ def _effective_active_window_wid(
     if isinstance(explicit_active, int):
         return explicit_active
 
-    stored_window = next(
-        (window for window in windows if window.get("wid") == connection.active_window_wid),
-        None,
-    )
     if stored_window is not None and not bool(stored_window.get("blocked_by_modal", False)):
         return connection.active_window_wid
 
@@ -917,8 +926,9 @@ def _session_summary(connection: ManagedConnection) -> dict[str, Any]:
     }
 
 
-def _select_active_window(connection: ManagedConnection, window_wid: int | None) -> None:
+def _select_active_window(connection: ManagedConnection, window_wid: int | None, *, override_scope: bool = False) -> None:
     connection.active_window_wid = window_wid
+    connection.window_scope_override_wid = window_wid if override_scope else None
 
 
 def _initialize_active_window(connection: ManagedConnection) -> list[dict[str, Any]]:
@@ -2521,7 +2531,7 @@ if FastMCP is not None:
                 window_title=title,
                 window_index=index,
             )
-            _select_active_window(connection_state, selected_window.wid)
+            _select_active_window(connection_state, selected_window.wid, override_scope=True)
             return {
                 "ok": True,
                 "action": action,

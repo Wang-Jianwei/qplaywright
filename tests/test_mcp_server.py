@@ -947,6 +947,56 @@ def test_window_tool_lists_selects_resizes_and_closes(monkeypatch):
     assert second.closed is True
 
 
+def test_window_select_overrides_transport_reported_active_window(monkeypatch):
+    state = mcp_server.ServerState()
+    first = FakeWindow(11, "First")
+    second = FakeWindow(22, "Second")
+    app = FakeApp([first, second])
+    app._conn = FakeTransportConn(
+        responses={
+            mcp_server.METHOD_LIST_WINDOWS: {
+                "windows": [
+                    {
+                        "wid": 11,
+                        "title": "First",
+                        "class": "QWidget",
+                        "geometry": [0, 0, 300, 200],
+                        "is_modal": False,
+                        "is_active": False,
+                    },
+                    {
+                        "wid": 22,
+                        "title": "Second",
+                        "class": "QDialog",
+                        "geometry": [20, 20, 320, 240],
+                        "is_modal": False,
+                        "is_active": True,
+                    },
+                ]
+            }
+        }
+    )
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=22,
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    selected = mcp_server.window(action="select", wid=11)
+    listed = mcp_server.window(action="list")
+
+    assert selected["active_window"]["wid"] == 11
+    assert selected["active_window"]["title"] == "First"
+    assert listed["active_window"]["wid"] == 11
+    assert listed["windows"][0]["is_active"] is True
+    assert listed["windows"][1]["is_active"] is False
+
+
 def test_window_select_requires_explicit_selector(monkeypatch):
     state = mcp_server.ServerState()
     state.connection = mcp_server.ManagedConnection(
