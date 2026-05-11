@@ -196,13 +196,13 @@ def test_resolve_click_target_prefers_viewport_hit_widget(monkeypatch):
     assert pos == FakePoint(2, 7)
 
 
-def test_resolve_click_target_rejects_covered_center(monkeypatch):
+def test_resolve_click_target_rejects_when_all_click_samples_are_covered(monkeypatch):
     widget = FakeClickWidget("QPushButton")
     overlay = FakeClickWidget("OverlayWidget", global_origin=FakePoint(100, 200))
 
     _install_fake_qt(monkeypatch, widget_at=overlay)
 
-    with pytest.raises(ValueError, match="covered by OverlayWidget"):
+    with pytest.raises(ValueError, match="no clickable sample point"):
         server._resolve_click_target(widget)
 
 
@@ -219,6 +219,25 @@ def test_click_widget_uses_hit_target_and_local_position(monkeypatch):
     assert FakeQTest.calls == [("click", hit, "left", "none", FakePoint(2, 7))]
     assert hit.focus_calls == [("mouse",)]
     assert FakeApplication.process_events_calls >= 2
+
+
+def test_resolve_click_target_prefers_checkable_hit_area_over_wide_center(monkeypatch):
+    widget = FakeClickWidget(
+        "QCheckBox",
+        global_origin=FakePoint(100, 200),
+        center=FakePoint(200, 8),
+        size=(400, 16),
+    )
+
+    _install_fake_qt(
+        monkeypatch,
+        widget_at=lambda point: widget if point == FakePoint(124, 208) else None,
+    )
+
+    target, pos = server._resolve_click_target(widget)
+
+    assert target is widget
+    assert pos == FakePoint(24, 8)
 
 
 def test_handle_command_click_accepts_window_relative_coordinates(monkeypatch):
@@ -315,13 +334,13 @@ def test_is_topmost_visible_widget_ignores_samples_outside_mask(monkeypatch):
     assert server._is_topmost_visible_widget(widget) is False
 
 
-def test_resolve_click_target_rejects_masked_center(monkeypatch):
-    masked_hole = FakeMaskRegion(empty=False, contains=lambda point: point != FakePoint(10, 12))
+def test_resolve_click_target_rejects_when_all_click_samples_are_masked(monkeypatch):
+    masked_hole = FakeMaskRegion(empty=False, contains=lambda point: False)
     widget = FakeClickWidget("QPushButton", mask_region=masked_hole)
 
     _install_fake_qt(monkeypatch, widget_at=None)
 
-    with pytest.raises(ValueError, match="masked out"):
+    with pytest.raises(ValueError, match="no clickable sample point"):
         server._resolve_click_target(widget)
 
 

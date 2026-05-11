@@ -3353,6 +3353,38 @@ def _sample_local_points(widget) -> list:
     return samples
 
 
+def _preferred_click_points(widget) -> list:
+    center = _widget_center_point(widget)
+    width = _widget_dimension(widget, "width")
+    height = _widget_dimension(widget, "height")
+
+    candidates = []
+    seen: set[tuple[int, int]] = set()
+
+    def add_point(x_value: int, y_value: int) -> None:
+        key = (x_value, y_value)
+        if key in seen:
+            return
+        seen.add(key)
+        point_type = type(center)
+        candidates.append(point_type(x_value, y_value))
+
+    class_name = _widget_class_name(widget)
+    if class_name in {"QCheckBox", "QRadioButton"}:
+        max_x = max(0, width - 1)
+        center_y = _point_coordinate(center, "y")
+        small_inset = min(max(1, width // 8) if width > 1 else 0, 24)
+        large_inset = min(max(1, width // 4) if width > 1 else 0, 48)
+        for inset in (small_inset, large_inset):
+            add_point(min(max_x, inset), center_y)
+            add_point(max(0, max_x - inset), center_y)
+
+    for point in _sample_local_points(widget):
+        add_point(_point_coordinate(point, "x"), _point_coordinate(point, "y"))
+
+    return candidates
+
+
 def _topmost_hit_at_point(target, local_point):
     if not _point_within_widget_mask(target, local_point):
         return None
@@ -3407,34 +3439,27 @@ def _resolve_click_target(widget):
             f"Cannot click widget of type {_widget_class_name(widget)}: event target is disabled"
         )
 
-    center = _widget_center_point(target)
-    if not _point_within_widget_mask(target, center):
-        raise ValueError(
-            f"Cannot click widget of type {_widget_class_name(widget)}: center point is masked out"
-        )
-    global_pos = _widget_map_to_global(target, center)
+    for candidate in _preferred_click_points(target):
+        if not _point_within_widget_mask(target, candidate):
+            continue
+        global_pos = _widget_map_to_global(target, candidate)
 
-    hit = _topmost_hit_at_point(target, center)
-    if hit is None:
-        raise ValueError(
-            f"Cannot click widget of type {_widget_class_name(widget)}: center point does not resolve to an event target"
-        )
+        hit = _topmost_hit_at_point(target, candidate)
+        if hit is None:
+            continue
+        if not _is_same_or_descendant_widget(hit, target):
+            continue
+        if not _widget_is_visible(hit):
+            continue
+        if not _widget_is_enabled(hit):
+            continue
 
-    if not _is_same_or_descendant_widget(hit, target):
-        raise ValueError(
-            f"Cannot click widget of type {_widget_class_name(widget)}: center point is covered by {_widget_class_name(hit)}"
-        )
-    if not _widget_is_visible(hit):
-        raise ValueError(
-            f"Cannot click widget of type {_widget_class_name(widget)}: resolved click target is not visible"
-        )
-    if not _widget_is_enabled(hit):
-        raise ValueError(
-            f"Cannot click widget of type {_widget_class_name(widget)}: resolved click target is disabled"
-        )
+        local_pos = _widget_map_from_global(hit, global_pos)
+        return hit, local_pos
 
-    local_pos = _widget_map_from_global(hit, global_pos)
-    return hit, local_pos
+    raise ValueError(
+        f"Cannot click widget of type {_widget_class_name(widget)}: no clickable sample point resolved to an event target"
+    )
 
 
 def _click_widget(widget, *, double: bool = False):

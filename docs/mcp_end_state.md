@@ -410,15 +410,14 @@ Qt 业务自动化的中心应当是：
 
 建议参数组合：
 
-- `press_key.target`
-- `press_key.key="Space"`
+- `click.target` 或 `press_key.target`
 - `wait.target`
 - `wait.condition="checked_equals"`
 
 为什么这样设计：
 
 - 直接调用 checked setter 可能绕过应用依赖的事件机制
-- 对 checkable widget，`press_key Space` 是更明确的用户路径，也更容易保持 UI 状态机一致
+- `click` 或 `press_key` 更接近用户真实操作，也更容易保持 UI 状态机一致
 
 扩展说明：
 

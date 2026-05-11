@@ -514,7 +514,7 @@ Tool-specific fields:
 - `hover`: optional `x` + `y` together when `target` is omitted
 - `scroll`: optional `delta_x`, `delta_y`
 
-For checkable widgets, prefer `press_key` with `key="Space"` on the resolved handle, then confirm the resulting state with `wait(condition="checked_equals", expected=true|false)` or `inspect`. Use `click` only when pointer interaction itself is the behavior you need to validate.
+For checkable widgets, use `click` or `press_key` on the resolved handle, then confirm the resulting state with `wait(condition="checked_equals", expected=true|false)` or `inspect`.
 
 ### screenshot
 

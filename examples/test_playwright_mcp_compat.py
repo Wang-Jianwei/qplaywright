@@ -151,10 +151,10 @@ async def main() -> None:
                 )
                 await _call_tool(
                     session,
-                    "press_key",
-                    {"target": remember_handle, "key": "Space"},
+                    "click",
+                    {"target": remember_handle},
                 )
-                await _call_tool(session, "press_key", {"target": notify_handle, "key": "Space"})
+                await _call_tool(session, "click", {"target": notify_handle})
                 login_result = await _call_tool(
                     session,
                     "click",

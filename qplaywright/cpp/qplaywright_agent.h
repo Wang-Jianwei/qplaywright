@@ -3722,6 +3722,35 @@ private:
         return samples;
     }
 
+    QVector<QPoint> preferredClickPoints(QWidget *target)
+    {
+        const QPoint center = target->rect().center();
+        const int width = target->width();
+        const int maxX = qMax(0, width - 1);
+
+        QVector<QPoint> candidates;
+        auto appendUnique = [&](const QPoint &point) {
+            if (candidates.contains(point))
+                return;
+            candidates.append(point);
+        };
+
+        if (qobject_cast<QCheckBox *>(target) || qobject_cast<QRadioButton *>(target)) {
+            const int smallInset = qMin(width > 1 ? qMax(1, width / 8) : 0, 24);
+            const int largeInset = qMin(width > 1 ? qMax(1, width / 4) : 0, 48);
+            for (int inset : {smallInset, largeInset}) {
+                appendUnique(QPoint(qMin(maxX, inset), center.y()));
+                appendUnique(QPoint(qMax(0, maxX - inset), center.y()));
+            }
+        }
+
+        const QVector<QPoint> samples = sampleLocalPoints(target);
+        for (const QPoint &sample : samples)
+            appendUnique(sample);
+
+        return candidates;
+    }
+
     bool pointWithinWidgetMask(QWidget *target, const QPoint &localPoint)
     {
         const QRegion region = target->mask();
@@ -3829,42 +3858,29 @@ private:
             );
         }
 
-        QPoint center = target->rect().center();
-        if (!pointWithinWidgetMask(target, center)) {
-            throw std::runtime_error(
-                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
-                "; center point is masked out"
-            );
-        }
-        QPoint globalPos = target->mapToGlobal(center);
-        QWidget *hit = topmostHitAtPoint(target, center);
-        if (!hit) {
-            throw std::runtime_error(
-                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
-                "; center point does not resolve to an event target"
-            );
+        const QVector<QPoint> candidates = preferredClickPoints(target);
+        for (const QPoint &candidate : candidates) {
+            if (!pointWithinWidgetMask(target, candidate))
+                continue;
+
+            const QPoint globalPos = target->mapToGlobal(candidate);
+            QWidget *hit = topmostHitAtPoint(target, candidate);
+            if (!hit)
+                continue;
+            if (!isSameOrDescendantWidget(hit, target))
+                continue;
+            if (!hit->isVisible())
+                continue;
+            if (!hit->isEnabled())
+                continue;
+
+            return {hit, hit->mapFromGlobal(globalPos)};
         }
 
-        if (!isSameOrDescendantWidget(hit, target)) {
-            throw std::runtime_error(
-                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
-                "; center point is covered by " + std::string(hit->metaObject()->className())
-            );
-        }
-        if (!hit->isVisible()) {
-            throw std::runtime_error(
-                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
-                "; resolved click target is not visible"
-            );
-        }
-        if (!hit->isEnabled()) {
-            throw std::runtime_error(
-                std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
-                "; resolved click target is disabled"
-            );
-        }
-
-        return {hit, hit->mapFromGlobal(globalPos)};
+        throw std::runtime_error(
+            std::string("Cannot click widget of type: ") + std::string(w->metaObject()->className()) +
+            "; no clickable sample point resolved to an event target"
+        );
     }
 
     // ----- Action helpers -----

@@ -344,8 +344,8 @@ async def main() -> None:
                 )
                 await _call_tool(
                     session,
-                    "press_key",
-                    {"target": remember_handle, "key": "Space"},
+                    "click",
+                    {"target": remember_handle},
                 )
                 await _call_tool(
                     session,
@@ -364,8 +364,8 @@ async def main() -> None:
                 )
                 await _call_tool(
                     session,
-                    "press_key",
-                    {"target": notify_handle, "key": "Space"},
+                    "click",
+                    {"target": notify_handle},
                 )
                 await _call_tool(
                     session,

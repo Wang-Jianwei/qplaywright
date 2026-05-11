@@ -776,7 +776,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 对 checkable widget，推荐路径是：
 
-1. 优先使用 `press_key` 且 `key="Space"` 触发真实交互
+1. 使用 `click` 或 `press_key` 触发真实交互
 2. 使用 `wait(condition="checked_equals", expected=true|false)` 或 `inspect` 确认结果状态
 
 这样可以避免直接调用 setter 绕过应用依赖的事件链。

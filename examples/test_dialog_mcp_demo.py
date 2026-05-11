@@ -139,10 +139,9 @@ async def main() -> None:
                 )
                 await _call_tool(
                     session,
-                    "press_key",
+                    "click",
                     {
                         "target": review_escalate_handle,
-                        "key": "Space",
                     },
                 )
                 await _call_tool(
