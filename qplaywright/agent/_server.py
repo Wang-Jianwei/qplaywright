@@ -72,6 +72,7 @@ from qplaywright.protocol import (
     METHOD_SCROLL,
     METHOD_SCREENSHOT,
     METHOD_SCREENSHOT_WIDGET,
+    METHOD_HANDSHAKE,
     METHOD_LIST_WINDOWS,
     METHOD_WINDOW_TITLE,
     METHOD_WINDOW_SIZE,
@@ -79,6 +80,7 @@ from qplaywright.protocol import (
     METHOD_WINDOW_CLOSE,
     METHOD_WAIT_FOR,
     METHOD_PING,
+    PROTOCOL_VERSION,
     METHOD_SET_SESSION_INFO,
 )
 from qplaywright.agent._selector import (
@@ -2904,6 +2906,12 @@ def _handle_command(req: Request) -> Any:
     Qt = qt_core.Qt
 
     # -- Ping ----------------------------------------------------------------
+    if method == METHOD_HANDSHAKE:
+        return {
+            "protocol_version": PROTOCOL_VERSION,
+            "agent_kind": "python",
+        }
+
     if method == METHOD_PING:
         return {"pong": True}
 

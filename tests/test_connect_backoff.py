@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from qplaywright.protocol import METHOD_HANDSHAKE, METHOD_SET_SESSION_INFO, PROTOCOL_VERSION
 from qplaywright.sync_api._api import QPlaywright
 
 
@@ -87,7 +88,7 @@ def test_connect_succeeds_on_second_attempt():
 
     fake_conn = MagicMock()
     fake_conn.connect.side_effect = connect_side_effect
-    fake_conn.send.return_value = {"result": "pong"}
+    fake_conn.send.return_value = {"protocol_version": PROTOCOL_VERSION, "agent_kind": "python"}
 
     with (
         patch("qplaywright.sync_api._api.Connection", return_value=fake_conn),
@@ -100,3 +101,36 @@ def test_connect_succeeds_on_second_attempt():
 
     assert isinstance(app, Application)
     assert attempt[0] == 2
+    assert fake_conn.send.mock_calls[-1] == call(METHOD_HANDSHAKE)
+
+
+def test_connect_advertises_agent_name_after_successful_handshake():
+    fake_conn = MagicMock()
+    fake_conn.send.side_effect = [
+        {"protocol_version": PROTOCOL_VERSION, "agent_kind": "python"},
+        {"agentName": "GitHub Copilot"},
+    ]
+
+    with patch("qplaywright.sync_api._api.Connection", return_value=fake_conn):
+        QPlaywright().connect(timeout=30.0, agent_name="GitHub Copilot")
+
+    assert fake_conn.send.mock_calls == [
+        call(METHOD_HANDSHAKE),
+        call(METHOD_SET_SESSION_INFO, {"agentName": "GitHub Copilot"}),
+    ]
+
+
+def test_connect_fails_immediately_on_protocol_mismatch():
+    sleep_calls: list[float] = []
+    fake_conn = MagicMock()
+    fake_conn.send.return_value = {"protocol_version": PROTOCOL_VERSION + 1, "agent_kind": "python"}
+
+    with (
+        patch("qplaywright.sync_api._api.Connection", return_value=fake_conn),
+        patch("qplaywright.sync_api._api.time.sleep", side_effect=lambda value: sleep_calls.append(value)),
+    ):
+        with pytest.raises(ConnectionError, match="protocol mismatch"):
+            QPlaywright().connect(timeout=30.0)
+
+    assert fake_conn.connect.call_count == 1
+    assert sleep_calls == []

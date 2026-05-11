@@ -243,10 +243,15 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 字段约束：
 
 - `action` 必填
-- `attach` 需要 `port`，`host` 默认为 `127.0.0.1`
-- `launch` 需要 `executable`
+- `attach` 需要 `port`，`host` 默认为 `127.0.0.1`，并且必须在建立 TCP 连接后完成 formal handshake
+- `launch` 需要 `executable`，并且 attach 到新进程后必须完成 formal handshake
 - `close` 不需要额外参数
 - `status` 不需要额外参数
+
+连接语义：
+
+- `attach` / `launch` 成功的前提不是“socket 可达”，而是“socket 可达且握手返回匹配的 `protocol_version`”
+- 如果握手方法不存在、响应结构非法或 `protocol_version` 不匹配，请求必须立即失败，不建立半连接 session
 
 ### Session Response: Attach Or Launch
 

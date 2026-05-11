@@ -967,6 +967,7 @@ def connect_connection(
 ) -> ManagedConnection:
     if state.connection is not None:
         state.connection.close()
+        state.connection = None
 
     qplaywright = QPlaywright()
     connection_name = (agent_name or "default").strip() or "default"
@@ -996,6 +997,7 @@ def launch_connection(
 ) -> ManagedConnection:
     if state.connection is not None:
         state.connection.close()
+        state.connection = None
 
     qplaywright = QPlaywright()
     connection_name = (agent_name or "default").strip() or "default"

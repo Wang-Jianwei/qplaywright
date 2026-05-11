@@ -330,6 +330,8 @@ METHOD_WINDOW_RESIZE = "window_resize"
 METHOD_WINDOW_CLOSE = "window_close"
 
 # Utility
+PROTOCOL_VERSION = 1
+METHOD_HANDSHAKE = "handshake"
 METHOD_WAIT_FOR = "wait_for"
 METHOD_PING = "ping"
 METHOD_SET_SESSION_INFO = "set_session_info"

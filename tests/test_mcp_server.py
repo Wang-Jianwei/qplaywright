@@ -257,6 +257,34 @@ def test_connect_connection_replaces_existing(monkeypatch):
     assert created[0].connected == ("127.0.0.1", 19877, 5.0)
 
 
+def test_connect_connection_clears_existing_when_new_connect_fails(monkeypatch):
+    class FailingQPlaywright(FakeQPlaywright):
+        def connect(self, *, host: str, port: int, timeout: float, agent_name: str | None = None):
+            self.connected = (host, port, timeout)
+            raise ConnectionError("protocol mismatch")
+
+    monkeypatch.setattr(mcp_server, "QPlaywright", FailingQPlaywright)
+
+    existing_qplaywright = FakeQPlaywright()
+    existing_app = FakeApp([])
+    existing_connection = mcp_server.ManagedConnection(
+        name="default",
+        qplaywright=existing_qplaywright,
+        app=existing_app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+    state = mcp_server.ServerState(connection=existing_connection)
+
+    with pytest.raises(ConnectionError, match="protocol mismatch"):
+        mcp_server.connect_connection(state, host="127.0.0.1", port=19877, timeout=5.0)
+
+    assert existing_qplaywright.closed is True
+    assert existing_app.closed is True
+    assert state.connection is None
+
+
 def test_launch_connection_tracks_executable(monkeypatch):
     created: list[FakeQPlaywright] = []
 

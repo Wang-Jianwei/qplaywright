@@ -90,6 +90,8 @@ class QPlaywrightAgent;
 class QPlaywrightHandler;
 class QPlaywrightClientConnection;
 
+static const int QPLAYWRIGHT_PROTOCOL_VERSION = 1;
+
 enum class QPlaywrightInvokeErrorCode {
     None,
     MethodNotExposed,
@@ -2049,6 +2051,14 @@ private:
     QJsonValue dispatch(const QString &method, const QJsonObject &params)
     {
         auto &reg = QPlaywrightRegistry::instance();
+
+        // -- Handshake --
+        if (method == "handshake") {
+            QJsonObject r;
+            r["protocol_version"] = QPLAYWRIGHT_PROTOCOL_VERSION;
+            r["agent_kind"] = QStringLiteral("cpp");
+            return r;
+        }
 
         // -- Ping --
         if (method == "ping") {

@@ -21,6 +21,7 @@ from typing import Any, Generator
 from qplaywright.protocol import (
     DEFAULT_HOST,
     DEFAULT_PORT,
+    METHOD_HANDSHAKE,
     METHOD_CLICK,
     METHOD_DBLCLICK,
     METHOD_HOVER,
@@ -33,9 +34,40 @@ from qplaywright.protocol import (
     METHOD_WINDOW_SIZE,
     METHOD_WINDOW_RESIZE,
     METHOD_WINDOW_CLOSE,
+    PROTOCOL_VERSION,
 )
 from qplaywright.sync_api._connection import Connection
 from qplaywright.sync_api._locator import Locator
+
+
+class _ConnectSetupError(RuntimeError):
+    """Raised when the agent is reachable but connection setup cannot complete."""
+
+
+def _perform_handshake(conn: Connection) -> dict[str, Any]:
+    try:
+        result = conn.send(METHOD_HANDSHAKE)
+    except RuntimeError as exc:
+        raise _ConnectSetupError(f"handshake failed: {exc}") from exc
+
+    if not isinstance(result, dict):
+        raise _ConnectSetupError("handshake failed: agent returned a non-object response")
+
+    protocol_version = result.get("protocol_version")
+    if protocol_version != PROTOCOL_VERSION:
+        raise _ConnectSetupError(
+            f"protocol mismatch: client requires protocol_version={PROTOCOL_VERSION}, "
+            f"agent reported {protocol_version!r}"
+        )
+
+    return result
+
+
+def _advertise_agent_name(conn: Connection, agent_name: str) -> None:
+    try:
+        conn.send(METHOD_SET_SESSION_INFO, {"agentName": agent_name})
+    except RuntimeError as exc:
+        raise _ConnectSetupError(f"session setup failed: {exc}") from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -309,13 +341,19 @@ class QPlaywright:
         while time.monotonic() < deadline:
             try:
                 conn.connect()
-                # Verify with ping
-                conn.send(METHOD_PING)
+                _perform_handshake(conn)
                 if agent_name:
-                    conn.send(METHOD_SET_SESSION_INFO, {"agentName": agent_name})
+                    _advertise_agent_name(conn, agent_name)
                 return Application(conn, timeout=timeout)
+            except _ConnectSetupError as e:
+                conn.close()
+                raise ConnectionError(
+                    f"Could not connect to QPlaywright agent at {host}:{port} "
+                    f"(timeout={timeout}s): {e}"
+                ) from e
             except (ConnectionRefusedError, ConnectionError, OSError) as e:
                 last_error = e
+                conn.close()
                 time.sleep(backoff)
                 backoff = min(backoff * 2, max_backoff)
 

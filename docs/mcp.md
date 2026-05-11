@@ -88,6 +88,11 @@ qplaywright-mcp cli hover --x 320 --y 180
 qplaywright-mcp cli input w7 123.45 --submit
 ```
 
+`session attach` and `session launch` perform a formal protocol handshake as
+part of connection setup. A reachable agent with a mismatched
+`protocol_version` is rejected immediately; attach does not fall through to a
+partially connected session.
+
 Use `snapshot`, `find`, `resolve_object_names`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
 Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find` when you want a short candidate list for one predicate; use `resolve_object_names` when one known subtree already exposes several deliberate stable `object_name` values.
 
@@ -96,7 +101,7 @@ If the active window is not the desired scope, switch it first with `window sele
 
 ## Typical Tool Flow
 
-1. `session` with `action="attach"` or `action="launch"` to establish the active session.
+1. `session` with `action="attach"` or `action="launch"` to establish the active session through TCP connect plus formal protocol handshake.
 2. `window` with `action="list"` to list visible top-level windows.
 3. `window` with `action="select"` when the desired scope is not the current active window.
 4. `snapshot`, `find`, `resolve_object_names`, or `inspect` to understand the widget tree and obtain stable handles.
@@ -231,6 +236,9 @@ Supported actions:
 - `launch`
 - `status`
 - `close`
+
+`attach` and `launch` only succeed after the remote agent completes the formal
+handshake and reports the same `protocol_version` as the client.
 
 `launch` additionally accepts:
 

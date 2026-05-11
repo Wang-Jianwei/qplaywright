@@ -137,6 +137,11 @@ qplaywright> find {"text": "Start", "limit": 1}
 qplaywright> click {"target": "w12"}
 ```
 
+Both direct `QPlaywright().connect(...)` and MCP `session attach` / `session launch`
+now perform a formal protocol handshake immediately after the TCP connection is
+established. If the remote agent reports a different `protocol_version`, the
+connection is rejected immediately instead of failing later on the first tool call.
+
 Use `snapshot`, `find`, `resolve_object_names`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
 Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find` when you want a short candidate list for one predicate; use `resolve_object_names` when one known subtree already exposes several deliberate stable `object_name` values.
 
