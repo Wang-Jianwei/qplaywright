@@ -1967,7 +1967,7 @@ private:
         return properties;
     }
 
-    QJsonObject serializeWidgetTree(QWidget *w, int depth = 0, int maxDepth = 10, bool topmostOnly = false)
+    QJsonObject serializeWidgetTree(QWidget *w, int depth = 0, int maxDepth = 10, bool topmostOnly = false, bool includeInteractable = false)
     {
         if (isAutomationOverlayWidget(w))
             throw std::runtime_error("Automation overlay widgets are excluded from snapshot capture");
@@ -2020,6 +2020,9 @@ private:
         geo.append(w->height());
         obj["geometry"] = geo;
 
+        if (includeInteractable)
+            obj["interactable"] = findInteractable(w);
+
         if (auto *cb = qobject_cast<const QCheckBox *>(w))
             obj["checked"] = cb->isChecked();
         if (auto *rb = qobject_cast<const QRadioButton *>(w))
@@ -2041,7 +2044,7 @@ private:
                     continue;
                 if (topmostOnly && !isTopmostVisibleWidget(cw))
                     continue;
-                children.append(serializeWidgetTree(cw, depth + 1, maxDepth, topmostOnly));
+                children.append(serializeWidgetTree(cw, depth + 1, maxDepth, topmostOnly, includeInteractable));
             }
             if (!children.isEmpty())
                 obj["children"] = children;
@@ -2073,7 +2076,13 @@ private:
             if (widgets.isEmpty()) return QJsonValue::Null;
             QWidget *w = widgets.first();
             int wid = reg.registerWidget(w);
-            QJsonObject r = serializeWidgetTree(w, 0, params["max_depth"].toInt(0));
+            QJsonObject r = serializeWidgetTree(
+                w,
+                0,
+                params["max_depth"].toInt(0),
+                false,
+                params.value("include_interactable").toBool(false)
+            );
             r["wid"] = wid;
             return r;
         }
@@ -2083,7 +2092,13 @@ private:
             QJsonArray arr;
             for (QWidget *w : widgets) {
                 int wid = reg.registerWidget(w);
-                QJsonObject r = serializeWidgetTree(w, 0, params["max_depth"].toInt(0));
+                QJsonObject r = serializeWidgetTree(
+                    w,
+                    0,
+                    params["max_depth"].toInt(0),
+                    false,
+                    params.value("include_interactable").toBool(false)
+                );
                 r["wid"] = wid;
                 arr.append(r);
             }
@@ -2097,6 +2112,7 @@ private:
         if (method == "widget_tree") {
             int maxDepth = params["max_depth"].toInt(10);
             const bool topmostOnly = params["topmost_only"].toBool(false);
+            const bool includeInteractable = params.value("include_interactable").toBool(false);
             QJsonArray arr;
             QList<QWidget *> roots;
             if (params.contains("wid")) {
@@ -2109,7 +2125,7 @@ private:
             }
             for (QWidget *w : roots) {
                 if (w->isVisible())
-                    arr.append(serializeWidgetTree(w, 0, maxDepth, topmostOnly));
+                    arr.append(serializeWidgetTree(w, 0, maxDepth, topmostOnly, includeInteractable));
             }
             return arr;
         }

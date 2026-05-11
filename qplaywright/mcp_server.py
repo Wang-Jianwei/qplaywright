@@ -749,9 +749,14 @@ def _widget_tree_raw(
     max_depth: int,
     window_wid: int | None = None,
     topmost_only: bool = False,
+    include_interactable: bool = False,
     timeout: float | None = None,
 ) -> list[dict[str, Any]]:
-    params: dict[str, Any] = {"max_depth": max_depth, "topmost_only": topmost_only}
+    params: dict[str, Any] = {
+        "max_depth": max_depth,
+        "topmost_only": topmost_only,
+        "include_interactable": include_interactable,
+    }
     if window_wid is not None:
         params["wid"] = window_wid
     return connection.app._conn.send(METHOD_WIDGET_TREE, params, timeout=timeout)
@@ -1556,6 +1561,17 @@ def _geometry_help_text() -> str:
     )
 
 
+def _snapshot_state_markers(node: dict[str, Any]) -> list[str]:
+    markers: list[str] = []
+    if node.get("visible") is False:
+        markers.append("[hidden]")
+    if node.get("enabled") is False:
+        markers.append("[disabled]")
+    if node.get("interactable") is False:
+        markers.append("[non-interactable]")
+    return markers
+
+
 def _format_widget_snapshot(nodes: list[dict[str, Any]], *, depth: int = 10, level: int = 0) -> str:
     if level > depth:
         return ""
@@ -1567,7 +1583,7 @@ def _format_widget_snapshot(nodes: list[dict[str, Any]], *, depth: int = 10, lev
         label, marker = _snapshot_display_label(node)
         item_view_marker = _snapshot_item_view_marker(node)
         text_part = f' "{label}"' if label else ""
-        markers = " ".join(part for part in (marker, item_view_marker) if part)
+        markers = " ".join(part for part in (marker, item_view_marker, *_snapshot_state_markers(node)) if part)
         marker_part = f" {markers}" if markers else ""
         line = f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{transparent_part}"
         lines.append(line)
@@ -1640,6 +1656,9 @@ def _snapshot_entry(node: dict[str, Any], handle: str | None) -> dict[str, Any]:
         if value is None or value == "":
             continue
         entry[output_key] = value
+    for key in ("visible", "enabled", "interactable"):
+        if node.get(key) is False:
+            entry[key] = False
     item_view = node.get("itemView")
     if isinstance(item_view, dict) and item_view:
         entry["item_view"] = dict(item_view)
@@ -1714,7 +1733,8 @@ def _render_snapshot_tree(
         transparent_part = " !transparent" if _is_mouse_transparent(node) else ""
         label, marker = _snapshot_display_label(node)
         text_part = f' "{label}"' if label else ""
-        marker_part = f" {marker}" if marker else ""
+        markers = " ".join(part for part in (marker, *_snapshot_state_markers(node)) if part)
+        marker_part = f" {markers}" if markers else ""
         active_part = " [active]" if wid == connection.active_window_wid else ""
         lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{active_part}{handle_part}{transparent_part}")
         widgets.append(_snapshot_entry(node, handle))
@@ -2056,6 +2076,7 @@ def _snapshot_result(
                 max_depth=depth,
                 window_wid=managed_connection.active_window_wid,
                 topmost_only=topmost_only,
+                include_interactable=True,
                 timeout=timeout,
             ),
             depth=depth,
@@ -2064,7 +2085,7 @@ def _snapshot_result(
 
     node = managed_connection.app._conn.send(
         METHOD_FIND,
-        target_params,
+        {**target_params, "include_interactable": True},
         timeout=timeout if timeout is not None else managed_connection.timeout,
     )
     if node is None:
@@ -2528,6 +2549,10 @@ if FastMCP is not None:
         - widget geometry fields use Rect4: [x, y, width, height]
         - subtree widget geometry is widget-local, usually relative to the parent widget
         - top-level window geometry is screen-space
+
+        Snapshot state semantics:
+        - widget entries only emit visible, enabled, and interactable when the value is false
+        - text snapshot lines add [hidden], [disabled], and [non-interactable] only when those states apply
         """
 
         connection_state = _get_connection(_SERVER_STATE)

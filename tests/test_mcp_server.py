@@ -2090,6 +2090,24 @@ def test_format_widget_snapshot_marks_mouse_transparent_widgets():
     assert "!transparent" in snapshot
 
 
+def test_format_widget_snapshot_marks_negative_state_flags_only_when_false():
+    snapshot = mcp_server._format_widget_snapshot(
+        [
+            {
+                "class": "QPushButton",
+                "text": "Login",
+                "visible": False,
+                "enabled": False,
+                "interactable": False,
+                "children": [],
+            }
+        ],
+        depth=3,
+    )
+
+    assert snapshot == '- QPushButton "Login" [hidden] [disabled] [non-interactable]'
+
+
 def test_snapshot_entry_wraps_special_attributes():
     entry = mcp_server._snapshot_entry(
         {
@@ -2102,6 +2120,42 @@ def test_snapshot_entry_wraps_special_attributes():
     )
 
     assert entry["attribute"] == {"transparent_for_mouse_events": True}
+
+
+def test_snapshot_entry_emits_false_state_flags_only():
+    entry = mcp_server._snapshot_entry(
+        {
+            "wid": 11,
+            "class": "QPushButton",
+            "objectName": "submit_btn",
+            "visible": False,
+            "enabled": False,
+            "interactable": False,
+        },
+        "w1",
+    )
+
+    assert entry["visible"] is False
+    assert entry["enabled"] is False
+    assert entry["interactable"] is False
+
+
+def test_snapshot_entry_omits_true_state_flags():
+    entry = mcp_server._snapshot_entry(
+        {
+            "wid": 11,
+            "class": "QPushButton",
+            "objectName": "submit_btn",
+            "visible": True,
+            "enabled": True,
+            "interactable": True,
+        },
+        "w1",
+    )
+
+    assert "visible" not in entry
+    assert "enabled" not in entry
+    assert "interactable" not in entry
 
 
 def test_snapshot_payload_creates_stable_handles():
@@ -2129,6 +2183,8 @@ def test_snapshot_payload_creates_stable_handles():
                         "class": "QPushButton",
                         "objectName": "login_btn",
                         "text": "Login",
+                        "enabled": False,
+                        "interactable": False,
                         "children": [],
                     }
                 ],
@@ -2138,9 +2194,13 @@ def test_snapshot_payload_creates_stable_handles():
 
     assert "@w1" in payload["snapshot"]
     assert "@w2" in payload["snapshot"]
+    assert "[disabled]" in payload["snapshot"]
+    assert "[non-interactable]" in payload["snapshot"]
     assert connection.handle_to_wid == {"w1": 1, "w2": 2}
     assert payload["widgets"][1]["handle"] == "w2"
     assert payload["widgets"][1]["object_name"] == "login_btn"
+    assert payload["widgets"][1]["enabled"] is False
+    assert payload["widgets"][1]["interactable"] is False
 
 
 def test_snapshot_payload_filters_infrastructure_widgets_by_default():
@@ -2268,6 +2328,7 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
                 "class": "DemoWindow",
                 "objectName": "",
                 "text": "Dialog",
+                "visible": False,
                 "geometry": [0, 0, 320, 180],
                 "children": [
                     {
@@ -2275,6 +2336,8 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
                         "class": "QPushButton",
                         "objectName": "confirm_btn",
                         "text": "Confirm",
+                        "enabled": False,
+                        "interactable": False,
                         "geometry": [40, 60, 80, 24],
                         "children": [],
                     }
@@ -2299,16 +2362,20 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
     result = mcp_server._snapshot_result(connection, target="w9", depth=3)
 
     assert transport.calls == [
-        {"method": "find", "params": {"wid": 42, "max_depth": 3}, "timeout": 30.0},
+        {"method": "find", "params": {"wid": 42, "max_depth": 3, "include_interactable": True}, "timeout": 30.0},
         {"method": "list_windows", "params": None, "timeout": None},
     ]
     assert connection.handle_to_wid == {"w9": 42, "w10": 43}
     assert connection.wid_to_handle == {42: "w9", 43: "w10"}
     assert result["root_handle"] == "w9"
+    assert "[hidden]" in result["snapshot"]
+    assert "[disabled]" in result["snapshot"]
+    assert "[non-interactable]" in result["snapshot"]
     assert result["widgets"] == [
         {
             "handle": "w9",
             "class": "DemoWindow",
+            "visible": False,
             "geometry": [0, 0, 320, 180],
             "text": "Dialog",
         },
@@ -2316,6 +2383,8 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
             "handle": "w10",
             "class": "QPushButton",
             "object_name": "confirm_btn",
+            "enabled": False,
+            "interactable": False,
             "geometry": [40, 60, 80, 24],
             "text": "Confirm",
         },
@@ -3108,7 +3177,10 @@ def test_widget_tree_raw_includes_optional_window_wid():
 
     mcp_server._widget_tree_raw(connection, max_depth=4, window_wid=12, topmost_only=True)
 
-    assert captured == {"method": mcp_server.METHOD_WIDGET_TREE, "params": {"max_depth": 4, "topmost_only": True, "wid": 12}}
+    assert captured == {
+        "method": mcp_server.METHOD_WIDGET_TREE,
+        "params": {"max_depth": 4, "topmost_only": True, "include_interactable": False, "wid": 12},
+    }
 
 
 def test_find_widgets_raw_uses_protocol_method_and_root_wid():
@@ -3437,7 +3509,13 @@ def test_snapshot_result_scopes_to_active_window(monkeypatch):
 
     payload = mcp_server._snapshot_result(connection, depth=3, topmost_only=True)
 
-    assert captured["kwargs"] == {"max_depth": 3, "window_wid": 22, "topmost_only": True, "timeout": None}
+    assert captured["kwargs"] == {
+        "max_depth": 3,
+        "window_wid": 22,
+        "topmost_only": True,
+        "include_interactable": True,
+        "timeout": None,
+    }
     assert 'DialogWindow "Dialog"' in payload["snapshot"]
     assert payload["root_handle"] == "w1"
     assert payload["widgets"][0]["handle"] == "w1"

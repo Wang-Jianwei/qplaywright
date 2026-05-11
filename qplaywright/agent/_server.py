@@ -869,7 +869,14 @@ def _iter_tree_children(widget, *, topmost_only: bool = False):
         yield child
 
 
-def _widget_tree_to_dict(widget, *, depth: int = 0, max_depth: int = 50, topmost_only: bool = False) -> dict:
+def _widget_tree_to_dict(
+    widget,
+    *,
+    depth: int = 0,
+    max_depth: int = 50,
+    topmost_only: bool = False,
+    include_interactable: bool = False,
+) -> dict:
     """Serialize a widget tree and include stable widget ids for each node."""
 
     if _is_automation_overlay_widget(widget):
@@ -877,12 +884,20 @@ def _widget_tree_to_dict(widget, *, depth: int = 0, max_depth: int = 50, topmost
 
     info = widget_to_dict(widget, depth=depth, max_depth=depth)
     info["wid"] = _registry.register(widget)
+    if include_interactable:
+        info["interactable"] = _find_interactable(widget)
 
     if depth < max_depth:
         children = []
         for child in _iter_tree_children(widget, topmost_only=topmost_only):
             children.append(
-                _widget_tree_to_dict(child, depth=depth + 1, max_depth=max_depth, topmost_only=topmost_only)
+                _widget_tree_to_dict(
+                    child,
+                    depth=depth + 1,
+                    max_depth=max_depth,
+                    topmost_only=topmost_only,
+                    include_interactable=include_interactable,
+                )
             )
         if children:
             info["children"] = children
@@ -2909,6 +2924,10 @@ def _handle_command(req: Request) -> Any:
             return None
         w = widgets[0]
         wid = _registry.register(w)
+        if bool(params.get("include_interactable", False)):
+            result = _widget_tree_to_dict(w, max_depth=params.get("max_depth", 0), include_interactable=True)
+            result["wid"] = wid
+            return result
         return {"wid": wid, **widget_to_dict(w, max_depth=params.get("max_depth", 0))}
 
     if method == METHOD_FIND_ALL:
@@ -2916,7 +2935,12 @@ def _handle_command(req: Request) -> Any:
         result = []
         for w in widgets:
             wid = _registry.register(w)
-            result.append({"wid": wid, **widget_to_dict(w, max_depth=params.get("max_depth", 0))})
+            if bool(params.get("include_interactable", False)):
+                entry = _widget_tree_to_dict(w, max_depth=params.get("max_depth", 0), include_interactable=True)
+                entry["wid"] = wid
+                result.append(entry)
+            else:
+                result.append({"wid": wid, **widget_to_dict(w, max_depth=params.get("max_depth", 0))})
         return result
 
     if method == METHOD_FIND_WIDGETS:
@@ -2925,6 +2949,7 @@ def _handle_command(req: Request) -> Any:
     if method == METHOD_WIDGET_TREE:
         wid = params.get("wid")
         topmost_only = bool(params.get("topmost_only", False))
+        include_interactable = bool(params.get("include_interactable", False))
         if wid is not None:
             root = _registry.get(wid)
             if root is None:
@@ -2933,7 +2958,12 @@ def _handle_command(req: Request) -> Any:
         else:
             roots = _get_interactable_top_level_widgets()
         return [
-            _widget_tree_to_dict(r, max_depth=params.get("max_depth", 10), topmost_only=topmost_only)
+            _widget_tree_to_dict(
+                r,
+                max_depth=params.get("max_depth", 10),
+                topmost_only=topmost_only,
+                include_interactable=include_interactable,
+            )
             for r in roots
             if r.isVisible()
         ]
