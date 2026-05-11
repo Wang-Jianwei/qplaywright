@@ -601,7 +601,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 ```json
 {
-  "owner": "w77",
+  "target": "w77",
   "max_rows": 50,
   "max_depth": 4,
   "max_items": 200,

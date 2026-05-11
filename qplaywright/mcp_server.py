@@ -1430,13 +1430,13 @@ def _wait_for_item_locator_state(locator: ItemLocator, *, state: str, timeout: f
 def _item_view_inspect(
     connection: ManagedConnection,
     *,
-    owner: str,
+    target: str,
     max_rows: int,
     max_depth: int,
     max_items: int,
     include_hidden: bool,
 ) -> dict[str, Any]:
-    owner_locator = _resolve_locator(connection, target=owner)
+    owner_locator = _resolve_locator(connection, target=target)
     resolve_owner_wid = getattr(owner_locator, "_resolve_owner_wid", None)
     if not callable(resolve_owner_wid):
         raise RuntimeError("Resolved owner locator does not expose owner widget resolution")
@@ -1470,7 +1470,7 @@ def _item_view_inspect(
         enriched = dict(entry)
         descriptor = enriched.get("item")
         if isinstance(descriptor, dict):
-            enriched["target"] = {"owner": owner, "item": dict(descriptor)}
+            enriched["target"] = {"owner": target, "item": dict(descriptor)}
         items.append(enriched)
     payload["items"] = items
     return payload
@@ -2707,7 +2707,7 @@ if FastMCP is not None:
 
     @mcp.tool()
     def inspect_items(
-        owner: WidgetDiscoveryTargetArg,
+        target: WidgetDiscoveryTargetArg,
         max_rows: InspectItemsMaxRowsArg = 20,
         max_depth: InspectItemsMaxDepthArg = 4,
         max_items: InspectItemsMaxItemsArg = 200,
@@ -2725,7 +2725,7 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE)
         payload = _item_view_inspect(
             connection_state,
-            owner=owner,
+            target=target,
             max_rows=max_rows,
             max_depth=max_depth,
             max_items=max_items,
@@ -2733,7 +2733,7 @@ if FastMCP is not None:
         )
         return {
             "ok": True,
-            "owner": owner,
+            "target": target,
             **payload,
         }
 

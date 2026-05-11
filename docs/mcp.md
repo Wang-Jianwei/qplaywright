@@ -457,7 +457,7 @@ Request:
 
 ```json
 {
-  "owner": "w9",
+  "target": "w9",
   "max_depth": 3,
   "max_items": 50
 }
@@ -475,8 +475,7 @@ When an item is actively being edited and the live editor value differs, the sam
 entry may also include `edit_value`. This lets an agent distinguish committed model
 state from an in-flight editor state such as `text="Active"` with `edit_value="Pending"`.
 
-When `target` is omitted and `topmost_only=true`, the returned tree is an
-approximate frontmost-visible view and may be incomplete.
+Use `target` to name the owner widget you want to enumerate.
 
 ### Action Tools
 

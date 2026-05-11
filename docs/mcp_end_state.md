@@ -322,7 +322,7 @@ Qt 业务自动化的中心应当是：
 
 建议参数：
 
-- `owner`
+- `target`
 - `max_rows`
 - `max_depth`
 - `max_items`
@@ -707,7 +707,7 @@ Qt 业务自动化的中心应当是：
 3. `snapshot(depth=2 or 3)` 获取结构概览
 4. `find(root=..., ...)` 缩小候选范围
 5. `inspect(target=...)` 确认目标
-6. `click|input|invoke|choose|wait` 或 `inspect_items(owner=...)`
+6. `click|input|invoke|choose|wait` 或 `inspect_items(target=...)`
 
 这意味着服务端内部需要持有：
 

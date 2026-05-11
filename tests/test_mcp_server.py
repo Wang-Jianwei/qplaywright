@@ -515,11 +515,11 @@ def test_inspect_items_wraps_entries_with_reusable_targets(monkeypatch):
     )
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
 
-    result = mcp_server.inspect_items(owner="#tree", max_depth=2)
+    result = mcp_server.inspect_items(target="#tree", max_depth=2)
 
     assert result == {
         "ok": True,
-        "owner": "#tree",
+        "target": "#tree",
         "kind": "tree",
         "items": [
             {
@@ -566,11 +566,11 @@ def test_inspect_items_wraps_tab_entries_with_reusable_targets(monkeypatch):
     )
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
 
-    result = mcp_server.inspect_items(owner="#main_tabs", max_items=10)
+    result = mcp_server.inspect_items(target="#main_tabs", max_items=10)
 
     assert result == {
         "ok": True,
-        "owner": "#main_tabs",
+        "target": "#main_tabs",
         "kind": "tab",
         "items": [
             {
