@@ -80,17 +80,24 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 
 它们的解析规则与 widget observation/search target 一致：优先解析 stable handle，否则按 selector 解析。
 
-### Rect Array
+### Rect4
 
-所有紧凑矩形数组统一使用 `[x, y, width, height]`。
+`Rect4 = [x, y, width, height]`
+
+语义：
+
+- `x`: 左上角横坐标
+- `y`: 左上角纵坐标
+- `width`: 宽度
+- `height`: 高度
 
 适用字段：
 
-- `geometry`
-- `bounding_box`
-- `global_bounding_box`
+- `geometry: Rect4`
+- `bounding_box: Rect4`
+- `global_bounding_box: Rect4`
 
-该顺序是正式契约的一部分，调用方不得自行猜测或重排。
+该顺序是正式契约的一部分，调用方不得自行猜测、重排或在别处改成另一种槽位顺序。
 
 ### Include Snapshot
 
@@ -126,7 +133,7 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 - `index`: 当前窗口列表中的索引
 - `is_active`: 是否为当前 active window
 - `is_modal`: 是否为模态窗口
-- `geometry`: 窗口布局数据，统一使用 `[x, y, width, height]`
+- `geometry: Rect4`，窗口布局数据
 
 ### SnapshotWidgetEntry
 
@@ -144,7 +151,7 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 
 - `handle` 是 exact widget follow-up action 的稳定标识
 - `attribute` 为可选字段，用于承载特殊属性，例如 `{"transparent_for_mouse_events": true}`
-- `geometry` 遵循 `Rect Array` 的固定槽位语义
+- `geometry: Rect4`
 
 ### WidgetTreeNode
 
@@ -564,6 +571,10 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 ```
 
 可选 `attribute` 字段用于暴露结构化特殊属性，例如 `{"transparent_for_mouse_events": true}`。
+
+- `geometry: Rect4`
+- `global_bounding_box: Rect4`
+- `bounding_box: Rect4`
 
 ### Inspect Response: Debug Tree Mode
 
