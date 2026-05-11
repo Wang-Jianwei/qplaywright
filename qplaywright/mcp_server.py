@@ -2142,9 +2142,12 @@ def _snapshot_result(
             include_infrastructure=include_infrastructure,
         )
 
+    assert target_params is not None
+    find_params = dict(target_params)
+    find_params["include_interactable"] = True
     node = managed_connection.app._conn.send(
         METHOD_FIND,
-        {**target_params, "include_interactable": True},
+        find_params,
         timeout=timeout if timeout is not None else managed_connection.timeout,
     )
     if node is None:

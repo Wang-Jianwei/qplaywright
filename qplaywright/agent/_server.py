@@ -3421,10 +3421,14 @@ def _point_xy(point) -> tuple[int, int]:
     return _point_coordinate(point, "x"), _point_coordinate(point, "y")
 
 
+def _qt_point(x_value: int, y_value: int):
+    qt_core = _qt_core_module()
+    return qt_core.QPoint(x_value, y_value)
+
+
 def _offset_point(point, dx: int, dy: int):
-    point_type = type(point)
     x_value, y_value = _point_xy(point)
-    return point_type(x_value + dx, y_value + dy)
+    return _qt_point(x_value + dx, y_value + dy)
 
 
 def _point_within_widget_mask(widget, local_point) -> bool:
@@ -3512,8 +3516,6 @@ def _checkable_style_click_points(widget) -> list:
     height = _widget_dimension(widget, "height")
     candidates = []
     seen: set[tuple[int, int]] = set()
-    point_type = type(_widget_center_point(widget))
-
     for sub_element_name in sub_elements:
         sub_element = getattr(qstyle, sub_element_name, None)
         if sub_element is None:
@@ -3535,7 +3537,7 @@ def _checkable_style_click_points(widget) -> list:
         if key in seen:
             continue
         seen.add(key)
-        candidates.append(point_type(x_value, y_value))
+        candidates.append(_qt_point(x_value, y_value))
 
     return candidates
 
@@ -3551,8 +3553,7 @@ def _preferred_click_points(widget) -> list:
         if key in seen:
             return
         seen.add(key)
-        point_type = type(center)
-        candidates.append(point_type(x_value, y_value))
+        candidates.append(_qt_point(x_value, y_value))
 
     for point in _checkable_style_click_points(widget):
         add_point(_point_coordinate(point, "x"), _point_coordinate(point, "y"))
