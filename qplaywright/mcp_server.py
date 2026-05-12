@@ -1713,14 +1713,15 @@ def _snapshot_item_view_marker(node: dict[str, Any]) -> str:
     return f"[item-view={kind}]"
 
 
-def _snapshot_entry(node: dict[str, Any], handle: str | None) -> dict[str, Any]:
+def _snapshot_entry(node: dict[str, Any], handle: str | None, *, include_geometry: bool = True) -> dict[str, Any]:
     entry = {
         "handle": handle,
         "class": node.get("class", ""),
     }
-    compact_geometry = _compact_geometry(node.get("geometry"))
-    if compact_geometry is not None:
-        entry["geometry"] = compact_geometry
+    if include_geometry:
+        compact_geometry = _compact_geometry(node.get("geometry"))
+        if compact_geometry is not None:
+            entry["geometry"] = compact_geometry
     attribute = _attribute_summary(node)
     if attribute is not None:
         entry["attribute"] = attribute
@@ -1801,7 +1802,7 @@ def _render_snapshot_tree(
         seen_wids = set()
 
     lines: list[str] = []
-    widgets: list[dict[str, Any]] = []
+    tree: list[dict[str, Any]] = []
 
     for node in nodes:
         wid = node.get("wid")
@@ -1819,19 +1820,20 @@ def _render_snapshot_tree(
         marker_part = f" {markers}" if markers else ""
         active_part = " [active]" if wid == connection.active_window_wid else ""
         lines.append(f"{'  ' * level}- {node.get('class', '?')}{text_part}{marker_part}{active_part}{handle_part}{transparent_part}")
-        widgets.append(_snapshot_entry(node, handle))
 
-        child_lines, child_refs = _render_snapshot_tree(
+        child_lines, child_tree = _render_snapshot_tree(
             connection,
             node.get("children") or [],
             depth=depth,
             level=level + 1,
             seen_wids=seen_wids,
         )
+        entry = _snapshot_entry(node, handle, include_geometry=False)
+        entry["children"] = child_tree
         lines.extend(child_lines)
-        widgets.extend(child_refs)
+        tree.append(entry)
 
-    return lines, widgets
+    return lines, tree
 
 
 def _snapshot_window_payload(connection: ManagedConnection) -> dict[str, Any] | None:
@@ -1858,7 +1860,7 @@ def _snapshot_payload(
     if not include_infrastructure:
         nodes = _filter_infrastructure_nodes(nodes, preserve_roots=preserve_roots)
 
-    lines, widgets = _render_snapshot_tree(connection, nodes, depth=depth)
+    lines, tree = _render_snapshot_tree(connection, nodes, depth=depth)
     root_wid = None
     if nodes:
         candidate = nodes[0].get("wid")
@@ -1870,7 +1872,7 @@ def _snapshot_payload(
         "window": _snapshot_window_payload(connection),
         "root_handle": root_handle,
         "snapshot": "\n".join(lines),
-        "widgets": widgets,
+        "tree": tree,
     }
 
 
@@ -2628,20 +2630,19 @@ if FastMCP is not None:
         Use target plus depth when you want to inspect one subtree and capture
         several child handles in one call.
 
-        The returned payload is JSON-first. Use `widgets` and `root_handle` as
+        The returned payload is JSON-first. Use `tree` and `root_handle` as
         the primary observation surface. `save_to` can still export the internal
         text snapshot for external debugging.
 
         When topmost_only is true, the window-wide snapshot becomes an approximate
         frontmost-visible view and may be incomplete.
 
-        Geometry semantics:
-        - widget geometry fields use Rect4: [x, y, width, height]
-        - subtree widget geometry is widget-local, usually relative to the parent widget
-        - top-level window geometry is screen-space
+        Snapshot tree semantics:
+        - tree nodes expose stable handles, semantic labels, sparse negative state, and children
+        - tree nodes omit geometry by default; use inspect when you need geometry or screen-space bounds
 
         Snapshot state semantics:
-        - widget entries only emit visible, enabled, and interactable when the value is false
+        - tree nodes only emit visible, enabled, and interactable when the value is false
         - text snapshot lines add [hidden], [disabled], and [non-interactable] only when those states apply
         """
 

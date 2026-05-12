@@ -27,6 +27,16 @@ from examples.test_mcp_demo import (
 DEMO_PORT = 29876
 
 
+def _iter_snapshot_tree(nodes: list[dict[str, object]]) -> list[dict[str, object]]:
+    flattened: list[dict[str, object]] = []
+    for node in nodes:
+        flattened.append(node)
+        children = node.get("children")
+        if isinstance(children, list):
+            flattened.extend(_iter_snapshot_tree(children))
+    return flattened
+
+
 async def main() -> None:
     root = _project_root()
     env = _python_path_env(root)
@@ -53,7 +63,7 @@ async def main() -> None:
                 await _attach_session(session, port=DEMO_PORT, timeout=60.0)
 
                 snapshot = await _call_tool(session, "snapshot", {"depth": 12})
-                print(snapshot["widgets"])
+                print(snapshot["tree"])
 
                 handles_by_target = await _discover_widget_handles(
                     session,
@@ -170,8 +180,9 @@ async def main() -> None:
                 assert login_button["exists"] is True
 
                 status = await _call_tool(session, "snapshot", {"target": status_handle, "depth": 0})
-                print(f"Status snapshot: {status['widgets']}")
-                assert any(widget.get("text") == "payment=JPY 90.9 precision=1 adjustments=on" for widget in status["widgets"])
+                status_nodes = _iter_snapshot_tree(status["tree"])
+                print(f"Status snapshot: {status['tree']}")
+                assert any(widget.get("text") == "payment=JPY 90.9 precision=1 adjustments=on" for widget in status_nodes)
 
                 screenshot = await _call_tool(
                     session,

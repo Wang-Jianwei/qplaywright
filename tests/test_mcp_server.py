@@ -225,7 +225,7 @@ def _v2_snapshot_payload(label: str, *, handle: str = "w1", class_name: str = "D
     return {
         "snapshot": f"- {label} @{handle}",
         "root_handle": handle,
-        "widgets": [{"handle": handle, "class": class_name}],
+        "tree": [{"handle": handle, "class": class_name, "children": []}],
     }
 
 
@@ -1088,7 +1088,7 @@ def test_snapshot_payload_returns_v2_handle_shape():
 
     assert payload["ok"] is True
     assert payload["root_handle"] == "w1"
-    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title"}]
+    assert payload["tree"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title", "children": []}]
     assert "refs" not in payload
     assert "epoch" not in payload
 
@@ -2670,10 +2670,24 @@ def test_snapshot_payload_creates_stable_handles():
     assert "[disabled]" in payload["snapshot"]
     assert "[non-interactable]" in payload["snapshot"]
     assert connection.handle_to_wid == {"w1": 1, "w2": 2}
-    assert payload["widgets"][1]["handle"] == "w2"
-    assert payload["widgets"][1]["object_name"] == "login_btn"
-    assert payload["widgets"][1]["enabled"] is False
-    assert payload["widgets"][1]["interactable"] is False
+    assert payload["tree"] == [
+        {
+            "handle": "w1",
+            "class": "DemoWindow",
+            "text": "Title",
+            "children": [
+                {
+                    "handle": "w2",
+                    "class": "QPushButton",
+                    "object_name": "login_btn",
+                    "text": "Login",
+                    "enabled": False,
+                    "interactable": False,
+                    "children": [],
+                }
+            ],
+        }
+    ]
 
 
 def test_snapshot_payload_filters_infrastructure_widgets_by_default():
@@ -2715,7 +2729,22 @@ def test_snapshot_payload_filters_infrastructure_widgets_by_default():
     )
 
     assert "qt_scrollarea_viewport" not in payload["snapshot"]
-    assert [entry["handle"] for entry in payload["widgets"]] == ["w1", "w2"]
+    assert payload["tree"] == [
+        {
+            "handle": "w1",
+            "class": "DemoWindow",
+            "text": "Title",
+            "children": [
+                {
+                    "handle": "w2",
+                    "class": "QPushButton",
+                    "object_name": "login_btn",
+                    "text": "Login",
+                    "children": [],
+                }
+            ],
+        }
+    ]
     assert connection.handle_to_wid == {"w1": 1, "w2": 3}
 
 
@@ -2751,7 +2780,21 @@ def test_snapshot_payload_can_include_infrastructure_widgets_when_requested():
         include_infrastructure=True,
     )
 
-    assert payload["widgets"][1]["object_name"] == "qt_scrollarea_viewport"
+    assert payload["tree"] == [
+        {
+            "handle": "w1",
+            "class": "DemoWindow",
+            "text": "Title",
+            "children": [
+                {
+                    "handle": "w2",
+                    "class": "QWidget",
+                    "object_name": "qt_scrollarea_viewport",
+                    "children": [],
+                }
+            ],
+        }
+    ]
 
 
 def test_snapshot_payload_preserves_existing_handle_bindings():
@@ -2781,12 +2824,12 @@ def test_snapshot_payload_preserves_existing_handle_bindings():
         ],
     )
 
-    assert payload["widgets"] == [
+    assert payload["tree"] == [
         {
             "handle": "w10",
             "class": "DemoWindow",
-            "geometry": [10, 20, 640, 480],
             "window_title": "Title",
+            "children": [],
         }
     ]
     assert connection.handle_to_wid == {"w9": 99, "w10": 1}
@@ -2844,22 +2887,23 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
     assert "[hidden]" in result["snapshot"]
     assert "[disabled]" in result["snapshot"]
     assert "[non-interactable]" in result["snapshot"]
-    assert result["widgets"] == [
+    assert result["tree"] == [
         {
             "handle": "w9",
             "class": "DemoWindow",
             "visible": False,
-            "geometry": [0, 0, 320, 180],
             "text": "Dialog",
-        },
-        {
-            "handle": "w10",
-            "class": "QPushButton",
-            "object_name": "confirm_btn",
-            "enabled": False,
-            "interactable": False,
-            "geometry": [40, 60, 80, 24],
-            "text": "Confirm",
+            "children": [
+                {
+                    "handle": "w10",
+                    "class": "QPushButton",
+                    "object_name": "confirm_btn",
+                    "enabled": False,
+                    "interactable": False,
+                    "text": "Confirm",
+                    "children": [],
+                }
+            ],
         },
     ]
 
@@ -2899,7 +2943,22 @@ def test_snapshot_result_preserves_target_root_when_it_matches_infrastructure():
 
     result = mcp_server._snapshot_result(connection, target="w9", depth=2)
 
-    assert [entry["handle"] for entry in result["widgets"]] == ["w9", "w10"]
+    assert result["tree"] == [
+        {
+            "handle": "w9",
+            "class": "QWidget",
+            "object_name": "qt_scrollarea_viewport",
+            "children": [
+                {
+                    "handle": "w10",
+                    "class": "QPushButton",
+                    "object_name": "confirm_btn",
+                    "text": "Confirm",
+                    "children": [],
+                }
+            ],
+        }
+    ]
 
 
 def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
@@ -2920,7 +2979,7 @@ def test_snapshot_payload_deduplicates_repeated_wids_within_one_snapshot():
         ],
     )
 
-    assert payload["widgets"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title"}]
+    assert payload["tree"] == [{"handle": "w1", "class": "DemoWindow", "text": "Title", "children": []}]
     assert payload["snapshot"].count("@w1") == 1
 
 
@@ -3036,7 +3095,7 @@ def test_run_cli_help_snapshot_mentions_targeted_subtree_capture(capsys):
     output = capsys.readouterr().out
     assert "inspect one subtree and capture" in output
     assert "frontmost-visible view" in output
-    assert "widget-local" in output
+    assert "omit geometry by default" in output
     assert "        Use target plus depth" not in output
 
 
@@ -4180,7 +4239,7 @@ def test_snapshot_result_scopes_to_active_window(monkeypatch):
     }
     assert 'DialogWindow "Dialog"' in payload["snapshot"]
     assert payload["root_handle"] == "w1"
-    assert payload["widgets"][0]["handle"] == "w1"
+    assert payload["tree"][0]["handle"] == "w1"
 
 
 def test_snapshot_window_payload_preserves_active_window_geometry_array(monkeypatch):

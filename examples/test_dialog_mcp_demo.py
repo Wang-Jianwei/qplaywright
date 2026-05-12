@@ -28,6 +28,16 @@ from examples.test_mcp_demo import (
 DEMO_PORT = 29877
 
 
+def _iter_snapshot_tree(nodes: list[dict[str, object]]) -> list[dict[str, object]]:
+    flattened: list[dict[str, object]] = []
+    for node in nodes:
+        flattened.append(node)
+        children = node.get("children")
+        if isinstance(children, list):
+            flattened.extend(_iter_snapshot_tree(children))
+    return flattened
+
+
 async def main() -> None:
     root = _project_root()
     env = _python_path_env(root)
@@ -93,9 +103,10 @@ async def main() -> None:
                 await _select_window(session, index=1)
 
                 dialog_snapshot = await _call_tool(session, "snapshot", {"depth": 12})
-                print(f"Dialog scoped widgets: {dialog_snapshot['widgets']}")
-                assert any(widget.get("window_title") == "Payment Review" for widget in dialog_snapshot["widgets"])
-                assert all(widget.get("window_title") != "QPlaywright Demo App" for widget in dialog_snapshot["widgets"])
+                dialog_nodes = _iter_snapshot_tree(dialog_snapshot["tree"])
+                print(f"Dialog scoped tree: {dialog_snapshot['tree']}")
+                assert any(widget.get("window_title") == "Payment Review" for widget in dialog_nodes)
+                assert all(widget.get("window_title") != "QPlaywright Demo App" for widget in dialog_nodes)
 
                 dialog_handles = await _discover_widget_handles(
                     session,

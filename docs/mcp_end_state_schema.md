@@ -135,7 +135,7 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 - `is_modal`: 是否为模态窗口
 - `geometry: Rect4`，窗口布局数据
 
-### SnapshotWidgetEntry
+### SnapshotTreeNode
 
 ```json
 {
@@ -143,15 +143,16 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
   "class": "FancyAmountEdit",
   "object_name": "amount_editor",
   "text": "123.45",
-  "geometry": [12, 48, 220, 80]
+  "children": []
 }
 ```
 
 补充说明：
 
 - `handle` 是 exact widget follow-up action 的稳定标识
+- `children` 显式表达 snapshot 主观察面的层级关系
 - `attribute` 为可选字段，用于承载特殊属性，例如 `{"transparent_for_mouse_events": true}`
-- `geometry: Rect4`
+- snapshot 节点默认不返回 `geometry`；如需坐标，使用 targeted `inspect`
 
 ### WidgetTreeNode
 
@@ -191,19 +192,19 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
   },
   "observation": {
     "root_handle": "w9",
-    "widgets": []
+    "tree": []
   }
 }
 ```
 
-其中 `widgets` 的元素类型为 `SnapshotWidgetEntry[]`。
+其中 `tree` 的元素类型为 `SnapshotTreeNode[]`。
 
 字段说明：
 
 - `window_changed`: 本次动作后 active window 是否变化
 - `active_window`: 当前 active window 摘要
 - `observation.root_handle`: post-action observation 的根 handle
-- `observation.widgets`: 与该 observation 一致的 widget handle 集
+- `observation.tree`: 与该 observation 一致的层级 widget tree
 
 ## Error Model
 
@@ -443,7 +444,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   },
   "target": null,
   "root_handle": "w1",
-  "widgets": [],
+  "tree": [],
   "warnings": [
     "topmost_only is an approximate frontmost-visible filter and may omit widgets or content. Rerun with topmost_only=false when you need a complete tree."
   ],
@@ -451,7 +452,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
-其中 `widgets` 的元素类型为 `SnapshotWidgetEntry[]`。
+其中 `tree` 的元素类型为 `SnapshotTreeNode[]`。
 当 `topmost_only=true` 且 `target=null` 时，`warnings` 应明确指出结果可能不完整。
 
 ## Find
@@ -909,7 +910,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   },
   "observation": {
     "root_handle": "w1",
-    "widgets": []
+    "tree": []
   }
 }
 ```
@@ -958,7 +959,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   },
   "observation": {
     "root_handle": "w1",
-    "widgets": []
+    "tree": []
   }
 }
 ```

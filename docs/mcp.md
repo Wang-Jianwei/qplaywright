@@ -197,7 +197,7 @@ Action tools support `include_snapshot=false` by default.
 When `include_snapshot=true`, the response also includes `observation`, where:
 
 - `observation.root_handle`
-- `observation.widgets`
+- `observation.tree`
 
 `window_changed` and `active_window` remain top-level action result fields.
 
@@ -329,20 +329,21 @@ Response includes:
 - optional `warnings`
 - optional `save_to`
 
-Each snapshot widget entry includes:
+Each snapshot tree node includes:
 
 - `handle`
 - `class`
-- optional compact `geometry`
+- `children`
 - optional `attribute`
 - optional sparse negative-state fields `visible`, `enabled`, and `interactable`, emitted only when the value is `false`
 - any meaningful semantic label fields such as `text`, `accessible_name`, `current_text`, `window_title`, or `value`
 
-`snapshot` is JSON-first: use `widgets` plus `root_handle` as the primary observation result.
+`snapshot` is JSON-first: use `tree` plus `root_handle` as the primary observation result.
 When `save_to` is provided, qplaywright also writes an internal text snapshot export to the target file.
 
 `handle` is the exact follow-up identity for widget actions.
-`geometry` uses `[x, y, width, height]`, and `attribute` wraps exceptional widget flags such as `{"transparent_for_mouse_events": true}`.
+`tree` preserves hierarchy explicitly through `children`, and `attribute` wraps exceptional widget flags such as `{"transparent_for_mouse_events": true}`.
+If you need widget-local geometry or screen-space bounds, follow up with `inspect`.
 
 Stable widget handles are session-stable. They survive later `snapshot`, `find`, and `inspect` calls, and only fail
 once the widget is destroyed or the session is replaced.

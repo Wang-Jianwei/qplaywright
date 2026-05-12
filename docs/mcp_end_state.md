@@ -136,7 +136,7 @@ Qt 业务自动化的中心应当是：
 推荐形式：
 
 - `include_snapshot: false` 为默认值
-- 当为 `true` 时，服务端附带 post-action snapshot、`root_handle` 和 `widgets`
+- 当为 `true` 时，服务端附带 post-action snapshot、`root_handle` 和 `tree`
 
 这样既保留高效路径，也保留单轮观察路径。
 
@@ -541,7 +541,7 @@ Qt 业务自动化的中心应当是：
 
 - `state` 与 `condition` 互斥；两者都省略时，默认等价于 `state="visible"`
 - 当使用 `condition` 时，必须提供 `expected`
-- `include_snapshot=true` 时，等待成功后返回 post-wait snapshot、`root_handle` 和 `widgets`
+- `include_snapshot=true` 时，等待成功后返回 post-wait snapshot、`root_handle` 和 `tree`
 - 这样 `wait` 与其他动作工具保持一致，也减少“wait 之后立即再 snapshot 一次”的机械往返
 
 ### 16. screenshot
@@ -607,7 +607,7 @@ Qt 业务自动化的中心应当是：
 - `snapshot` 只由 `snapshot` 作为主入口提供
 - 动作工具默认返回精简结构
 - 动作工具统一支持 `include_snapshot`
-- 当 `include_snapshot=true` 时，返回值附带 post-action snapshot、`root_handle` 和 `widgets`
+- 当 `include_snapshot=true` 时，返回值附带 post-action snapshot、`root_handle` 和 `tree`
 - 对可能导致窗口切换的动作，返回值可附带 `window_changed` 和 `active_window`
 
 推荐示例：
@@ -623,7 +623,7 @@ Qt 业务自动化的中心应当是：
   },
   "snapshot": "...",
   "root_handle": "w9",
-  "widgets": []
+  "tree": []
 }
 ```
 

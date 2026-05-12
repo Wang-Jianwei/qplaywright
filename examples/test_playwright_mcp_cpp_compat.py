@@ -24,6 +24,16 @@ from examples.test_mcp_demo import (
 )
 
 
+def _iter_snapshot_tree(nodes: list[dict[str, object]]) -> list[dict[str, object]]:
+    flattened: list[dict[str, object]] = []
+    for node in nodes:
+        flattened.append(node)
+        children = node.get("children")
+        if isinstance(children, list):
+            flattened.extend(_iter_snapshot_tree(children))
+    return flattened
+
+
 async def main() -> None:
     root = _project_root()
     env = _cpp_demo_env(root)
@@ -49,7 +59,7 @@ async def main() -> None:
                 print(f"Tabs: {tabs}")
 
                 snapshot = await _call_tool(session, "snapshot", {"depth": 12})
-                print(snapshot["widgets"])
+                print(snapshot["tree"])
 
                 handles_by_target = await _discover_widget_handles(
                     session,
