@@ -2015,7 +2015,7 @@ def test_widget_action_tools_wrap_action_errors(monkeypatch, tool_name, call_kwa
         def focus(self):
             raise QPlaywrightActionError("focus failed for locator Locator(wid=101): Agent error: focus rejected", code="action_failed")
 
-        def select_option(self, value=None, *, index=None, label=None):
+        def select_option(self, *, value=None, index=None, label=None):
             raise QPlaywrightActionError("select_option failed for locator Locator(wid=101): Agent error: option missing", code="action_failed")
 
         def hover(self):
@@ -2206,8 +2206,8 @@ def test_mcp_tool_input_schema_describes_all_parameters():
     assert mcp_server.mcp is not None
 
     async def list_tools():
-        assert mcp_server.mcp is not None
-        return await mcp_server.mcp.list_tools()
+        mcp = cast(Any, mcp_server.mcp)
+        return await mcp.list_tools()
 
     tools = anyio.run(list_tools)
     dumped = [tool.model_dump(mode="json") for tool in tools]

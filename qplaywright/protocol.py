@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, asdict
-from typing import Any, overload
+from typing import Any, cast
 
 # Default port for the agent server
 DEFAULT_PORT = 19876
@@ -67,75 +67,31 @@ class QPlaywrightMethodArg:
         self._required = True
         self._default_value = MISSING
 
-    @overload
-    def name(self, value: Any = MISSING):
-        ...
-
-    @overload
-    def name(self) -> str:
-        ...
-
-    @overload
-    def name(self, value: Any) -> QPlaywrightMethodArg:
-        ...
-
-    def name(self, value: Any = MISSING):
+    def name(self, value: object = MISSING) -> str | QPlaywrightMethodArg:
         if value is MISSING:
             return self._name
         self._name = str(value)
         return self
 
-    @overload
-    def type(self) -> str:
-        ...
-
-    @overload
-    def type(self, value: Any) -> QPlaywrightMethodArg:
-        ...
-
-    def type(self, value: Any = MISSING):
+    def type(self, value: object = MISSING) -> str | QPlaywrightMethodArg:
         if value is MISSING:
             return self._type
         self._type = str(value)
         return self
 
-    @overload
-    def brief(self) -> str:
-        ...
-
-    @overload
-    def brief(self, value: Any) -> QPlaywrightMethodArg:
-        ...
-
-    def brief(self, value: Any = MISSING):
+    def brief(self, value: object = MISSING) -> str | QPlaywrightMethodArg:
         if value is MISSING:
             return self._brief
         self._brief = str(value)
         return self
 
-    @overload
-    def required(self) -> bool:
-        ...
-
-    @overload
-    def required(self, value: Any) -> QPlaywrightMethodArg:
-        ...
-
-    def required(self, value: Any = MISSING):
+    def required(self, value: object = MISSING) -> bool | QPlaywrightMethodArg:
         if value is MISSING:
             return self._required
         self._required = bool(value)
         return self
 
-    @overload
-    def defaultValue(self) -> Any:
-        ...
-
-    @overload
-    def defaultValue(self, value: Any) -> QPlaywrightMethodArg:
-        ...
-
-    def defaultValue(self, value: Any = MISSING):
+    def defaultValue(self, value: object = MISSING) -> Any | QPlaywrightMethodArg:
         if value is MISSING:
             return None if self._default_value is MISSING else self._default_value
         self._default_value = value
@@ -161,15 +117,7 @@ class QPlaywrightClassMethod:
         self._return_type = "QVariant"
         self._brief = ""
 
-    @overload
-    def name(self) -> str:
-        ...
-
-    @overload
-    def name(self, value: Any) -> QPlaywrightClassMethod:
-        ...
-
-    def name(self, value: Any = MISSING):
+    def name(self, value: object = MISSING) -> str | QPlaywrightClassMethod:
         if value is MISSING:
             return self._name
         self._name = str(value)
@@ -182,36 +130,20 @@ class QPlaywrightClassMethod:
     def args(self) -> list[QPlaywrightMethodArg]:
         return list(self._args)
 
-    @overload
-    def returnType(self) -> str:
-        ...
-
-    @overload
-    def returnType(self, value: Any) -> QPlaywrightClassMethod:
-        ...
-
-    def returnType(self, value: Any = MISSING):
+    def returnType(self, value: object = MISSING) -> str | QPlaywrightClassMethod:
         if value is MISSING:
             return self._return_type
         self._return_type = str(value)
         return self
 
-    @overload
-    def brief(self) -> str:
-        ...
-
-    @overload
-    def brief(self, value: Any) -> QPlaywrightClassMethod:
-        ...
-
-    def brief(self, value: Any = MISSING):
+    def brief(self, value: object = MISSING) -> str | QPlaywrightClassMethod:
         if value is MISSING:
             return self._brief
         self._brief = str(value)
         return self
 
     def signature(self) -> str:
-        return f"{self._name}({', '.join(arg.type() for arg in self._args)})"
+        return f"{self._name}({', '.join(cast(str, arg.type()) for arg in self._args)})"
 
     def toVariantMap(self) -> dict[str, Any]:
         return {
@@ -227,15 +159,7 @@ class QPlaywrightClassMetadata:
         self._role = ""
         self._methods: list[QPlaywrightClassMethod] = []
 
-    @overload
-    def role(self) -> str:
-        ...
-
-    @overload
-    def role(self, value: Any) -> QPlaywrightClassMetadata:
-        ...
-
-    def role(self, value: Any = MISSING):
+    def role(self, value: object = MISSING) -> str | QPlaywrightClassMetadata:
         if value is MISSING:
             return self._role
         self._role = str(value)
