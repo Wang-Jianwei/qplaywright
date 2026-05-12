@@ -16,6 +16,7 @@
 #ifndef QPLAYWRIGHT_AGENT_H
 #define QPLAYWRIGHT_AGENT_H
 
+#include <QtGlobal>
 #include <QObject>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -93,6 +94,31 @@ class QPlaywrightHandler;
 class QPlaywrightClientConnection;
 
 static const int QPLAYWRIGHT_PROTOCOL_VERSION = 1;
+static const char *QPLAYWRIGHT_OVERLAY_BADGE_TEMPLATE_ENV = "QPLAYWRIGHT_OVERLAY_BADGE_TEMPLATE";
+
+inline QString qPlaywrightOverlayBadgeText(const QString &agentName)
+{
+    const QString normalized = agentName.trimmed();
+    if (normalized.isEmpty())
+        return QString();
+
+    const QByteArray rawTemplate = qgetenv(QPLAYWRIGHT_OVERLAY_BADGE_TEMPLATE_ENV);
+    const QString templateText = rawTemplate.trimmed().isEmpty()
+        ? QStringLiteral("正在与 Agent {agent} 共享")
+        : QString::fromLocal8Bit(rawTemplate).trimmed();
+
+    if (templateText.contains(QStringLiteral("{agent}"))) {
+        QString result = templateText;
+        result.replace(QStringLiteral("{agent}"), normalized);
+        return result;
+    }
+    if (templateText.contains(QStringLiteral("%s"))) {
+        QString result = templateText;
+        result.replace(QStringLiteral("%s"), normalized);
+        return result;
+    }
+    return QStringLiteral("%1 %2").arg(templateText, normalized).trimmed();
+}
 
 enum class QPlaywrightInvokeErrorCode {
     None,
@@ -1448,9 +1474,7 @@ private:
 
         QString badgeText() const
         {
-            if (m_sharedAgentName.isEmpty())
-                return QString();
-            return QStringLiteral("正在与 Agent %1 共享").arg(m_sharedAgentName);
+            return qPlaywrightOverlayBadgeText(m_sharedAgentName);
         }
 
         QFont badgeFont() const

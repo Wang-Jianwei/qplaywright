@@ -127,6 +127,8 @@ _OVERLAY_BADGE_LEFT_INSET = 6
 _OVERLAY_BADGE_TOP_INSET = 6
 _OVERLAY_CORNER_RADIUS = 6
 _OVERLAY_BADGE_RADIUS = 7
+_OVERLAY_BADGE_TEMPLATE_ENV = "QPLAYWRIGHT_OVERLAY_BADGE_TEMPLATE"
+_OVERLAY_BADGE_TEMPLATE_DEFAULT = "正在与 Agent {agent} 共享"
 _OVERLAY_MANAGER = None
 _OverlayManagerClass = None
 _FIND_INFRASTRUCTURE_WIDGET_CLASSES = {
@@ -262,6 +264,25 @@ def _coerce_runtime_int(value: Any, name: str) -> int:
     return value
 
 
+def _overlay_badge_text(agent_name: str) -> str:
+    normalized_agent_name = str(agent_name or "").strip()
+    if not normalized_agent_name:
+        return ""
+
+    template = os.environ.get(_OVERLAY_BADGE_TEMPLATE_ENV, "").strip() or _OVERLAY_BADGE_TEMPLATE_DEFAULT
+    if "{agent}" in template:
+        try:
+            return template.format(agent=normalized_agent_name)
+        except Exception:
+            return _OVERLAY_BADGE_TEMPLATE_DEFAULT.format(agent=normalized_agent_name)
+    if "%s" in template:
+        try:
+            return template % normalized_agent_name
+        except Exception:
+            return _OVERLAY_BADGE_TEMPLATE_DEFAULT.format(agent=normalized_agent_name)
+    return f"{template} {normalized_agent_name}".strip()
+
+
 def _is_automation_overlay_widget(widget) -> bool:
     if widget is None:
         return False
@@ -341,7 +362,7 @@ def _create_overlay_manager_class():
         def _badge_text(self) -> str:
             if not self._session_agent_name:
                 return ""
-            return f"正在与 Agent {self._session_agent_name} 共享"
+            return _overlay_badge_text(self._session_agent_name)
 
         def _badge_font(self):
             font = self.font()
@@ -958,7 +979,7 @@ def _create_dispatcher():
                     # Re-post the event so it is processed after the current command
                     # finishes, preventing re-entrant command execution during
                     # processEvents() calls inside _handle_command.
-                    logger.debug(
+                    logger.warning(
                         "Re-entrant CommandEvent detected (method=%r); deferring until current command completes.",
                         req.method,
                     )
@@ -1345,9 +1366,9 @@ def _find_widgets_payload(params: dict[str, Any]) -> dict[str, Any]:
                 entry["ancestorSummary"] = _find_ancestor_summary(ancestors)
             matches.append(
                 {
-                    "keyword_mode_rank": keyword_match["mode_rank"] if keyword_match is not None else 0,
-                    "keyword_field_rank": keyword_match["field_rank"] if keyword_match is not None else 0,
-                    "keyword_distance": keyword_match["distance"] if keyword_match is not None else 0,
+                    "keyword_mode_rank": keyword_match.get("mode_rank", 0),
+                    "keyword_field_rank": keyword_match.get("field_rank", 0),
+                    "keyword_distance": keyword_match.get("distance", 0),
                     "depth": len(ancestors),
                     "interactable": interactable,
                     "visible": visible,
@@ -2991,6 +3012,7 @@ def _key_to_qt(key_str: str):
         "Escape": Qt.Key_Escape,
         "Backspace": Qt.Key_Backspace,
         "Delete": Qt.Key_Delete,
+        "Insert": Qt.Key_Insert,
         "ArrowUp": Qt.Key_Up,
         "ArrowDown": Qt.Key_Down,
         "ArrowLeft": Qt.Key_Left,
@@ -3000,6 +3022,13 @@ def _key_to_qt(key_str: str):
         "PageUp": Qt.Key_PageUp,
         "PageDown": Qt.Key_PageDown,
         "Space": Qt.Key_Space,
+        "Pause": Qt.Key_Pause,
+        "PrintScreen": Qt.Key_Print,
+        "Menu": Qt.Key_Menu,
+        "CapsLock": Qt.Key_CapsLock,
+        "NumLock": Qt.Key_NumLock,
+        "ScrollLock": Qt.Key_ScrollLock,
+        "Clear": Qt.Key_Clear,
         "F1": Qt.Key_F1, "F2": Qt.Key_F2, "F3": Qt.Key_F3, "F4": Qt.Key_F4,
         "F5": Qt.Key_F5, "F6": Qt.Key_F6, "F7": Qt.Key_F7, "F8": Qt.Key_F8,
         "F9": Qt.Key_F9, "F10": Qt.Key_F10, "F11": Qt.Key_F11, "F12": Qt.Key_F12,
@@ -3690,44 +3719,34 @@ def _post_mouse_event(widget, pos, *, double: bool = False):
     Qt = qt_core.Qt
     global_pos = _widget_map_to_global(widget, pos)
 
-    # Try Qt6 API first, then Qt5
-    try:
-        press = QMouseEvent(
-            QEvent.Type.MouseButtonPress, pos, global_pos,
-            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
-        )
-        release = QMouseEvent(
-            QEvent.Type.MouseButtonRelease, pos, global_pos,
-            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
-        )
-    except TypeError:
-        pos_f = _to_qpointf(pos)
-        global_f = _to_qpointf(global_pos)
-        press = QMouseEvent(
-            QEvent.Type.MouseButtonPress, pos_f, global_f,
-            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
-        )
-        release = QMouseEvent(
-            QEvent.Type.MouseButtonRelease, pos_f, global_f,
-            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
-        )
+    pos_f = _to_qpointf(pos)
+    global_f = _to_qpointf(global_pos)
+
+    def _make_mouse_event(event_type):
+        try:
+            return QMouseEvent(
+                event_type, pos, global_pos,
+                Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
+            )
+        except TypeError:
+            return QMouseEvent(
+                event_type, pos_f, global_f,
+                Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
+            )
+
+    press = _make_mouse_event(QEvent.Type.MouseButtonPress)
+    release = _make_mouse_event(QEvent.Type.MouseButtonRelease)
 
     q_application.postEvent(widget, press)
     q_application.postEvent(widget, release)
 
     if double:
-        try:
-            dbl = QMouseEvent(
-                QEvent.Type.MouseButtonDblClick, pos, global_pos,
-                Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
-            )
-        except TypeError:
-            dbl = QMouseEvent(
-                QEvent.Type.MouseButtonDblClick, _to_qpointf(pos), _to_qpointf(global_pos),
-                Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
-            )
+        second_press = _make_mouse_event(QEvent.Type.MouseButtonPress)
+        dbl = _make_mouse_event(QEvent.Type.MouseButtonDblClick)
+        second_release = _make_mouse_event(QEvent.Type.MouseButtonRelease)
+        q_application.postEvent(widget, second_press)
         q_application.postEvent(widget, dbl)
-        q_application.postEvent(widget, release)
+        q_application.postEvent(widget, second_release)
 
 
 def _fill_widget(widget, value: str):
@@ -3871,12 +3890,19 @@ def _scroll_widget(widget, delta_x: int = 0, delta_y: int = 0):
     center = _widget_center_point(target)
     global_pos = _widget_map_to_global(target, center)
 
+    def _wheel_angle_delta(delta: int) -> int:
+        if delta == 0:
+            return 0
+        if abs(delta) >= 120 and delta % 120 == 0:
+            return delta
+        return 120 if delta > 0 else -120
+
     try:
         QPoint = qt_core.QPoint
         event = QWheelEvent(
             _to_qpointf(center), _to_qpointf(global_pos),
             QPoint(delta_x, delta_y),   # pixelDelta
-            QPoint(delta_x, delta_y),   # angleDelta
+            QPoint(_wheel_angle_delta(delta_x), _wheel_angle_delta(delta_y)),
             Qt.NoButton, Qt.NoModifier,
             Qt.ScrollBegin, False,
         )

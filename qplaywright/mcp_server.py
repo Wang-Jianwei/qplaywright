@@ -119,6 +119,7 @@ def _tighten_pointer_tool_schema(tool: Any | None, *, verb: str) -> None:
 
 SessionAction = Literal["attach", "launch", "close", "status"]
 WindowAction = Literal["list", "select", "resize", "close"]
+FindMode = Literal["auto", "exact", "fuzzy"]
 
 _ALLOWED_WAIT_STATES = {"visible", "hidden", "enabled", "disabled", "checked", "unchecked"}
 _ALLOWED_WAIT_CONDITIONS = {
@@ -225,13 +226,23 @@ FindRoleArg = Annotated[
     str | None,
     Field(description="Exact qplaywright role name to match, such as button, table, or tree."),
 ]
+FindModeArg = Annotated[
+    FindMode,
+    Field(
+        description=(
+            "Find mode: auto chooses fuzzy when keyword is provided and exact otherwise; "
+            "exact uses deterministic constraints such as text, class, object_name, or accessible_name; "
+            "fuzzy requires keyword and ranks approximate matches across readable widget fields."
+        )
+    ),
+]
 FindTextArg = Annotated[
     str | None,
     Field(description="Exact primary widget text to match, case-sensitive."),
 ]
 FindKeywordArg = Annotated[
-    str,
-    Field(description="Approximate keyword clue for broad fuzzy discovery across multiple readable widget fields."),
+    str | None,
+    Field(description="Approximate keyword clue for fuzzy discovery across readable widget text, accessible name, current text, window title, and object name fields."),
 ]
 FindClassArg = Annotated[
     str | None,
@@ -1998,6 +2009,7 @@ def _find_result_entry(connection: ManagedConnection, node: dict[str, Any]) -> d
 def _find_result(
     connection: ManagedConnection,
     *,
+    mode: FindMode = "auto",
     root: str | None = None,
     keyword: str | None = None,
     role: str | None = None,
@@ -2012,6 +2024,7 @@ def _find_result(
     limit: int = 5,
     timeout: float | None = None,
 ) -> dict[str, Any]:
+    resolved_mode = "fuzzy" if mode == "auto" and keyword is not None else ("exact" if mode == "auto" else mode)
     root_wid = _resolve_find_root_wid(connection, root)
     raw = _find_widgets_raw(
         connection,
@@ -2033,6 +2046,7 @@ def _find_result(
     raw_root_wid = raw.get("rootWid")
     root_handle = connection.handle_for_wid(raw_root_wid if isinstance(raw_root_wid, int) else root_wid)
     return {
+        "search_mode": resolved_mode,
         "root_handle": root_handle,
         "count": int(raw.get("count", len(results))),
         "truncated": bool(raw.get("truncated", False)),
@@ -2042,33 +2056,6 @@ def _find_result(
             if isinstance(entry, dict)
         ],
     }
-
-
-def _find_fuzzy_result(
-    connection: ManagedConnection,
-    *,
-    keyword: str,
-    root: str | None = None,
-    role: str | None = None,
-    visible: bool | None = None,
-    enabled: bool | None = None,
-    interactable: bool | None = None,
-    include_infrastructure: bool = False,
-    limit: int = 5,
-    timeout: float | None = None,
-) -> dict[str, Any]:
-    return _find_result(
-        connection,
-        root=root,
-        keyword=keyword,
-        role=role,
-        visible=visible,
-        enabled=enabled,
-        interactable=interactable,
-        include_infrastructure=include_infrastructure,
-        limit=limit,
-        timeout=timeout,
-    )
 
 
 def _iter_widget_tree_nodes(nodes: Sequence[dict[str, Any]]) -> Any:
@@ -2756,6 +2743,8 @@ if FastMCP is not None:
 
     @mcp.tool()
     def find(
+        mode: FindModeArg = "auto",
+        keyword: FindKeywordArg = None,
         root: FindRootArg = None,
         role: FindRoleArg = None,
         text: FindTextArg = None,
@@ -2768,64 +2757,33 @@ if FastMCP is not None:
         include_infrastructure: IncludeInfrastructureArg = False,
         limit: FindLimitArg = 5,
     ) -> dict[str, Any]:
-        """Return a small, deterministic set of widget candidates within one root scope.
+        """Return a small candidate set within one root scope using exact, fuzzy, or auto search.
 
-        Prefer find when you already know deterministic constraints such as
-        exact text, role, class, or object_name and want a short candidate
-        list instead of a full subtree snapshot.
+        Use mode=exact for deterministic constraints such as exact text,
+        role, class, or object_name. Use mode=fuzzy with keyword when you only
+        know an approximate visible phrase, semantic label, window title, or
+        object name clue. mode=auto chooses fuzzy when keyword is provided and
+        exact otherwise.
         """
 
         if limit <= 0:
             raise ValueError("limit must be > 0")
+        if mode == "exact" and keyword is not None:
+            raise ValueError("find mode='exact' does not accept keyword; use mode='fuzzy' or mode='auto'")
+        if mode == "fuzzy" and keyword is None:
+            raise ValueError("find mode='fuzzy' requires keyword")
 
         connection_state = _get_connection(_SERVER_STATE)
         payload = _find_result(
             connection_state,
+            mode=mode,
             root=root,
+            keyword=keyword,
             role=role,
             text=text,
             widget_class=class_,
             object_name=object_name,
             accessible_name=accessible_name,
-            visible=visible,
-            enabled=enabled,
-            interactable=interactable,
-            include_infrastructure=include_infrastructure,
-            limit=limit,
-        )
-        return {
-            "ok": True,
-            **payload,
-        }
-
-
-    @mcp.tool()
-    def find_fuzzy(
-        keyword: FindKeywordArg,
-        root: FindRootArg = None,
-        role: FindRoleArg = None,
-        visible: FindVisibleArg = None,
-        enabled: FindEnabledArg = None,
-        interactable: FindInteractableArg = None,
-        include_infrastructure: IncludeInfrastructureArg = False,
-        limit: FindLimitArg = 5,
-    ) -> dict[str, Any]:
-        """Return a small candidate set for one approximate textual clue.
-
-        Prefer find_fuzzy when you only know an approximate visible phrase,
-        semantic label, window title, or object name and want typo-tolerant,
-        multi-field discovery.
-        """
-
-        if limit <= 0:
-            raise ValueError("limit must be > 0")
-
-        connection_state = _get_connection(_SERVER_STATE)
-        payload = _find_fuzzy_result(
-            connection_state,
-            keyword=keyword,
-            root=root,
-            role=role,
             visible=visible,
             enabled=enabled,
             interactable=interactable,
@@ -3397,7 +3355,6 @@ _CLI_TOOL_NAMES = (
     "window",
     "snapshot",
     "find",
-    "find_fuzzy",
     "resolve_object_names",
     "inspect",
     "inspect_items",
@@ -3474,8 +3431,7 @@ def _cli_usage_text() -> str:
         "  session attach|launch|status|close\n"
         "  window list|select\n"
         "  snapshot [--target TARGET] [--depth N] [--topmost-only] [--save-to PATH]\n"
-        "  find [--root ROOT] [--role ROLE] [--text TEXT] [--class CLASS] [--object-name NAME] [--accessible-name NAME] [--limit N]\n"
-        "  find_fuzzy KEYWORD [--root ROOT] [--role ROLE] [--limit N]\n"
+        "  find [--mode auto|exact|fuzzy] [--keyword KEYWORD] [--root ROOT] [--role ROLE] [--text TEXT] [--class CLASS] [--object-name NAME] [--accessible-name NAME] [--limit N]\n"
         "  click [TARGET] [--count 1|2] [--x X --y Y] [--include-snapshot]\n"
         "  hover [TARGET] [--x X --y Y] [--include-snapshot]\n"
         "  input TARGET [TEXT] [--mode replace|append|type|clear] [--delay MS] [--submit]\n"
@@ -3774,7 +3730,9 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("--include-infrastructure", action="store_true")
     snapshot_parser.add_argument("--save-to")
 
-    find_parser = subparsers.add_parser("find", help="Run deterministic server-side widget search under one scope.")
+    find_parser = subparsers.add_parser("find", help="Run exact or fuzzy server-side widget search under one scope.")
+    find_parser.add_argument("--mode", choices=("auto", "exact", "fuzzy"), default="auto")
+    find_parser.add_argument("--keyword")
     find_parser.add_argument("--root")
     find_parser.add_argument("--role")
     find_parser.add_argument("--text")
@@ -3789,19 +3747,6 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     find_parser.add_argument("--not-interactable", action="store_true")
     find_parser.add_argument("--include-infrastructure", action="store_true")
     find_parser.add_argument("--limit", type=int, default=5)
-
-    find_fuzzy_parser = subparsers.add_parser("find_fuzzy", help="Run broad fuzzy widget search under one scope.")
-    find_fuzzy_parser.add_argument("keyword")
-    find_fuzzy_parser.add_argument("--root")
-    find_fuzzy_parser.add_argument("--role")
-    find_fuzzy_parser.add_argument("--visible", action="store_true")
-    find_fuzzy_parser.add_argument("--not-visible", action="store_true")
-    find_fuzzy_parser.add_argument("--enabled", action="store_true")
-    find_fuzzy_parser.add_argument("--disabled", action="store_true")
-    find_fuzzy_parser.add_argument("--interactable", action="store_true")
-    find_fuzzy_parser.add_argument("--not-interactable", action="store_true")
-    find_fuzzy_parser.add_argument("--include-infrastructure", action="store_true")
-    find_fuzzy_parser.add_argument("--limit", type=int, default=5)
 
     resolve_object_names_parser = subparsers.add_parser(
         "resolve_object_names",
@@ -3906,6 +3851,8 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
 
     if command == "find":
         arguments = {
+            "mode": namespace.mode,
+            "keyword": namespace.keyword,
             "root": namespace.root,
             "role": namespace.role,
             "text": namespace.text,
@@ -3928,28 +3875,6 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         elif namespace.not_interactable:
             arguments["interactable"] = False
         return "find", arguments
-
-    if command == "find_fuzzy":
-        arguments = {
-            "keyword": namespace.keyword,
-            "root": namespace.root,
-            "role": namespace.role,
-            "include_infrastructure": namespace.include_infrastructure,
-            "limit": namespace.limit,
-        }
-        if namespace.visible:
-            arguments["visible"] = True
-        elif namespace.not_visible:
-            arguments["visible"] = False
-        if namespace.enabled:
-            arguments["enabled"] = True
-        elif namespace.disabled:
-            arguments["enabled"] = False
-        if namespace.interactable:
-            arguments["interactable"] = True
-        elif namespace.not_interactable:
-            arguments["interactable"] = False
-        return "find_fuzzy", arguments
 
     if command == "resolve_object_names":
         return "resolve_object_names", {
@@ -4119,7 +4044,7 @@ def _try_run_typed_cli(argv: Sequence[str]) -> int | None:
     if not argv:
         return None
     if argv[0] not in {
-        "resource", "session", "window", "snapshot", "find", "find_fuzzy", "resolve_object_names", "inspect", "click", "input", "invoke",
+        "resource", "session", "window", "snapshot", "find", "resolve_object_names", "inspect", "click", "input", "invoke",
         "press_key", "focus", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         return None
@@ -4145,7 +4070,7 @@ def _try_run_typed_cli_from_command_line(command_line: str) -> int | None:
         return None
     # If the first part is a known tool and the rest looks like flags/args (not JSON)
     if parts[0] in {
-        "resource", "session", "window", "snapshot", "find", "find_fuzzy", "resolve_object_names", "inspect", "click", "input", "invoke",
+        "resource", "session", "window", "snapshot", "find", "resolve_object_names", "inspect", "click", "input", "invoke",
         "press_key", "focus", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         if len(parts) > 1 and parts[1].lstrip().startswith("{"):

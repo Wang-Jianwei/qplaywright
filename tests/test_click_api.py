@@ -202,6 +202,11 @@ class FakeQMouseEvent:
         self.args = _args
 
 
+class FakeQWheelEvent:
+    def __init__(self, *_args):
+        self.args = _args
+
+
 def _install_fake_qt(monkeypatch, *, widget_at=None):
     FakeApplication.widget_at_result = widget_at
     FakeApplication.process_events_calls = 0
@@ -222,19 +227,65 @@ def _install_fake_qt(monkeypatch, *, widget_at=None):
         ),
     )
     monkeypatch.setattr(server, "_QApplication", FakeApplication)
-    monkeypatch.setattr(server, "_QtGui", SimpleNamespace(QCursor=object, QMouseEvent=FakeQMouseEvent))
+    monkeypatch.setattr(server, "_QtGui", SimpleNamespace(QCursor=object, QMouseEvent=FakeQMouseEvent, QWheelEvent=FakeQWheelEvent))
     monkeypatch.setattr(server, "_QtTest", SimpleNamespace(QTest=FakeQTest))
     monkeypatch.setattr(
         server,
         "_QtCore",
         SimpleNamespace(
-            QEvent=SimpleNamespace(Type=SimpleNamespace(MouseMove="mousemove")),
+            QEvent=SimpleNamespace(
+                Type=SimpleNamespace(
+                    MouseMove="mousemove",
+                    MouseButtonPress="mousepress",
+                    MouseButtonRelease="mouserelease",
+                    MouseButtonDblClick="mousedblclick",
+                )
+            ),
             Qt=SimpleNamespace(
                 LeftButton="left",
                 NoButton="none",
                 NoModifier="none",
                 MouseFocusReason="mouse",
                 WA_TransparentForMouseEvents="transparent",
+                ScrollBegin="scrollbegin",
+                Key_Return="return",
+                Key_Tab="tab",
+                Key_Escape="escape",
+                Key_Backspace="backspace",
+                Key_Delete="delete",
+                Key_Insert="insert",
+                Key_Up="up",
+                Key_Down="down",
+                Key_Left="left-key",
+                Key_Right="right-key",
+                Key_Home="home",
+                Key_End="end",
+                Key_PageUp="pageup",
+                Key_PageDown="pagedown",
+                Key_Space="space",
+                Key_Pause="pause",
+                Key_Print="print",
+                Key_Menu="menu",
+                Key_CapsLock="capslock",
+                Key_NumLock="numlock",
+                Key_ScrollLock="scrolllock",
+                Key_Clear="clear",
+                Key_F1="f1",
+                Key_F2="f2",
+                Key_F3="f3",
+                Key_F4="f4",
+                Key_F5="f5",
+                Key_F6="f6",
+                Key_F7="f7",
+                Key_F8="f8",
+                Key_F9="f9",
+                Key_F10="f10",
+                Key_F11="f11",
+                Key_F12="f12",
+                Key_Control="control",
+                Key_Shift="shift",
+                Key_Alt="alt",
+                Key_Meta="meta",
             ),
             QPoint=FakePoint,
         ),
@@ -429,3 +480,77 @@ def test_is_topmost_visible_widget_ignores_mouse_transparent_hit(monkeypatch):
     _install_fake_qt(monkeypatch, widget_at=transparent_overlay)
 
     assert server._is_topmost_visible_widget(widget) is True
+
+
+def test_post_mouse_event_double_click_posts_second_press(monkeypatch):
+    widget = FakeClickWidget("QPushButton")
+    posted_events = []
+
+    _install_fake_qt(monkeypatch, widget_at=widget)
+    monkeypatch.setattr(
+        server,
+        "_QApplication",
+        SimpleNamespace(
+            widgetAt=FakeApplication.widgetAt,
+            processEvents=FakeApplication.processEvents,
+            postEvent=lambda target, event: posted_events.append((target, event)),
+        ),
+    )
+
+    server._post_mouse_event(widget, FakePoint(4, 5), double=True)
+
+    assert [event.args[0] for _, event in posted_events] == [
+        "mousepress",
+        "mouserelease",
+        "mousepress",
+        "mousedblclick",
+        "mouserelease",
+    ]
+
+
+def test_scroll_widget_uses_wheel_angle_steps(monkeypatch):
+    widget = FakeClickWidget("QPushButton")
+    posted_events = []
+
+    _install_fake_qt(monkeypatch, widget_at=widget)
+    monkeypatch.setattr(
+        server,
+        "_QApplication",
+        SimpleNamespace(
+            widgetAt=FakeApplication.widgetAt,
+            processEvents=FakeApplication.processEvents,
+            postEvent=lambda target, event: posted_events.append((target, event)),
+        ),
+    )
+
+    server._scroll_widget(widget, delta_x=5, delta_y=-10)
+
+    assert posted_events
+    wheel_event = posted_events[-1][1]
+    assert wheel_event.args[2] == FakePoint(5, -10)
+    assert wheel_event.args[3] == FakePoint(120, -120)
+
+
+@pytest.mark.parametrize(
+    ("key_name", "expected"),
+    [
+        ("Insert", "insert"),
+        ("Pause", "pause"),
+        ("PrintScreen", "print"),
+        ("Menu", "menu"),
+        ("CapsLock", "capslock"),
+        ("NumLock", "numlock"),
+        ("ScrollLock", "scrolllock"),
+        ("Clear", "clear"),
+    ],
+)
+def test_key_to_qt_supports_extended_named_keys(monkeypatch, key_name, expected):
+    _install_fake_qt(monkeypatch)
+
+    assert server._key_to_qt(key_name) == expected
+
+
+def test_overlay_badge_text_uses_configured_template(monkeypatch):
+    monkeypatch.setenv("QPLAYWRIGHT_OVERLAY_BADGE_TEMPLATE", "Sharing with {agent}")
+
+    assert server._overlay_badge_text("Inspector") == "Sharing with Inspector"

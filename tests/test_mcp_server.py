@@ -3222,32 +3222,37 @@ def test_try_run_typed_cli_from_command_line_keeps_quoted_title(monkeypatch, cap
     }
 
 
-def test_try_run_typed_cli_from_command_line_supports_find_fuzzy(monkeypatch, capsys):
+def test_try_run_typed_cli_from_command_line_supports_find_fuzzy_mode(monkeypatch, capsys):
     monkeypatch.setattr(
         mcp_server,
-        "find_fuzzy",
+        "find",
         lambda **kwargs: {"ok": True, **kwargs},
     )
 
-    exit_code = mcp_server._try_run_typed_cli_from_command_line("find_fuzzy submt --role button --limit 2")
+    exit_code = mcp_server._try_run_typed_cli_from_command_line("find --mode fuzzy --keyword submt --role button --limit 2")
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload == {
         "ok": True,
+        "mode": "fuzzy",
         "keyword": "submt",
         "root": None,
         "role": "button",
+        "text": None,
+        "class_": None,
+        "object_name": None,
+        "accessible_name": None,
         "include_infrastructure": False,
         "limit": 2,
     }
 
 
-def test_cli_usage_text_lists_find_and_find_fuzzy():
+def test_cli_usage_text_lists_unified_find_modes():
     usage = mcp_server._cli_usage_text()
 
-    assert "find [--root ROOT]" in usage
-    assert "find_fuzzy KEYWORD" in usage
+    assert "find [--mode auto|exact|fuzzy] [--keyword KEYWORD]" in usage
+    assert "find_fuzzy" not in usage
 
 
 def test_run_cli_typed_snapshot(monkeypatch, capsys):
@@ -3284,6 +3289,8 @@ def test_run_cli_typed_find(monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload == {
         "ok": True,
+        "mode": "auto",
+        "keyword": None,
         "root": "w12",
         "role": "button",
         "text": "Submit",
@@ -3295,22 +3302,27 @@ def test_run_cli_typed_find(monkeypatch, capsys):
     }
 
 
-def test_run_cli_typed_find_fuzzy(monkeypatch, capsys):
+def test_run_cli_typed_find_fuzzy_mode(monkeypatch, capsys):
     monkeypatch.setattr(
         mcp_server,
-        "find_fuzzy",
+        "find",
         lambda **kwargs: {"ok": True, **kwargs},
     )
 
-    exit_code = mcp_server._run_cli(["find_fuzzy", "submt", "--root", "w12", "--role", "button", "--limit", "2"])
+    exit_code = mcp_server._run_cli(["find", "--mode", "fuzzy", "--keyword", "submt", "--root", "w12", "--role", "button", "--limit", "2"])
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload == {
         "ok": True,
+        "mode": "fuzzy",
         "keyword": "submt",
         "root": "w12",
         "role": "button",
+        "text": None,
+        "class_": None,
+        "object_name": None,
+        "accessible_name": None,
         "include_infrastructure": False,
         "limit": 2,
     }
@@ -3866,6 +3878,7 @@ def test_find_result_returns_v2_handle_shape():
         }
     ]
     assert result == {
+        "search_mode": "fuzzy",
         "root_handle": "w1",
         "count": 1,
         "truncated": False,
@@ -3906,6 +3919,7 @@ def test_find_tool_returns_ok_payload(monkeypatch):
         mcp_server,
         "_find_result",
         lambda managed_connection, **kwargs: {
+            "search_mode": kwargs["mode"],
             "root_handle": "w1",
             "count": 1,
             "truncated": False,
@@ -3917,6 +3931,7 @@ def test_find_tool_returns_ok_payload(monkeypatch):
 
     assert result == {
         "ok": True,
+        "search_mode": "auto",
         "root_handle": "w1",
         "count": 1,
         "truncated": False,
@@ -3951,7 +3966,7 @@ def test_find_root_resolution_errors_are_user_facing(monkeypatch):
         mcp_server.find(root="#payment_panel", role="button")
 
 
-def test_find_fuzzy_tool_returns_ok_payload(monkeypatch):
+def test_find_tool_returns_ok_payload_for_fuzzy_mode(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -3965,8 +3980,9 @@ def test_find_fuzzy_tool_returns_ok_payload(monkeypatch):
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", mcp_server.ServerState(connection=connection))
     monkeypatch.setattr(
         mcp_server,
-        "_find_fuzzy_result",
+        "_find_result",
         lambda managed_connection, **kwargs: {
+            "search_mode": kwargs["mode"],
             "root_handle": "w1",
             "count": 1,
             "truncated": False,
@@ -3974,15 +3990,24 @@ def test_find_fuzzy_tool_returns_ok_payload(monkeypatch):
         },
     )
 
-    result = mcp_server.find_fuzzy(keyword="submt", root="#payment_panel", role="button", limit=3)
+    result = mcp_server.find(mode="fuzzy", keyword="submt", root="#payment_panel", role="button", limit=3)
 
     assert result == {
         "ok": True,
+        "search_mode": "fuzzy",
         "root_handle": "w1",
         "count": 1,
         "truncated": False,
         "results": [{"handle": "w2", "class": "QPushButton", "text": "Submit"}],
     }
+
+
+def test_find_mode_validation_errors_are_user_facing():
+    with pytest.raises(ValueError, match="mode='fuzzy' requires keyword"):
+        mcp_server.find(mode="fuzzy")
+
+    with pytest.raises(ValueError, match="mode='exact' does not accept keyword"):
+        mcp_server.find(mode="exact", keyword="submit")
 
 
 def test_resolve_object_names_result_maps_handles_and_reports_missing_and_ambiguous(monkeypatch):

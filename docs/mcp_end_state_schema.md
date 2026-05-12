@@ -458,12 +458,13 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 工具名：`find`
 
-职责：在给定 scope 下做确定性的结构化 widget 搜索。
+职责：在给定 scope 下做结构化 widget 搜索，通过 `mode` 在 exact、fuzzy、auto 三种语义之间切换。
 
 ### Find Request
 
 ```json
 {
+  "mode": "exact",
   "root": "w12",
   "role": "button",
   "text": "Submit",
@@ -480,6 +481,9 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 字段约束：
 
+- `mode="exact"` 时使用确定性约束搜索
+- `mode="fuzzy"` 时要求提供 `keyword`，并执行多字段近似排序
+- `mode="auto"` 时，当提供 `keyword` 走 fuzzy，否则走 exact
 - `root` 可选，缺省表示当前 active window
 - 所有显式启用的谓词按 AND 关系求交
 - `include_infrastructure` 默认为 `false`
@@ -490,6 +494,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 ```json
 {
   "ok": true,
+  "search_mode": "exact",
   "root_handle": "w12",
   "count": 1,
   "truncated": false,
@@ -509,16 +514,11 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
-## Find Fuzzy
-
-工具名：`find_fuzzy`
-
-职责：在给定 scope 下做近似关键词搜索，适合只有模糊文本线索时使用。
-
-### Find Fuzzy Request
+### Find Fuzzy Example
 
 ```json
 {
+  "mode": "fuzzy",
   "keyword": "submt",
   "root": "w12",
   "role": "button",
@@ -527,13 +527,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
-### Find Fuzzy Response
-
-响应结构与 `find` 相同，但 `match_reason` 会标明关键词命中来源，例如：
+响应结构与 `find` 相同，但 `search_mode` 为 `"fuzzy"`，并且 `match_reason` 会标明关键词命中来源，例如：
 
 ```json
 {
   "ok": true,
+  "search_mode": "fuzzy",
   "root_handle": "w12",
   "count": 1,
   "truncated": false,
