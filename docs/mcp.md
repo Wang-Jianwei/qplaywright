@@ -86,6 +86,8 @@ qplaywright-mcp cli click w12 --count 2
 qplaywright-mcp cli click --x 320 --y 180
 qplaywright-mcp cli hover --x 320 --y 180
 qplaywright-mcp cli input w7 123.45 --submit
+qplaywright-mcp cli input w7 --mode clear
+qplaywright-mcp cli focus w7 --include-state
 ```
 
 `session attach` and `session launch` perform a formal protocol handshake as
@@ -106,7 +108,7 @@ If the active window is not the desired scope, switch it first with `window sele
 3. `window` with `action="select"` when the desired scope is not the current active window.
 4. `snapshot`, `find`, `resolve_object_names`, or `inspect` to understand the widget tree and obtain stable handles.
 5. `inspect_items` when the target widget is a table, tree, or list and you need structured descendant item targets.
-6. Use action tools like `click`, `input`, `invoke`, `set_expanded`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and targeted `screenshot` with those handles, or reuse the structured item targets returned by `inspect_items`.
+6. Use action tools like `click`, `input`, `invoke`, `set_expanded`, `press_key`, `focus`, `hover`, `scroll`, `choose`, `wait`, and targeted `screenshot` with those handles, or reuse the structured item targets returned by `inspect_items`.
 7. `session` with `action="close"` when finished.
 
 ## Exposed MCP Interfaces
@@ -136,9 +138,10 @@ The server can be exposed through:
 | `resolve_object_names` | Resolve several exact `object_name` values to stable handles under one known root scope |
 | `inspect_items` | Enumerate structured table/tree/list/tab descendants for one owner widget |
 | `click` | Click or double-click one stable-handle widget, one item target, or one active-window coordinate |
-| `input` | Replace or append text, optionally submitting with Enter |
+| `input` | Replace, append, type, or clear widget text, optionally submitting with Enter |
 | `invoke` | Invoke one exposed custom widget method by exact name |
 | `press_key` | Send one key press to one stable-handle widget |
+| `focus` | Focus one stable-handle widget |
 | `set_expanded` | Expand or collapse one structured tree node item target |
 | `choose` | Select one combobox option by `value`, `index`, or `label` |
 | `wait` | Wait until a widget or item target reaches a supported state |
@@ -180,7 +183,7 @@ That value may be either:
 - a structured item target object such as `{"owner": "w3", "item": {"kind": "tab_item", "index": 1}}
 
 Exact widget actions use the same `target` parameter name, but for widgets they only accept stable handles such as `w12`.
-That applies to `click`, `input`, `invoke`, `press_key`, `hover`, `scroll`, `choose`, `wait`, and targeted `screenshot`.
+That applies to `click`, `input`, `invoke`, `press_key`, `focus`, `hover`, `scroll`, `choose`, `wait`, and targeted `screenshot`.
 Selectors remain valid for observation/search scopes such as `snapshot`, `find`, `inspect`, and `inspect_items` owner resolution.
 
 The selector side keeps the existing atomic qplaywright forms.
@@ -523,9 +526,10 @@ For item-view descendants, the same `target` field may be a structured object:
 Tool-specific fields:
 
 - `click`: optional `count`, or `x` + `y` together when `target` is omitted
-- `input`: `text`, optional `mode`, `delay`, `submit`
+- `input`: optional `text`, optional `mode`, `delay`, `submit`; `text` may be omitted only when `mode="clear"`
 - `invoke`: `method`, optional `args`
 - `press_key`: `key`
+- `focus`: no extra fields beyond `target` and optional post-action flags
 - `set_expanded`: `expanded` for structured tree node item targets only
 - `choose`: exactly one of `value`, `index`, or `label`
 - `wait`: optional `state` or `condition` + `expected`, optional `timeout`; item targets support `visible`/`hidden` and `text_equals`/`text_contains`

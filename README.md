@@ -113,6 +113,25 @@ tabs.tab("Data").select()
 
 When `visual_feedback` is enabled in the Qt agent and the client provides `agent_name`, the target window shows the current shared-agent overlay marker.
 
+## Logging
+
+QPlaywright uses the shared `qplaywright` logger namespace. If you want package logs on stderr or in a file, configure it once from Python:
+
+```python
+from qplaywright import configure_logging
+
+configure_logging(level="DEBUG")
+```
+
+The Python agent `start_agent()` and the MCP server entrypoint also honor these environment variables:
+
+```bash
+QPLAYWRIGHT_LOG_LEVEL=DEBUG
+QPLAYWRIGHT_LOG_FILE=qplaywright.log
+```
+
+When set, they enable package logging for `python -m qplaywright.mcp_server` and for Python apps that call `start_agent()`.
+
 ## MCP Server
 
 Run the MCP server over stdio:
@@ -141,8 +160,13 @@ Both direct `QPlaywright().connect(...)` and MCP `session attach` / `session lau
 now perform a formal protocol handshake immediately after the TCP connection is
 established. If the remote agent reports a different `protocol_version`, the
 connection is rejected immediately instead of failing later on the first tool call.
+The sync client now also exposes public exception types such as `QPlaywrightConnectionError`,
+`QPlaywrightProtocolError`, `QPlaywrightLookupError`, and `QPlaywrightActionError` so callers can
+distinguish transport, handshake/setup, lookup, and post-resolution action failures without
+string-matching exception messages.
 
 Use `snapshot`, `find`, `resolve_object_names`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
+Those handles remain valid across later observation calls, but you must rediscover them after the widget is destroyed or the session is replaced.
 Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find` when you want a short candidate list for one predicate; use `resolve_object_names` when one known subtree already exposes several deliberate stable `object_name` values.
 
 You can also inspect CLI help and available MCP resources directly:
@@ -165,6 +189,8 @@ qplaywright-mcp cli click w12 --count 2
 qplaywright-mcp cli click --x 320 --y 180
 qplaywright-mcp cli hover --x 320 --y 180
 qplaywright-mcp cli input w7 123.45 --submit
+qplaywright-mcp cli input w7 --mode clear
+qplaywright-mcp cli focus w7 --include-state
 ```
 
 When `click` or `hover` omits `target`, `x` and `y` are interpreted as coordinates relative to the active window.
@@ -219,5 +245,6 @@ In this repository, if you are using the checked-in virtual environment, run:
 ## Additional Docs
 
 - `docs/mcp.md`: current MCP server contract and tool surface
+- `docs/concurrency.md`: GUI-thread ownership, dispatch boundaries, and sync client serialization rules
 - `docs/custom_widgets.md`: explicit method-based custom widget automation contract
 - `docs/accessibility_semantics.md`: recommended use of `accessibleName`, `accessibleDescription`, and future `accessibleIdentifier` for agent-friendly Qt UIs

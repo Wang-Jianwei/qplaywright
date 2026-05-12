@@ -25,6 +25,7 @@ import weakref
 from concurrent.futures import Future
 from typing import Any
 
+from qplaywright._logging import configure_logging_from_env
 from qplaywright.protocol import (
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -131,6 +132,9 @@ _OverlayManagerClass = None
 _FIND_INFRASTRUCTURE_WIDGET_CLASSES = {
     "QAbstractScrollAreaScrollBarContainer",
 }
+# Session overlay metadata is process-global, but the agent only mutates it from
+# the Qt main thread while handling session commands. Worker/socket threads must
+# marshal back to the GUI thread before touching widget state or these globals.
 _SESSION_AGENT_NAMES: dict[str, str] = {}
 _ACTIVE_SESSION_ID: str | None = None
 # Reentrancy guard: set to True while a CommandEvent is being handled on the Qt
@@ -4152,6 +4156,7 @@ def start_agent(
         The server thread (call ``server.stop()`` to shut down).
     """
     global _agent_server, _VISUAL_FEEDBACK_ENABLED, _OVERLAY_MANAGER
+    configure_logging_from_env()
     _import_qt()
 
     if visual_feedback is None:

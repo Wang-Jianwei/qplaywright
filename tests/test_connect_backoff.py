@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from qplaywright import QPlaywrightAgentError, QPlaywrightConnectionError, QPlaywrightProtocolError
 from qplaywright.protocol import METHOD_HANDSHAKE, METHOD_SET_SESSION_INFO, PROTOCOL_VERSION
 from qplaywright.sync_api._api import QPlaywright
 
@@ -65,8 +66,11 @@ def test_connect_raises_after_timeout():
         patch("qplaywright.sync_api._api.time.monotonic", side_effect=fake_monotonic),
         patch("qplaywright.sync_api._api.time.sleep", side_effect=advance_time_on_sleep),
     ):
-        with pytest.raises(ConnectionError, match="Could not connect"):
+        with pytest.raises(QPlaywrightConnectionError, match="Could not connect") as exc_info:
             QPlaywright().connect(timeout=1.0)
+
+    assert exc_info.value.code == "connect_timeout"
+    assert exc_info.value.context["timeout"] == 1.0
 
 
 def test_connect_succeeds_on_second_attempt():
@@ -129,8 +133,22 @@ def test_connect_fails_immediately_on_protocol_mismatch():
         patch("qplaywright.sync_api._api.Connection", return_value=fake_conn),
         patch("qplaywright.sync_api._api.time.sleep", side_effect=lambda value: sleep_calls.append(value)),
     ):
-        with pytest.raises(ConnectionError, match="protocol mismatch"):
+        with pytest.raises(QPlaywrightProtocolError, match="protocol mismatch") as exc_info:
             QPlaywright().connect(timeout=30.0)
 
     assert fake_conn.connect.call_count == 1
     assert sleep_calls == []
+    assert exc_info.value.code == "protocol_mismatch"
+    assert exc_info.value.context["expected_protocol_version"] == PROTOCOL_VERSION
+
+
+def test_connect_wraps_handshake_agent_errors_as_protocol_errors():
+    fake_conn = MagicMock()
+    fake_conn.send.side_effect = QPlaywrightAgentError("Agent error: handshake rejected", code="agent_error")
+
+    with patch("qplaywright.sync_api._api.Connection", return_value=fake_conn):
+        with pytest.raises(QPlaywrightProtocolError, match="handshake failed") as exc_info:
+            QPlaywright().connect(timeout=30.0)
+
+    assert exc_info.value.code == "handshake_failed"
+    assert exc_info.value.context["method"] == METHOD_HANDSHAKE

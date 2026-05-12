@@ -779,6 +779,9 @@ inline bool matchesRole(const QWidget *widget, const QString &role)
         {"toolbar",     {"QToolBar"}},
         {"statusbar",   {"QStatusBar"}},
         {"groupbox",    {"QGroupBox"}},
+        {"splitter",    {"QSplitter"}},
+        {"stackedwidget", {"QStackedWidget"}},
+        {"dockwidget",  {"QDockWidget"}},
     };
 
     const auto it = roleMap.find(role.toLower());

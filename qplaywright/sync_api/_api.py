@@ -18,6 +18,12 @@ import subprocess
 import time
 from typing import Any, Generator
 
+from qplaywright.errors import (
+    QPlaywrightAgentError,
+    QPlaywrightConnectionError,
+    QPlaywrightLookupError,
+    QPlaywrightProtocolError,
+)
 from qplaywright.protocol import (
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -43,21 +49,59 @@ from qplaywright.sync_api._locator import Locator
 class _ConnectSetupError(RuntimeError):
     """Raised when the agent is reachable but connection setup cannot complete."""
 
+    def __init__(self, error: QPlaywrightConnectionError):
+        super().__init__(str(error))
+        self.error = error
+
+
+def _raise_connect_setup_error(error: QPlaywrightConnectionError) -> None:
+    raise _ConnectSetupError(error)
+
+
+def _wrap_connect_error(error: QPlaywrightConnectionError, *, host: str, port: int, timeout: float) -> QPlaywrightConnectionError:
+    context = dict(getattr(error, "context", {}) or {})
+    context.update({"host": host, "port": port, "timeout": timeout})
+    return error.__class__(
+        f"Could not connect to QPlaywright agent at {host}:{port} (timeout={timeout}s): {error}",
+        code=getattr(error, "code", None),
+        context=context,
+    )
+
 
 def _perform_handshake(conn: Connection) -> dict[str, Any]:
     try:
         result = conn.send(METHOD_HANDSHAKE)
-    except RuntimeError as exc:
-        raise _ConnectSetupError(f"handshake failed: {exc}") from exc
+    except QPlaywrightAgentError as exc:
+        _raise_connect_setup_error(
+            QPlaywrightProtocolError(
+                f"handshake failed: {exc}",
+                code="handshake_failed",
+                context={"method": METHOD_HANDSHAKE},
+            )
+        )
 
     if not isinstance(result, dict):
-        raise _ConnectSetupError("handshake failed: agent returned a non-object response")
+        _raise_connect_setup_error(
+            QPlaywrightProtocolError(
+                "handshake failed: agent returned a non-object response",
+                code="handshake_invalid_response",
+                context={"method": METHOD_HANDSHAKE},
+            )
+        )
 
     protocol_version = result.get("protocol_version")
     if protocol_version != PROTOCOL_VERSION:
-        raise _ConnectSetupError(
-            f"protocol mismatch: client requires protocol_version={PROTOCOL_VERSION}, "
-            f"agent reported {protocol_version!r}"
+        _raise_connect_setup_error(
+            QPlaywrightProtocolError(
+                f"protocol mismatch: client requires protocol_version={PROTOCOL_VERSION}, "
+                f"agent reported {protocol_version!r}",
+                code="protocol_mismatch",
+                context={
+                    "method": METHOD_HANDSHAKE,
+                    "protocol_version": protocol_version,
+                    "expected_protocol_version": PROTOCOL_VERSION,
+                },
+            )
         )
 
     return result
@@ -66,8 +110,14 @@ def _perform_handshake(conn: Connection) -> dict[str, Any]:
 def _advertise_agent_name(conn: Connection, agent_name: str) -> None:
     try:
         conn.send(METHOD_SET_SESSION_INFO, {"agentName": agent_name})
-    except RuntimeError as exc:
-        raise _ConnectSetupError(f"session setup failed: {exc}") from exc
+    except QPlaywrightAgentError as exc:
+        _raise_connect_setup_error(
+            QPlaywrightProtocolError(
+                f"session setup failed: {exc}",
+                code="session_setup_failed",
+                context={"method": METHOD_SET_SESSION_INFO, "agent_name": agent_name},
+            )
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -273,13 +323,21 @@ class Application:
         """
         wins = self.windows()
         if not wins:
-            raise RuntimeError("No visible windows found in the application")
+            raise QPlaywrightLookupError(
+                "No visible windows found in the application",
+                code="window_not_found",
+                context={"title": title, "index": index},
+            )
 
         if title is not None:
             for w in wins:
                 if title.lower() in w.title().lower():
                     return w
-            raise RuntimeError(f"No window found with title containing: {title!r}")
+            raise QPlaywrightLookupError(
+                f"No window found with title containing: {title!r}",
+                code="window_not_found",
+                context={"title": title, "index": index, "window_count": len(wins)},
+            )
 
         if index >= len(wins):
             raise IndexError(f"Window index {index} out of range (found {len(wins)} windows)")
@@ -347,19 +405,23 @@ class QPlaywright:
                 return Application(conn, timeout=timeout)
             except _ConnectSetupError as e:
                 conn.close()
-                raise ConnectionError(
-                    f"Could not connect to QPlaywright agent at {host}:{port} "
-                    f"(timeout={timeout}s): {e}"
-                ) from e
-            except (ConnectionRefusedError, ConnectionError, OSError) as e:
+                raise _wrap_connect_error(e.error, host=host, port=port, timeout=timeout) from e.error
+            except (ConnectionRefusedError, QPlaywrightConnectionError, OSError) as e:
                 last_error = e
                 conn.close()
                 time.sleep(backoff)
                 backoff = min(backoff * 2, max_backoff)
 
-        raise ConnectionError(
+        raise QPlaywrightConnectionError(
             f"Could not connect to QPlaywright agent at {host}:{port} "
-            f"(timeout={timeout}s): {last_error}"
+            f"(timeout={timeout}s): {last_error}",
+            code="connect_timeout",
+            context={
+                "host": host,
+                "port": port,
+                "timeout": timeout,
+                "last_error": None if last_error is None else repr(last_error),
+            },
         )
 
     def launch(

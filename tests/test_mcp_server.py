@@ -9,6 +9,7 @@ from typing import Any, cast
 import pytest
 
 import qplaywright.mcp_server as mcp_server
+from qplaywright import QPlaywrightActionError, QPlaywrightConnectionError, QPlaywrightProtocolError
 
 
 class FakeQPlaywright:
@@ -196,6 +197,9 @@ class FakeLocator:
     def hover(self):
         self.action_calls.append(("hover", {}))
 
+    def focus(self):
+        self.action_calls.append(("focus", {}))
+
     def scroll(self, *, delta_x: int = 0, delta_y: int = 0):
         self.action_calls.append(("scroll", {"delta_x": delta_x, "delta_y": delta_y}))
 
@@ -267,7 +271,7 @@ def test_connect_connection_clears_existing_when_new_connect_fails(monkeypatch):
     class FailingQPlaywright(FakeQPlaywright):
         def connect(self, *, host: str, port: int, timeout: float, agent_name: str | None = None):
             self.connected = (host, port, timeout)
-            raise ConnectionError("protocol mismatch")
+            raise QPlaywrightProtocolError("protocol mismatch", code="protocol_mismatch")
 
     monkeypatch.setattr(mcp_server, "QPlaywright", FailingQPlaywright)
 
@@ -283,12 +287,13 @@ def test_connect_connection_clears_existing_when_new_connect_fails(monkeypatch):
     )
     state = mcp_server.ServerState(connection=existing_connection)
 
-    with pytest.raises(ConnectionError, match="protocol mismatch"):
+    with pytest.raises(QPlaywrightProtocolError, match="protocol mismatch") as exc_info:
         mcp_server.connect_connection(state, host="127.0.0.1", port=19877, timeout=5.0)
 
     assert existing_qplaywright.closed is True
     assert existing_app.closed is True
     assert state.connection is None
+    assert exc_info.value.code == "protocol_mismatch"
 
 
 def test_launch_connection_tracks_executable(monkeypatch):
@@ -317,7 +322,9 @@ def test_launch_connection_tracks_executable(monkeypatch):
 
 def test_get_connection_removes_stale_session_from_state():
     app = FakeApp([])
-    app._conn = FakeTransportConn(error=ConnectionError("Agent closed connection"))
+    app._conn = FakeTransportConn(
+        error=QPlaywrightConnectionError("Agent closed connection", code="connection_closed")
+    )
     qplaywright = FakeQPlaywright()
     state = mcp_server.ServerState(
         connection=mcp_server.ManagedConnection(
@@ -330,12 +337,15 @@ def test_get_connection_removes_stale_session_from_state():
         )
     )
 
-    with pytest.raises(ConnectionError, match="Call session attach again"):
+    with pytest.raises(QPlaywrightConnectionError, match="Call session attach again") as exc_info:
         mcp_server._get_connection(state)
 
     assert state.connection is None
     assert app.closed is True
     assert qplaywright.closed is True
+    assert exc_info.value.code == "stale_session"
+    assert exc_info.value.context["host"] == "127.0.0.1"
+    assert exc_info.value.context["port"] == 19876
 
 
 def test_resolve_window_prefers_wid_then_title():
@@ -590,6 +600,49 @@ def test_inspect_items_wraps_tab_entries_with_reusable_targets(monkeypatch):
     }
 
 
+def test_inspect_items_missing_transport_raises_connection_error(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    with pytest.raises(QPlaywrightConnectionError, match="inspect_items") as exc_info:
+        mcp_server.inspect_items(target="#tree")
+
+    assert exc_info.value.code == "transport_unavailable"
+
+
+def test_inspect_items_invalid_payload_raises_value_error(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(responses={"item_view_inspect": "bad-payload"})
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    with pytest.raises(ValueError, match="inspect_items received an invalid item_view_inspect payload"):
+        mcp_server.inspect_items(target="#tree")
+
+
 def test_click_accepts_item_target(monkeypatch):
     window = FakeWindow(11, "Main")
     app = FakeApp([window])
@@ -614,6 +667,24 @@ def test_click_accepts_item_target(monkeypatch):
     assert app._conn.calls[-1]["method"] == "item_dblclick"
     assert result["state_target"] == target
     assert result["snapshot_target"] == "#tree"
+
+
+def test_click_item_target_owner_resolution_errors_are_user_facing(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", mcp_server.ServerState(connection=connection))
+    monkeypatch.setattr(mcp_server, "_resolve_locator", lambda managed_connection, target: object())
+
+    with pytest.raises(ValueError, match="Item target owner '#tree' could not be resolved to a concrete widget"):
+        mcp_server.click(target=_item_target())
 
 
 def test_click_without_target_uses_active_window_transport(monkeypatch):
@@ -670,7 +741,10 @@ def test_click_rejects_mixed_target_and_coordinates(monkeypatch):
 def test_click_hidden_stable_handle_reports_clearer_error(monkeypatch):
     class HiddenLocator(FakeLocator):
         def click(self):
-            raise RuntimeError("Agent error: Cannot click widget of type: QPushButton; event target is not visible")
+            raise QPlaywrightActionError(
+                "Agent error: Cannot click widget of type: QPushButton; event target is not visible",
+                code="action_failed",
+            )
 
         def count(self) -> int:
             return 1
@@ -694,6 +768,131 @@ def test_click_hidden_stable_handle_reports_clearer_error(monkeypatch):
 
     with pytest.raises(ValueError, match="still exists but is not visible"):
         mcp_server.click(target="w5")
+
+
+def test_click_item_target_wraps_action_errors(monkeypatch):
+    class FailingItemLocator:
+        def click(self):
+            raise QPlaywrightActionError(
+                "click failed for item target {'kind': 'table_cell'}: Agent error: item disabled",
+                code="action_failed",
+            )
+
+        def dblclick(self):
+            raise AssertionError("dblclick should not be called")
+
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=FakeApp([FakeWindow(11, "Main")]),
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_resolve_item_locator", lambda *args, **kwargs: FailingItemLocator())
+
+    with pytest.raises(ValueError, match="click failed for target"):
+        mcp_server.click(target=_item_target())
+
+
+def test_input_clear_mode_clears_without_text(monkeypatch):
+    locator = FakeLocator(count=1, target="w7")
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=FakeApp([FakeWindow(11, "Main")]),
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
+
+    result = mcp_server.input(target="w7", text="", mode="clear")
+
+    assert locator.action_calls == [("clear", {})]
+    assert result["mode"] == "clear"
+    assert result["text"] == ""
+
+
+def test_input_type_mode_uses_keyboard_typing(monkeypatch):
+    locator = FakeLocator(count=1, target="w7")
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=FakeApp([FakeWindow(11, "Main")]),
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: locator)
+    monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
+
+    result = mcp_server.input(target="w7", text="123.45", mode="type", delay=25)
+
+    assert locator.action_calls == [("type", {"text": "123.45", "delay": 25})]
+    assert result["mode"] == "type"
+    assert result["delay"] == 25
+
+
+def test_input_wraps_action_errors_with_target_context(monkeypatch):
+    class FailingInputLocator(FakeLocator):
+        def fill(self, value: str):
+            raise QPlaywrightActionError(
+                "fill failed for locator Locator(wid=101): Agent error: widget is read-only",
+                code="action_failed",
+            )
+
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=FakeApp([FakeWindow(11, "Main")]),
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(
+        mcp_server,
+        "_resolve_widget_handle_locator",
+        lambda *args, **kwargs: FailingInputLocator(count=1, target="w7"),
+    )
+
+    with pytest.raises(ValueError, match="Input failed for target 'w7'"):
+        mcp_server.input(target="w7", text="123.45", mode="replace")
+
+
+def test_input_clear_mode_rejects_submit_without_text_entry(monkeypatch):
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=FakeApp([FakeWindow(11, "Main")]),
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    with pytest.raises(ValueError, match="clear mode does not support submit"):
+        mcp_server.input(target="w7", text="", mode="clear", submit=True)
 
 
 def test_hover_without_target_uses_active_window_transport(monkeypatch):
@@ -724,6 +923,32 @@ def test_hover_without_target_uses_active_window_transport(monkeypatch):
     assert result["target"] is None
     assert result["x"] == 7
     assert result["y"] == 9
+
+
+def test_hover_item_target_wraps_action_errors(monkeypatch):
+    class FailingItemLocator:
+        def hover(self):
+            raise QPlaywrightActionError(
+                "hover failed for item target {'kind': 'table_cell'}: Agent error: item hidden",
+                code="action_failed",
+            )
+
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=FakeApp([FakeWindow(11, "Main")]),
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_resolve_item_locator", lambda *args, **kwargs: FailingItemLocator())
+
+    with pytest.raises(ValueError, match="hover failed for target"):
+        mcp_server.hover(target=_item_target())
 
 
 def test_wait_accepts_item_target_visible_state(monkeypatch):
@@ -798,6 +1023,35 @@ def test_set_expanded_uses_item_expand(monkeypatch):
     assert app._conn.calls[-1]["method"] == "item_expand"
     assert result["expanded"] is True
     assert result["snapshot_target"] == "#tree"
+
+
+def test_set_expanded_wraps_action_errors_with_target_context(monkeypatch):
+    class FailingItemLocator:
+        def expand(self):
+            raise QPlaywrightActionError(
+                "expand failed for item target {'kind': 'tree_node'}: Agent error: node is not expandable",
+                code="action_failed",
+            )
+
+        def collapse(self):
+            raise AssertionError("collapse should not be called")
+
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=FakeApp([FakeWindow(11, "Main")]),
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_resolve_item_locator", lambda *args, **kwargs: FailingItemLocator())
+
+    with pytest.raises(ValueError, match="set_expanded failed for target"):
+        mcp_server.set_expanded(target=_item_target(), expanded=True)
 
 
 def test_handle_for_wid_is_stable_across_calls():
@@ -1398,6 +1652,20 @@ def test_invoke_locator_method_raises_detailed_failure_for_structured_invoke_res
         mcp_server._invoke_locator_method(locator, method_name="setAmount", args={})
 
 
+def test_invoke_locator_method_wraps_action_errors():
+    class FailingInvokeLocator(FakeLocator):
+        def invoke(self, method_name: str, args: dict[str, object] | None = None):
+            raise QPlaywrightActionError(
+                "invoke failed for locator Locator(wid=101): Agent error: method failed",
+                code="action_failed",
+            )
+
+    locator = FailingInvokeLocator(count=1)
+
+    with pytest.raises(ValueError, match=r"Invoke failed for method 'setAmount': invoke failed for locator"):
+        mcp_server._invoke_locator_method(locator, method_name="setAmount", args={"value": "123.45"})
+
+
 def test_wait_can_include_snapshot(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
@@ -1432,6 +1700,31 @@ def test_wait_can_include_snapshot(monkeypatch):
     assert result["active_window"]["wid"] == 11
     assert result["observation"] == _v2_observation_payload("DemoWindow")
     assert "refs" not in result
+
+
+def test_wait_wraps_action_errors_with_target_context(monkeypatch):
+    class FailingWaitLocator(FakeLocator):
+        def wait_for(self, *, state: str = "visible", timeout: float | None = None) -> None:
+            raise QPlaywrightActionError(
+                "wait_for failed for locator Locator(wid=101): Agent error: widget never became visible",
+                code="action_failed",
+            )
+
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: FailingWaitLocator(count=1))
+
+    with pytest.raises(ValueError, match="wait failed for target 'w7'"):
+        mcp_server.wait(target="w7", state="visible", timeout=5.0)
 
 
 def test_wait_can_use_text_contains_condition(monkeypatch):
@@ -1705,6 +1998,51 @@ def test_choose_ignores_blank_unused_string_values(monkeypatch):
 
 
 @pytest.mark.parametrize(
+    ("tool_name", "call_kwargs", "match_text"),
+    [
+        ("press_key", {"target": "w3", "key": "Enter"}, "press_key failed for target 'w3'"),
+        ("focus", {"target": "w6"}, "focus failed for target 'w6'"),
+        ("choose", {"target": "w5", "label": "CNY"}, "choose failed for target 'w5'"),
+        ("hover", {"target": "w6"}, "hover failed for target 'w6'"),
+        ("scroll", {"target": "w6", "delta_x": 5, "delta_y": 10}, "scroll failed for target 'w6'"),
+    ],
+)
+def test_widget_action_tools_wrap_action_errors(monkeypatch, tool_name, call_kwargs, match_text):
+    class FailingLocator(FakeLocator):
+        def press(self, key: str):
+            raise QPlaywrightActionError("press failed for locator Locator(wid=101): Agent error: key rejected", code="action_failed")
+
+        def focus(self):
+            raise QPlaywrightActionError("focus failed for locator Locator(wid=101): Agent error: focus rejected", code="action_failed")
+
+        def select_option(self, value=None, *, index=None, label=None):
+            raise QPlaywrightActionError("select_option failed for locator Locator(wid=101): Agent error: option missing", code="action_failed")
+
+        def hover(self):
+            raise QPlaywrightActionError("hover failed for locator Locator(wid=101): Agent error: widget hidden", code="action_failed")
+
+        def scroll(self, *, delta_x: int = 0, delta_y: int = 0):
+            raise QPlaywrightActionError("scroll failed for locator Locator(wid=101): Agent error: wheel event rejected", code="action_failed")
+
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=FakeApp([FakeWindow(11, "Main")]),
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: FailingLocator(count=1, target="w6"))
+
+    with pytest.raises(ValueError, match=match_text):
+        getattr(mcp_server, tool_name)(**call_kwargs)
+
+
+@pytest.mark.parametrize(
     ("tool_name", "call_kwargs", "expected_calls", "expected_payload"),
     [
         ("click", {"target": "w2", "include_snapshot": True}, [("click", {})], {"target": "w2", "count": 1}),
@@ -1715,6 +2053,7 @@ def test_choose_ignores_blank_unused_string_values(monkeypatch):
         ("press_key", {"target": "w3", "key": "Enter", "include_snapshot": True}, [("press", {"key": "Enter"})], {"target": "w3", "key": "Enter"}),
         ("choose", {"target": "w5", "label": "CNY", "include_snapshot": True}, [("select_option", {"value": None, "index": None, "label": "CNY"})], {"target": "w5", "label": "CNY", "value": None, "index": None}),
         ("hover", {"target": "w6", "include_snapshot": True}, [("hover", {})], {"target": "w6"}),
+        ("focus", {"target": "w6", "include_snapshot": True}, [("focus", {})], {"target": "w6"}),
         ("scroll", {"target": "w6", "delta_x": 5, "delta_y": 10, "include_snapshot": True}, [("scroll", {"delta_x": 5, "delta_y": 10})], {"target": "w6", "delta_x": 5, "delta_y": 10}),
     ],
 )
@@ -1823,6 +2162,46 @@ def test_press_key_without_target_uses_active_window_transport(monkeypatch):
     assert result["key"] == "Enter"
 
 
+def test_press_key_without_target_missing_transport_raises_connection_error(monkeypatch):
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=FakeApp([FakeWindow(11, "Main")]),
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    with pytest.raises(QPlaywrightConnectionError, match="targetless press_key") as exc_info:
+        mcp_server.press_key(key="Enter")
+
+    assert exc_info.value.code == "transport_unavailable"
+
+
+def test_hover_without_target_missing_transport_raises_connection_error(monkeypatch):
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=FakeApp([FakeWindow(11, "Main")]),
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    with pytest.raises(QPlaywrightConnectionError, match="targetless hover") as exc_info:
+        mcp_server.hover(x=7, y=9)
+
+    assert exc_info.value.code == "transport_unavailable"
+
+
 def test_mcp_tool_input_schema_describes_all_parameters():
     assert mcp_server.mcp is not None
 
@@ -1863,6 +2242,13 @@ def test_mcp_tool_input_schema_describes_all_parameters():
         {"required": ["target"]},
         {"required": ["x", "y"]},
     ]
+
+    input_tool = next(tool for tool in dumped if tool["name"] == "input")
+    input_mode_description = input_tool["inputSchema"]["properties"]["mode"]["description"]
+    assert "replace" in input_mode_description
+    assert "append" in input_mode_description
+    assert "type" in input_mode_description
+    assert "clear" in input_mode_description
     assert hover_schema["allOf"] == [
         {"not": {"required": ["target", "x"]}},
         {"not": {"required": ["target", "y"]}},
@@ -3024,23 +3410,75 @@ def test_run_cli_typed_click_and_input(monkeypatch, capsys):
         "target": "w7",
         "text": "123.45",
     }
+
+
+def test_run_cli_typed_input_clear_omits_text(monkeypatch, capsys):
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    def fake_input(**kwargs):
+        captured.append(("input", kwargs))
+        return {"ok": True, **kwargs}
+
+    monkeypatch.setattr(mcp_server, "input", fake_input)
+
+    input_exit_code = mcp_server._run_cli(["input", "w7", "--mode", "clear"])
+    input_payload = json.loads(capsys.readouterr().out)
+
+    assert input_exit_code == 0
     assert captured == [
-        (
-            "click",
-            {"target": "w12", "count": 2, "include_state": False, "include_snapshot": True},
-        ),
         (
             "input",
             {
                 "target": "w7",
-                "text": "123.45",
-                "mode": "append",
-                "delay": 25,
-                "submit": True,
+                "text": "",
+                "mode": "clear",
+                "delay": 0,
+                "submit": False,
                 "include_state": False,
                 "include_snapshot": False,
             },
-        ),
+        )
+    ]
+    assert input_payload == {
+        "ok": True,
+        "delay": 0,
+        "include_state": False,
+        "include_snapshot": False,
+        "mode": "clear",
+        "submit": False,
+        "target": "w7",
+        "text": "",
+    }
+
+
+def test_run_cli_typed_focus(monkeypatch, capsys):
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    def fake_focus(**kwargs):
+        captured.append(("focus", kwargs))
+        return {"ok": True, **kwargs}
+
+    monkeypatch.setattr(mcp_server, "focus", fake_focus)
+
+    exit_code = mcp_server._run_cli(["focus", "w7", "--include-state"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "target": "w7",
+        "include_state": True,
+        "include_snapshot": False,
+    }
+    assert captured == [
+        (
+            "focus",
+            {
+                "target": "w7",
+                "include_state": True,
+                "include_snapshot": False,
+            },
+        )
     ]
 
 
@@ -3161,6 +3599,7 @@ def test_main_serve_mode_keeps_existing_transport_flow(monkeypatch):
         return 0
 
     monkeypatch.setattr(mcp_server, "_MCP_VERSION_ERROR", None)
+    monkeypatch.setattr(mcp_server, "configure_logging_from_env", lambda: calls.setdefault("logging_configured", True))
     monkeypatch.setattr(mcp_server, "_configure_stdio_for_mcp", lambda transport: calls.setdefault("transport", transport))
     monkeypatch.setattr(mcp_server, "_run_mcp_transport", fake_run_transport)
 
@@ -3168,7 +3607,11 @@ def test_main_serve_mode_keeps_existing_transport_flow(monkeypatch):
         mcp_server.main(["--transport", "streamable-http"])
 
     assert exc_info.value.code == 0
-    assert calls == {"transport": "streamable-http", "run_transport": "streamable-http"}
+    assert calls == {
+        "logging_configured": True,
+        "transport": "streamable-http",
+        "run_transport": "streamable-http",
+    }
 
 
 def test_main_rejects_too_old_mcp_dependency(monkeypatch):
@@ -3479,6 +3922,33 @@ def test_find_tool_returns_ok_payload(monkeypatch):
         "truncated": False,
         "results": [{"handle": "w2", "class": "QPushButton", "text": "Submit"}],
     }
+
+
+def test_find_root_resolution_errors_are_user_facing(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", mcp_server.ServerState(connection=connection))
+
+    class BrokenRootLocator:
+        def count(self) -> int:
+            return 1
+
+    class BrokenRootWindow:
+        def locator(self, target: str):
+            return BrokenRootLocator()
+
+    monkeypatch.setattr(mcp_server, "_resolve_window", lambda managed_connection: BrokenRootWindow())
+
+    with pytest.raises(ValueError, match="Find root '#payment_panel' could not be resolved to a concrete widget"):
+        mcp_server.find(root="#payment_panel", role="button")
 
 
 def test_find_fuzzy_tool_returns_ok_payload(monkeypatch):

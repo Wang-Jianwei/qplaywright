@@ -7,6 +7,7 @@ import socket
 import threading
 from typing import Any
 
+from qplaywright.errors import QPlaywrightAgentError, QPlaywrightConnectionError
 from qplaywright.protocol import (
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -44,7 +45,11 @@ class Connection:
     def send(self, method: str, params: dict | None = None, *, timeout: float | None = None) -> Any:
         """Send a request and wait for the response. Returns the result or raises."""
         if self._sock is None:
-            raise ConnectionError("Not connected to agent")
+            raise QPlaywrightConnectionError(
+                "Not connected to agent",
+                code="not_connected",
+                context={"host": self.host, "port": self.port, "method": method},
+            )
 
         with self._lock:
             self._id_counter += 1
@@ -68,12 +73,20 @@ class Connection:
                         resp = Response.from_dict(d)
                         if resp.id == req_id:
                             if resp.error:
-                                raise RuntimeError(f"Agent error: {resp.error}")
+                                raise QPlaywrightAgentError(
+                                    f"Agent error: {resp.error}",
+                                    code="agent_error",
+                                    context={"method": method, "request_id": req_id},
+                                )
                             return resp.result
 
                     data = self._sock.recv(65536)
                     if not data:
-                        raise ConnectionError("Agent closed connection")
+                        raise QPlaywrightConnectionError(
+                            "Agent closed connection",
+                            code="connection_closed",
+                            context={"host": self.host, "port": self.port, "method": method, "request_id": req_id},
+                        )
                     self._buf += data
             finally:
                 if timeout is not None:

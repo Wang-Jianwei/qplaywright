@@ -20,7 +20,7 @@ import shutil
 import sys
 import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -44,6 +44,8 @@ from qplaywright.protocol import (
     METHOD_PRESS,
     METHOD_WIDGET_TREE,
 )
+from qplaywright._logging import configure_logging_from_env
+from qplaywright.errors import QPlaywrightActionError, QPlaywrightConnectionError
 from qplaywright.sync_api import QPlaywright
 from qplaywright.sync_api._locator import ItemLocator, Locator
 
@@ -309,7 +311,7 @@ InputTextArg = Annotated[
 ]
 InputModeArg = Annotated[
     str,
-    Field(description="Input mode. Use replace to overwrite existing content or append to type after it."),
+    Field(description="Input mode. Use replace to overwrite existing content, append to type after it, type to simulate keyboard entry without clearing first, or clear to erase existing content without typing."),
 ]
 InputDelayArg = Annotated[
     int,
@@ -964,9 +966,36 @@ def _get_connection(state: ServerState) -> ManagedConnection:
     except Exception as exc:
         connection.close()
         state.connection = None
-        raise ConnectionError(_stale_connection_message(connection, exc)) from exc
+        raise QPlaywrightConnectionError(
+            _stale_connection_message(connection, exc),
+            code="stale_session",
+            context={
+                "host": connection.host,
+                "port": connection.port,
+                "timeout": connection.timeout,
+                "connection_name": connection.name,
+                "last_error": repr(exc),
+            },
+        ) from exc
 
     return connection
+
+
+def _require_session_transport(connection: ManagedConnection, *, action: str) -> Any:
+    client = getattr(connection.app, "_conn", None)
+    if client is None:
+        raise QPlaywrightConnectionError(
+            f"Active session transport is unavailable for {action}. Reattach or relaunch the session before retrying.",
+            code="transport_unavailable",
+            context={
+                "host": connection.host,
+                "port": connection.port,
+                "timeout": connection.timeout,
+                "connection_name": connection.name,
+                "action": action,
+            },
+        )
+    return client
 
 
 def connect_connection(
@@ -1175,6 +1204,19 @@ def _target_owner_target(target: str | dict[str, Any] | None) -> str | None:
     return _normalize_item_target(target)["owner"]
 
 
+def _resolve_locator_owner_wid(locator: Any, *, context: str) -> int:
+    resolve_owner_wid = getattr(locator, "_resolve_owner_wid", None)
+    if not callable(resolve_owner_wid):
+        raise ValueError(f"{context} could not be resolved to a concrete widget.")
+    try:
+        owner_wid = resolve_owner_wid()
+    except Exception as exc:
+        raise ValueError(f"{context} could not be resolved to a concrete widget: {exc}") from exc
+    if isinstance(owner_wid, bool) or not isinstance(owner_wid, int):
+        raise ValueError(f"{context} did not resolve to a concrete widget id.")
+    return int(owner_wid)
+
+
 def _resolve_item_locator(
     connection: ManagedConnection,
     *,
@@ -1182,14 +1224,9 @@ def _resolve_item_locator(
 ) -> ItemLocator:
     normalized = _normalize_item_target(target)
     owner_locator = _resolve_locator(connection, target=normalized["owner"])
-    resolve_owner_wid = getattr(owner_locator, "_resolve_owner_wid", None)
-    if not callable(resolve_owner_wid):
-        raise RuntimeError("Resolved owner locator does not expose owner widget resolution")
-    owner_wid_value = resolve_owner_wid()
-    if isinstance(owner_wid_value, bool) or not isinstance(owner_wid_value, int):
-        raise RuntimeError(f"Resolved owner wid must be an integer, got {type(owner_wid_value).__name__}")
-    owner_wid = int(owner_wid_value)
-    return ItemLocator(connection.app._conn, owner_wid, normalized["item"], timeout=connection.timeout)
+    owner_wid = _resolve_locator_owner_wid(owner_locator, context=f"Item target owner {normalized['owner']!r}")
+    client = _require_session_transport(connection, action="item target operations")
+    return ItemLocator(client, owner_wid, normalized["item"], timeout=connection.timeout)
 
 
 def _inspect_locator(
@@ -1475,22 +1512,13 @@ def _item_view_inspect(
     include_hidden: bool,
 ) -> dict[str, Any]:
     owner_locator = _resolve_locator(connection, target=target)
-    resolve_owner_wid = getattr(owner_locator, "_resolve_owner_wid", None)
-    if not callable(resolve_owner_wid):
-        raise RuntimeError("Resolved owner locator does not expose owner widget resolution")
-
-    client = getattr(connection.app, "_conn", None)
-    if client is None:
-        raise RuntimeError("Active session does not expose the raw transport required for item discovery")
-
-    owner_wid_value = resolve_owner_wid()
-    if isinstance(owner_wid_value, bool) or not isinstance(owner_wid_value, int):
-        raise RuntimeError(f"Resolved owner wid must be an integer, got {type(owner_wid_value).__name__}")
+    owner_wid = _resolve_locator_owner_wid(owner_locator, context=f"inspect_items target {target!r}")
+    client = _require_session_transport(connection, action="inspect_items")
 
     payload = client.send(
         METHOD_ITEM_VIEW_INSPECT,
         {
-            "wid": int(owner_wid_value),
+            "wid": owner_wid,
             "max_rows": max_rows,
             "max_depth": max_depth,
             "max_items": max_items,
@@ -1499,7 +1527,7 @@ def _item_view_inspect(
         timeout=connection.timeout,
     )
     if not isinstance(payload, dict):
-        raise RuntimeError("item_view_inspect returned an invalid payload")
+        raise ValueError("inspect_items received an invalid item_view_inspect payload")
 
     items = []
     for entry in payload.get("items") or []:
@@ -1526,12 +1554,23 @@ def _invoke_locator_method(
             "No widget found for invoke. Use snapshot, find, or inspect first and reuse the returned stable handle."
         )
 
-    result = locator.first().invoke(method_name, args or {})
+    try:
+        result = locator.first().invoke(method_name, args or {})
+    except QPlaywrightActionError as exc:
+        raise ValueError(f"Invoke failed for method {method_name!r}: {exc}") from exc
+
     if isinstance(result, dict) and "ok" in result and result.get("ok") is False:
         error_code = result.get("errorCode")
         error_message = str(result.get("errorMessage") or "Unknown invoke failure")
         raise ValueError(f"Invoke failed for method {method_name!r} (errorCode={error_code}): {error_message}")
     return result
+
+
+def _run_widget_tool_action(*, action: str, target: str, callback: Callable[[], Any]) -> Any:
+    try:
+        return callback()
+    except QPlaywrightActionError as exc:
+        raise ValueError(f"{action} failed for target {target!r}: {exc}") from exc
 
 
 def _target_not_found_message(connection: ManagedConnection, target: str | None, *, element: str | None = None) -> str:
@@ -1919,13 +1958,7 @@ def _resolve_find_root_wid(connection: ManagedConnection, root: str | None) -> i
             f"Find root {candidate!r} is ambiguous ({count} matches). Use find to narrow candidates before using it as a root."
         )
 
-    resolve_owner_wid = getattr(locator, "_resolve_owner_wid", None)
-    if not callable(resolve_owner_wid):
-        raise RuntimeError("Resolved find root locator does not expose owner widget resolution")
-    owner_wid = resolve_owner_wid()
-    if isinstance(owner_wid, bool) or not isinstance(owner_wid, int):
-        raise RuntimeError(f"Resolved find root wid must be an integer, got {type(owner_wid).__name__}")
-    return int(owner_wid)
+    return _resolve_locator_owner_wid(locator, context=f"Find root {candidate!r}")
 
 
 def _find_ancestor_summary_entry(connection: ManagedConnection, node: dict[str, Any]) -> dict[str, Any]:
@@ -2176,9 +2209,7 @@ def _topmost_only_warnings(*, topmost_only: bool, target: str | None = None) -> 
 
 
 def _press_key_without_target(connection: ManagedConnection, *, key: str) -> None:
-    client = getattr(connection.app, "_conn", None)
-    if client is None:
-        raise RuntimeError("Active session does not expose the raw transport required for targetless press_key")
+    client = _require_session_transport(connection, action="targetless press_key")
 
     params: dict[str, Any] = {"key": key}
     if connection.active_window_wid is not None:
@@ -2201,9 +2232,7 @@ def _pointer_action_coords(*, x: int | None, y: int | None) -> dict[str, int]:
 
 
 def _pointer_action_without_target(connection: ManagedConnection, *, method: str, x: int, y: int) -> None:
-    client = getattr(connection.app, "_conn", None)
-    if client is None:
-        raise RuntimeError("Active session does not expose the raw transport required for targetless pointer actions")
+    client = _require_session_transport(connection, action=f"targetless {method}")
 
     params: dict[str, Any] = {"x": x, "y": y}
     if connection.active_window_wid is not None:
@@ -2869,7 +2898,7 @@ if FastMCP is not None:
                     locator.dblclick()
                 else:
                     locator.click()
-            except RuntimeError as exc:
+            except QPlaywrightActionError as exc:
                 if isinstance(target, str):
                     _raise_if_hidden_click_target(
                         locator,
@@ -2877,7 +2906,9 @@ if FastMCP is not None:
                         action="dblclick" if count == 2 else "click",
                         exc=exc,
                     )
-                raise
+                raise ValueError(
+                    f"{'dblclick' if count == 2 else 'click'} failed for target {target!r}: {exc}"
+                ) from exc
 
         snapshot_target = _target_owner_target(target) if target is not None else None
         return _finalize_action_result(
@@ -2929,7 +2960,7 @@ if FastMCP is not None:
     @mcp.tool()
     def input(
         target: WidgetHandleArg,
-        text: InputTextArg,
+        text: InputTextArg = "",
         mode: InputModeArg = "replace",
         delay: InputDelayArg = 0,
         submit: SubmitArg = False,
@@ -2938,24 +2969,35 @@ if FastMCP is not None:
     ) -> dict[str, Any]:
         """Input text into one widget resolved by stable handle."""
 
-        if mode not in ("replace", "append"):
-            raise ValueError("mode must be 'replace' or 'append'")
+        if mode not in ("replace", "append", "type", "clear"):
+            raise ValueError("mode must be 'replace', 'append', 'type', or 'clear'")
         if delay < 0:
             raise ValueError("delay must be >= 0")
+        if mode == "clear" and submit:
+            raise ValueError("clear mode does not support submit")
+        if mode != "clear" and not text:
+            raise ValueError("text must not be empty unless mode='clear'")
 
         connection_state = _get_connection(_SERVER_STATE)
         locator = _resolve_widget_handle_locator(connection_state, target=target, action="input")
-        if mode == "replace":
-            if delay == 0:
-                locator.fill(text)
+        try:
+            if mode == "replace":
+                if delay == 0:
+                    locator.fill(text)
+                else:
+                    locator.clear()
+                    locator.type(text, delay=delay)
+            elif mode == "append":
+                locator.type(text, delay=delay)
+            elif mode == "type":
+                locator.type(text, delay=delay)
             else:
                 locator.clear()
-                locator.type(text, delay=delay)
-        else:
-            locator.type(text, delay=delay)
 
-        if submit:
-            locator.press("Enter")
+            if submit:
+                locator.press("Enter")
+        except QPlaywrightActionError as exc:
+            raise ValueError(f"Input failed for target {target!r}: {exc}") from exc
 
         return _finalize_action_result(
             connection_state,
@@ -3011,7 +3053,7 @@ if FastMCP is not None:
             _press_key_without_target(connection_state, key=key)
         else:
             locator = _resolve_widget_handle_locator(connection_state, target=target, action="press_key")
-            locator.press(key)
+            _run_widget_tool_action(action="press_key", target=target, callback=lambda: locator.press(key))
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
@@ -3021,6 +3063,27 @@ if FastMCP is not None:
             ok=True,
             target=target,
             key=key,
+        )
+
+    @mcp.tool()
+    def focus(
+        target: WidgetHandleArg,
+        include_state: IncludeStateArg = False,
+        include_snapshot: IncludeSnapshotArg = False,
+    ) -> dict[str, Any]:
+        """Focus one widget resolved by stable handle."""
+
+        connection_state = _get_connection(_SERVER_STATE)
+        locator = _resolve_widget_handle_locator(connection_state, target=target, action="focus")
+        _run_widget_tool_action(action="focus", target=target, callback=locator.focus)
+        return _finalize_action_result(
+            connection_state,
+            include_state=include_state,
+            include_snapshot=include_snapshot,
+            state_target=target,
+            snapshot_target=target,
+            ok=True,
+            target=target,
         )
 
     @mcp.tool()
@@ -3042,7 +3105,11 @@ if FastMCP is not None:
 
         connection_state = _get_connection(_SERVER_STATE)
         locator = _resolve_widget_handle_locator(connection_state, target=target, action="choose")
-        locator.select_option(value=value, index=index, label=label)
+        _run_widget_tool_action(
+            action="choose",
+            target=target,
+            callback=lambda: locator.select_option(value=value, index=index, label=label),
+        )
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
@@ -3094,7 +3161,10 @@ if FastMCP is not None:
 
             if condition is None:
                 assert state is not None
-                locator.wait_for(state=state, timeout=timeout)
+                try:
+                    locator.wait_for(state=state, timeout=timeout)
+                except QPlaywrightActionError as exc:
+                    raise ValueError(f"wait failed for target {target!r}: {exc}") from exc
                 payload = {
                     "ok": True,
                     "target": target,
@@ -3227,9 +3297,13 @@ if FastMCP is not None:
                 raise ValueError("hover does not accept x/y together with target")
             if isinstance(target, str):
                 locator = _resolve_widget_handle_locator(connection_state, target=target, action="hover")
+                _run_widget_tool_action(action="hover", target=target, callback=locator.hover)
             else:
                 locator = _resolve_item_locator(connection_state, target=target)
-            locator.hover()
+                try:
+                    locator.hover()
+                except QPlaywrightActionError as exc:
+                    raise ValueError(f"hover failed for target {target!r}: {exc}") from exc
 
         snapshot_target = _target_owner_target(target) if target is not None else None
         return _finalize_action_result(
@@ -3257,10 +3331,13 @@ if FastMCP is not None:
         locator = _resolve_item_locator(connection_state, target=target)
         snapshot_target = _target_owner_target(target)
 
-        if expanded:
-            locator.expand()
-        else:
-            locator.collapse()
+        try:
+            if expanded:
+                locator.expand()
+            else:
+                locator.collapse()
+        except QPlaywrightActionError as exc:
+            raise ValueError(f"set_expanded failed for target {target!r}: {exc}") from exc
 
         return _finalize_action_result(
             connection_state,
@@ -3289,7 +3366,11 @@ if FastMCP is not None:
 
         connection_state = _get_connection(_SERVER_STATE)
         locator = _resolve_widget_handle_locator(connection_state, target=target, action="scroll")
-        locator.scroll(delta_x=delta_x, delta_y=delta_y)
+        _run_widget_tool_action(
+            action="scroll",
+            target=target,
+            callback=lambda: locator.scroll(delta_x=delta_x, delta_y=delta_y),
+        )
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
@@ -3324,6 +3405,7 @@ _CLI_TOOL_NAMES = (
     "input",
     "invoke",
     "press_key",
+    "focus",
     "set_expanded",
     "choose",
     "wait",
@@ -3396,7 +3478,8 @@ def _cli_usage_text() -> str:
         "  find_fuzzy KEYWORD [--root ROOT] [--role ROLE] [--limit N]\n"
         "  click [TARGET] [--count 1|2] [--x X --y Y] [--include-snapshot]\n"
         "  hover [TARGET] [--x X --y Y] [--include-snapshot]\n"
-        "  input TARGET TEXT [--mode replace|append] [--delay MS] [--submit]\n"
+        "  input TARGET [TEXT] [--mode replace|append|type|clear] [--delay MS] [--submit]\n"
+        "  focus TARGET [--include-state] [--include-snapshot]\n"
         "  wait TARGET [--state STATE | --condition CONDITION --expected VALUE] [--timeout SEC]\n"
         "\n"
         "JSON/REPL commands:\n"
@@ -3739,8 +3822,8 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
 
     input_parser = subparsers.add_parser("input", help="Input text into one widget resolved by stable handle.")
     input_parser.add_argument("target")
-    input_parser.add_argument("text")
-    input_parser.add_argument("--mode", choices=("replace", "append"), default="replace")
+    input_parser.add_argument("text", nargs="?", default="")
+    input_parser.add_argument("--mode", choices=("replace", "append", "type", "clear"), default="replace")
     input_parser.add_argument("--delay", type=int, default=0)
     input_parser.add_argument("--submit", action="store_true")
     input_parser.add_argument("--include-state", action="store_true")
@@ -3768,6 +3851,11 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     press_key_parser.add_argument("--target")
     press_key_parser.add_argument("--include-state", action="store_true")
     press_key_parser.add_argument("--include-snapshot", action="store_true")
+
+    focus_parser = subparsers.add_parser("focus", help="Focus one widget resolved by stable handle.")
+    focus_parser.add_argument("target")
+    focus_parser.add_argument("--include-state", action="store_true")
+    focus_parser.add_argument("--include-snapshot", action="store_true")
 
     choose_parser = subparsers.add_parser("choose", help="Select a combobox option by value, index, or label.")
     choose_parser.add_argument("target")
@@ -3899,6 +3987,13 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "include_snapshot": namespace.include_snapshot,
         }
 
+    if command == "focus":
+        return "focus", {
+            "target": namespace.target,
+            "include_state": namespace.include_state,
+            "include_snapshot": namespace.include_snapshot,
+        }
+
     if command == "choose":
         arguments = {
             "target": namespace.target,
@@ -4025,7 +4120,7 @@ def _try_run_typed_cli(argv: Sequence[str]) -> int | None:
         return None
     if argv[0] not in {
         "resource", "session", "window", "snapshot", "find", "find_fuzzy", "resolve_object_names", "inspect", "click", "input", "invoke",
-        "press_key", "choose", "wait", "screenshot", "hover", "scroll",
+        "press_key", "focus", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         return None
     if len(argv) > 1 and _looks_like_json_object_argument(argv[1]):
@@ -4051,7 +4146,7 @@ def _try_run_typed_cli_from_command_line(command_line: str) -> int | None:
     # If the first part is a known tool and the rest looks like flags/args (not JSON)
     if parts[0] in {
         "resource", "session", "window", "snapshot", "find", "find_fuzzy", "resolve_object_names", "inspect", "click", "input", "invoke",
-        "press_key", "choose", "wait", "screenshot", "hover", "scroll",
+        "press_key", "focus", "choose", "wait", "screenshot", "hover", "scroll",
     }:
         if len(parts) > 1 and parts[1].lstrip().startswith("{"):
             return None
@@ -4192,6 +4287,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="MCP transport to expose. stdio is the default and works with most hosts.",
     )
     args = parser.parse_args(argv_list)
+    configure_logging_from_env()
     LOGGER.debug("Starting qplaywright MCP server with transport=%s", args.transport)
     _configure_stdio_for_mcp(args.transport)
     raise SystemExit(_run_mcp_transport(args.transport))

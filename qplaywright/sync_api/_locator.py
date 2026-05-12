@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any, TYPE_CHECKING
 
+from qplaywright.errors import QPlaywrightActionError, QPlaywrightAgentError, QPlaywrightLookupError
 from qplaywright.protocol import (
     METHOD_FIND,
     METHOD_FIND_ALL,
@@ -88,6 +89,21 @@ class ItemLocator:
     def _send(self, method: str, **extra) -> Any:
         return self._conn.send(method, self._params(**extra), timeout=self._timeout)
 
+    def _send_action(self, action: str, method: str, **extra) -> Any:
+        try:
+            return self._send(method, **extra)
+        except QPlaywrightAgentError as exc:
+            raise QPlaywrightActionError(
+                f"{action} failed for item target {self._item!r}: {exc}",
+                code="action_failed",
+                context={
+                    "action": action,
+                    "method": method,
+                    "owner_wid": self._owner_wid,
+                    "item": dict(self._item),
+                },
+            ) from exc
+
     def _kind(self) -> str:
         kind = self._item.get("kind")
         return str(kind) if isinstance(kind, str) else ""
@@ -111,7 +127,7 @@ class ItemLocator:
     def is_visible(self) -> bool:
         try:
             return self._send(METHOD_ITEM_VISIBLE)
-        except RuntimeError:
+        except QPlaywrightAgentError:
             return False
 
     def is_selected(self) -> bool:
@@ -121,21 +137,21 @@ class ItemLocator:
         return self._send(METHOD_ITEM_BOUNDING_BOX)
 
     def click(self) -> None:
-        self._send(METHOD_ITEM_CLICK)
+        self._send_action("click", METHOD_ITEM_CLICK)
 
     def dblclick(self) -> None:
-        self._send(METHOD_ITEM_DBLCLICK)
+        self._send_action("dblclick", METHOD_ITEM_DBLCLICK)
 
     def hover(self) -> None:
-        self._send(METHOD_ITEM_HOVER)
+        self._send_action("hover", METHOD_ITEM_HOVER)
 
     def expand(self) -> None:
         self._require_kind("tree_node", action="expand")
-        self._send(METHOD_ITEM_EXPAND)
+        self._send_action("expand", METHOD_ITEM_EXPAND)
 
     def collapse(self) -> None:
         self._require_kind("tree_node", action="collapse")
-        self._send(METHOD_ITEM_COLLAPSE)
+        self._send_action("collapse", METHOD_ITEM_COLLAPSE)
 
     def __repr__(self) -> str:
         return f"ItemLocator(owner_wid={self._owner_wid}, item={self._item!r})"
@@ -199,13 +215,39 @@ class Locator:
     def _send(self, method: str, **extra) -> Any:
         return self._conn.send(method, self._params(**extra), timeout=self._timeout)
 
+    def _action_context(self) -> dict[str, Any]:
+        return {
+            "selector": self._selector,
+            "has_text": self._has_text,
+            "parent_wid": self._parent_wid,
+            "widget_wid": self._widget_wid,
+        }
+
+    def _send_action(self, action: str, method: str, **extra) -> Any:
+        try:
+            return self._send(method, **extra)
+        except QPlaywrightAgentError as exc:
+            raise QPlaywrightActionError(
+                f"{action} failed for locator {self!r}: {exc}",
+                code="action_failed",
+                context={
+                    "action": action,
+                    "method": method,
+                    **self._action_context(),
+                },
+            ) from exc
+
     def _resolve_owner_wid(self) -> int:
         if self._widget_wid is not None:
             return self._widget_wid
 
         result = self._send(METHOD_FIND)
         if result is None:
-            raise ValueError(f"Widget not found: {self._selector}")
+            raise QPlaywrightLookupError(
+                f"Widget not found: {self._selector}",
+                code="widget_not_found",
+                context={"selector": self._selector, "has_text": self._has_text},
+            )
         return int(result["wid"])
 
     def _item_params(self, item: dict[str, Any], **extra) -> dict[str, Any]:
@@ -220,7 +262,11 @@ class Locator:
         # Resolve current widget to use as parent
         result = self._send(METHOD_FIND)
         if result is None:
-            raise ValueError(f"Parent widget not found: {self._selector}")
+            raise QPlaywrightLookupError(
+                f"Parent widget not found: {self._selector}",
+                code="widget_not_found",
+                context={"selector": self._selector, "has_text": self._has_text},
+            )
         return Locator(
             self._conn,
             selector,
@@ -357,21 +403,21 @@ class Locator:
         """Check if the widget is visible."""
         try:
             return self._send(METHOD_IS_VISIBLE)
-        except RuntimeError:
+        except QPlaywrightAgentError:
             return False
 
     def is_enabled(self) -> bool:
         """Check if the widget is enabled."""
         try:
             return self._send(METHOD_IS_ENABLED)
-        except RuntimeError:
+        except QPlaywrightAgentError:
             return False
 
     def is_checked(self) -> bool:
         """Check if the widget is checked."""
         try:
             return self._send(METHOD_IS_CHECKED)
-        except RuntimeError:
+        except QPlaywrightAgentError:
             return False
 
     def is_hidden(self) -> bool:
@@ -404,15 +450,15 @@ class Locator:
 
     def click(self, **kwargs) -> None:
         """Click the widget."""
-        self._send(METHOD_CLICK, **kwargs)
+        self._send_action("click", METHOD_CLICK, **kwargs)
 
     def dblclick(self, **kwargs) -> None:
         """Double-click the widget."""
-        self._send(METHOD_DBLCLICK, **kwargs)
+        self._send_action("dblclick", METHOD_DBLCLICK, **kwargs)
 
     def fill(self, value: str) -> None:
         """Fill the widget with the given value (clears first)."""
-        self._send(METHOD_FILL, value=value)
+        self._send_action("fill", METHOD_FILL, value=value)
 
     def invoke(self, name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         """Invoke a custom widget method declared in qplaywrightClassMetadata.
@@ -421,19 +467,31 @@ class Locator:
         structured invoke result: ``ok``, ``value``, ``errorCode``, and
         ``errorMessage``.
         """
-        return self._send(METHOD_INVOKE, request={"method": name, "args": args or {}})
+        try:
+            return self._send(METHOD_INVOKE, request={"method": name, "args": args or {}})
+        except QPlaywrightAgentError as exc:
+            raise QPlaywrightActionError(
+                f"invoke failed for locator {self!r}: {exc}",
+                code="action_failed",
+                context={
+                    "action": "invoke",
+                    "method": METHOD_INVOKE,
+                    "invoke_name": name,
+                    **self._action_context(),
+                },
+            ) from exc
 
     def clear(self) -> None:
         """Clear the widget's text."""
-        self._send(METHOD_CLEAR)
+        self._send_action("clear", METHOD_CLEAR)
 
     def type(self, text: str, *, delay: int = 0) -> None:
         """Type text character by character."""
-        self._send(METHOD_TYPE, text=text, delay=delay)
+        self._send_action("type", METHOD_TYPE, text=text, delay=delay)
 
     def press(self, key: str) -> None:
         """Press a key (e.g., 'Enter', 'Tab', 'a')."""
-        self._send(METHOD_PRESS, key=key)
+        self._send_action("press", METHOD_PRESS, key=key)
 
     def select_option(
         self,
@@ -450,19 +508,19 @@ class Locator:
             params["index"] = index
         if label is not None:
             params["label"] = label
-        self._send(METHOD_SELECT_OPTION, **params)
+        self._send_action("select_option", METHOD_SELECT_OPTION, **params)
 
     def hover(self) -> None:
         """Hover over the widget."""
-        self._send(METHOD_HOVER)
+        self._send_action("hover", METHOD_HOVER)
 
     def focus(self) -> None:
         """Focus the widget."""
-        self._send(METHOD_FOCUS)
+        self._send_action("focus", METHOD_FOCUS)
 
     def scroll(self, *, delta_x: int = 0, delta_y: int = 0) -> None:
         """Send a mouse wheel scroll event to the widget."""
-        self._send(METHOD_SCROLL, delta_x=delta_x, delta_y=delta_y)
+        self._send_action("scroll", METHOD_SCROLL, delta_x=delta_x, delta_y=delta_y)
 
     def scroll_into_view_if_needed(self) -> None:
         """No-op for Qt (widgets are always in view if visible)."""
@@ -506,7 +564,19 @@ class Locator:
             raise TimeoutError(f"Timed out waiting for {self!r} to be {state}")
 
         params = self._params(state=state, timeout=int(t * 1000))
-        self._conn.send(METHOD_WAIT_FOR, params, timeout=t + 5)
+        try:
+            self._conn.send(METHOD_WAIT_FOR, params, timeout=t + 5)
+        except QPlaywrightAgentError as exc:
+            raise QPlaywrightActionError(
+                f"wait_for failed for locator {self!r}: {exc}",
+                code="action_failed",
+                context={
+                    "action": "wait_for",
+                    "method": METHOD_WAIT_FOR,
+                    "state": state,
+                    **self._action_context(),
+                },
+            ) from exc
 
     # -- Expect (convenience) ------------------------------------------------
 

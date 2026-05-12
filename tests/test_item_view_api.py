@@ -7,6 +7,7 @@ from typing import Any, cast
 import pytest  # type: ignore[import-not-found]
 
 from qplaywright.agent import _server as server
+from qplaywright import QPlaywrightActionError, QPlaywrightAgentError, QPlaywrightLookupError
 from qplaywright.protocol import Request
 from qplaywright.sync_api._locator import ItemLocator, Locator
 
@@ -35,6 +36,17 @@ class SequencedConnection(FakeConnection):
                 return response.pop(0)
             return response[0]
         return response
+
+
+class ErrorConnection(FakeConnection):
+    def __init__(self, error: Exception):
+        super().__init__()
+        self.error = error
+
+    def send(self, method: str, params: dict | None = None, *, timeout: float | None = None) -> object:
+        payload = params or {}
+        self.calls.append((method, payload, timeout))
+        raise self.error
 
 
 def test_locator_cell_with_widget_id_builds_numeric_item_locator_request():
@@ -94,6 +106,28 @@ def test_locator_cell_resolves_owner_widget_before_item_click():
             4.0,
         ),
     ]
+
+
+def test_locator_cell_raises_lookup_error_when_owner_widget_is_missing():
+    conn = SequencedConnection({"find": [None]})
+    locator = Locator(cast(Any, conn), "#missing_table", timeout=4.0)
+
+    with pytest.raises(QPlaywrightLookupError, match="Widget not found: #missing_table") as exc_info:
+        locator.cell(3, 0)
+
+    assert exc_info.value.code == "widget_not_found"
+    assert exc_info.value.context == {"selector": "#missing_table", "has_text": None}
+
+
+def test_locator_child_locator_raises_lookup_error_when_parent_widget_is_missing():
+    conn = SequencedConnection({"find": [None]})
+    locator = Locator(cast(Any, conn), "#missing_panel", timeout=4.0)
+
+    with pytest.raises(QPlaywrightLookupError, match="Parent widget not found: #missing_panel") as exc_info:
+        locator.locator("role=button")
+
+    assert exc_info.value.code == "widget_not_found"
+    assert exc_info.value.context == {"selector": "#missing_panel", "has_text": None}
 
 
 def test_locator_cell_uses_header_name_descriptor_for_string_column():
@@ -158,6 +192,65 @@ def test_item_locator_is_visible_sends_item_visible_request():
                 },
             },
             3.0,
+        )
+    ]
+
+
+def test_item_locator_is_visible_returns_false_on_agent_error():
+    conn = ErrorConnection(QPlaywrightAgentError("Agent error: item no longer visible", code="agent_error"))
+    item = ItemLocator(cast(Any, conn), 5, {"kind": "table_cell", "row": 0, "column": 2}, timeout=3.0)
+
+    result = item.is_visible()
+
+    assert result is False
+    assert conn.calls == [
+        (
+            "item_visible",
+            {
+                "wid": 5,
+                "item": {
+                    "kind": "table_cell",
+                    "row": 0,
+                    "column": 2,
+                },
+            },
+            3.0,
+        )
+    ]
+
+
+def test_item_locator_click_wraps_agent_error_as_action_error():
+    conn = ErrorConnection(QPlaywrightAgentError("Agent error: item disabled", code="agent_error"))
+    item = ItemLocator(cast(Any, conn), 5, {"kind": "table_cell", "row": 0, "column": 2}, timeout=3.0)
+
+    with pytest.raises(QPlaywrightActionError, match="click failed") as exc_info:
+        item.click()
+
+    assert exc_info.value.code == "action_failed"
+    assert exc_info.value.context == {
+        "action": "click",
+        "method": "item_click",
+        "owner_wid": 5,
+        "item": {
+            "kind": "table_cell",
+            "row": 0,
+            "column": 2,
+        },
+    }
+
+
+def test_locator_is_visible_returns_false_on_agent_error():
+    conn = ErrorConnection(QPlaywrightAgentError("Agent error: widget disappeared", code="agent_error"))
+    locator = Locator(cast(Any, conn), "#login", timeout=2.0)
+
+    result = locator.is_visible()
+
+    assert result is False
+    assert conn.calls == [
+        (
+            "is_visible",
+            {"selector": "#login"},
+            2.0,
         )
     ]
 

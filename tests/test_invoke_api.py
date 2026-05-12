@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
+from qplaywright import QPlaywrightActionError, QPlaywrightAgentError, QPlaywrightLookupError
 from qplaywright.agent import _selector as selector
 from qplaywright.agent import _server as server
 from qplaywright.protocol import QPlaywrightClassMetadata, QPlaywrightClassMethod, QPlaywrightMethodArg, Request
-from qplaywright.sync_api._api import Window
+from qplaywright.sync_api._api import Application, Window
 from qplaywright.sync_api._locator import Locator
 
 
@@ -105,6 +108,17 @@ class SequencedConnection(FakeConnection):
                 return response.pop(0)
             return response[0]
         return response
+
+
+class ErrorConnection(FakeConnection):
+    def __init__(self, error: Exception):
+        super().__init__()
+        self.error = error
+
+    def send(self, method: str, params: dict | None = None, *, timeout: float | None = None):
+        payload = params or {}
+        self.calls.append((method, payload, timeout))
+        raise self.error
 
 
 def test_selector_declared_method_schema_reads_class_metadata():
@@ -456,6 +470,68 @@ def test_window_hover_at_sends_window_relative_request():
             None,
         )
     ]
+
+
+def test_locator_click_wraps_agent_error_as_action_error():
+    conn = ErrorConnection(QPlaywrightAgentError("Agent error: button disabled", code="agent_error"))
+    locator = Locator(conn, "#submit", timeout=8.0)
+
+    with pytest.raises(QPlaywrightActionError, match="click failed") as exc_info:
+        locator.click()
+
+    assert exc_info.value.code == "action_failed"
+    assert exc_info.value.context == {
+        "action": "click",
+        "method": "click",
+        "selector": "#submit",
+        "has_text": None,
+        "parent_wid": None,
+        "widget_wid": None,
+    }
+
+
+def test_locator_invoke_wraps_agent_error_as_action_error():
+    conn = ErrorConnection(QPlaywrightAgentError("Agent error: method failed", code="agent_error"))
+    locator = Locator(conn, "#amount", timeout=8.0)
+
+    with pytest.raises(QPlaywrightActionError, match="invoke failed") as exc_info:
+        locator.invoke("setAmount", {"value": "123.45"})
+
+    assert exc_info.value.code == "action_failed"
+    assert exc_info.value.context == {
+        "action": "invoke",
+        "method": "invoke",
+        "invoke_name": "setAmount",
+        "selector": "#amount",
+        "has_text": None,
+        "parent_wid": None,
+        "widget_wid": None,
+    }
+
+
+def test_application_window_raises_lookup_error_when_no_windows_exist():
+    conn = SequencedConnection({"list_windows": [[]]})
+    app = Application(conn, timeout=4.0)
+
+    with pytest.raises(QPlaywrightLookupError, match="No visible windows found") as exc_info:
+        app.window()
+
+    assert exc_info.value.code == "window_not_found"
+    assert exc_info.value.context == {"title": None, "index": 0}
+
+
+def test_application_window_raises_lookup_error_for_missing_title_match():
+    conn = SequencedConnection({
+        "list_windows": [[{"wid": 7, "title": "Main Window"}]],
+        "window_title": "Main Window",
+    })
+    app = Application(conn, timeout=4.0)
+
+    with pytest.raises(QPlaywrightLookupError, match="No window found with title containing") as exc_info:
+        app.window(title="Preferences")
+
+    assert exc_info.value.code == "window_not_found"
+    assert exc_info.value.context == {"title": "Preferences", "index": 0, "window_count": 1}
 
 
 def test_locator_screenshot_passes_clip_region():
