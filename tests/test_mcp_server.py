@@ -662,7 +662,7 @@ def test_click_accepts_item_target(monkeypatch):
     monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
 
     target = _item_target()
-    result = mcp_server.click(target=target, count=2, include_snapshot=True)
+    result = mcp_server.click(target=target, count=2, observation="full_tree")
 
     assert app._conn.calls[-1]["method"] == "item_dblclick"
     assert result["state_target"] == target
@@ -705,7 +705,7 @@ def test_click_without_target_uses_active_window_transport(monkeypatch):
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
     monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
 
-    result = mcp_server.click(x=12, y=34, include_snapshot=True)
+    result = mcp_server.click(x=12, y=34, observation="full_tree")
 
     assert app._conn.calls[-1] == {
         "method": "click",
@@ -1778,7 +1778,7 @@ def test_invoke_locator_method_wraps_action_errors():
         mcp_server._invoke_locator_method(locator, method_name="setAmount", args={"value": "123.45"})
 
 
-def test_wait_can_include_snapshot(monkeypatch):
+def test_wait_can_include_full_tree_observation(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -1800,10 +1800,10 @@ def test_wait_can_include_snapshot(monkeypatch):
     monkeypatch.setattr(
         mcp_server,
         "_action_result_with_snapshot",
-        lambda managed_connection, **payload: payload | {"observation": _v2_observation_payload("DemoWindow")},
+        lambda managed_connection, **payload: {"observation": _v2_observation_payload("DemoWindow")},
     )
 
-    result = mcp_server.wait(target="w7", state="visible", timeout=5.0, include_snapshot=True)
+    result = mcp_server.wait(target="w7", state="visible", timeout=5.0, observation="full_tree")
 
     assert locator.wait_calls == [{"state": "visible", "timeout": 5.0}]
     assert result["ok"] is True
@@ -2031,22 +2031,112 @@ def test_finalize_action_result_can_include_state_and_snapshot_together(monkeypa
     monkeypatch.setattr(
         mcp_server,
         "_action_result_with_snapshot",
-        lambda managed_connection, **payload: payload | {"observation": _v2_observation_payload("DemoWindow")},
+        lambda managed_connection, **payload: {"observation": _v2_observation_payload("DemoWindow")},
     )
 
     result = mcp_server._finalize_action_result(
         connection,
         include_state=True,
-        include_snapshot=True,
+        observation="full_tree",
         state_target="w1",
         snapshot_target="w1",
         ok=True,
         target="w1",
     )
+def test_finalize_action_result_passes_screen_visible_mode_for_target_scope(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    captured = {}
 
-    assert result["state"]["visible"] is True
-    assert result["observation"] == _v2_observation_payload("DemoWindow")
-    assert "refs" not in result
+    monkeypatch.setattr(
+        mcp_server,
+        "_list_windows_raw",
+        lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
+    )
+
+    def fake_action_result_with_snapshot(managed_connection, *, target=None, mode="full_tree", **payload):
+        captured["target"] = target
+        captured["mode"] = mode
+        return payload | {"observation": {"root_handle": "w1", "tree": [{"handle": "w1", "class": "DemoWindow", "children": []}], "mode": mode}}
+
+    monkeypatch.setattr(mcp_server, "_action_result_with_snapshot", fake_action_result_with_snapshot)
+
+    result = mcp_server._finalize_action_result(
+        connection,
+        observation="screen_visible",
+        snapshot_target="w1",
+        ok=True,
+        target="w1",
+    )
+
+    assert captured == {"target": "w1", "mode": "screen_visible"}
+    assert result["observation"]["mode"] == "screen_visible"
+
+
+def test_click_rejects_screen_visible_observation_without_target(monkeypatch):
+    window = FakeWindow(11, "Main")
+    app = FakeApp([window])
+    app._conn = FakeTransportConn(responses={"click": True})
+    state = mcp_server.ServerState(
+        connection=mcp_server.ManagedConnection(
+            name="demo",
+            qplaywright=FakeQPlaywright(),
+            app=app,
+            host="127.0.0.1",
+            port=19876,
+            timeout=30.0,
+            active_window_wid=11,
+        )
+    )
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+
+    with pytest.raises(ValueError, match="observation='screen_visible' requires a widget target or item target owner"):
+        mcp_server.click(x=12, y=34, observation="screen_visible")
+
+
+def test_finalize_action_result_warns_when_screen_visible_scope_is_lost(monkeypatch):
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(
+        mcp_server,
+        "_list_windows_raw",
+        lambda managed_connection, **kwargs: [{"wid": 22, "title": "Dialog", "class": "QDialog", "geometry": {"x": 50, "y": 60, "width": 480, "height": 320}, "is_modal": False}],
+    )
+
+    called = {"count": 0}
+
+    def fake_action_result_with_snapshot(*args, **kwargs):
+        called["count"] += 1
+        return {"observation": _v2_observation_payload("QDialog")}
+
+    monkeypatch.setattr(mcp_server, "_action_result_with_snapshot", fake_action_result_with_snapshot)
+
+    result = mcp_server._finalize_action_result(
+        connection,
+        observation="screen_visible",
+        snapshot_target="w2",
+        ok=True,
+        target="w2",
+    )
+
+    assert called["count"] == 0
+    assert "observation" not in result
+    assert any("observation='screen_visible' requires the original target scope" in warning for warning in result["warnings"])
 
 
 def test_wait_rejects_undocumented_state(monkeypatch):
@@ -2157,19 +2247,19 @@ def test_widget_action_tools_wrap_action_errors(monkeypatch, tool_name, call_kwa
 @pytest.mark.parametrize(
     ("tool_name", "call_kwargs", "expected_calls", "expected_payload"),
     [
-        ("click", {"target": "w2", "include_snapshot": True}, [("click", {})], {"target": "w2", "count": 1}),
-        ("click", {"target": "w2", "count": 2, "include_snapshot": True}, [("dblclick", {})], {"target": "w2", "count": 2}),
-        ("input", {"target": "w3", "text": "123.45", "include_snapshot": True}, [("fill", {"value": "123.45"})], {"target": "w3", "text": "123.45", "mode": "replace", "delay": 0, "submitted": False}),
-        ("invoke", {"target": "w3", "method": "setAmount", "args": {"value": "88.00"}, "include_snapshot": True}, [("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}})], {"target": "w3", "method": "setAmount", "args": {"value": "88.00"}}),
-        ("input", {"target": "w3", "text": "abc", "mode": "append", "delay": 25, "submit": True, "include_snapshot": True}, [("type", {"text": "abc", "delay": 25}), ("press", {"key": "Enter"})], {"target": "w3", "text": "abc", "mode": "append", "delay": 25, "submitted": True}),
-        ("press_key", {"target": "w3", "key": "Enter", "include_snapshot": True}, [("press", {"key": "Enter"})], {"target": "w3", "key": "Enter"}),
-        ("choose", {"target": "w5", "label": "CNY", "include_snapshot": True}, [("select_option", {"value": None, "index": None, "label": "CNY"})], {"target": "w5", "label": "CNY", "value": None, "index": None}),
-        ("hover", {"target": "w6", "include_snapshot": True}, [("hover", {})], {"target": "w6"}),
-        ("focus", {"target": "w6", "include_snapshot": True}, [("focus", {})], {"target": "w6"}),
-        ("scroll", {"target": "w6", "delta_x": 5, "delta_y": 10, "include_snapshot": True}, [("scroll", {"delta_x": 5, "delta_y": 10})], {"target": "w6", "delta_x": 5, "delta_y": 10}),
+        ("click", {"target": "w2", "observation": "full_tree"}, [("click", {})], {"target": "w2", "count": 1}),
+        ("click", {"target": "w2", "count": 2, "observation": "full_tree"}, [("dblclick", {})], {"target": "w2", "count": 2}),
+        ("input", {"target": "w3", "text": "123.45", "observation": "full_tree"}, [("fill", {"value": "123.45"})], {"target": "w3", "text": "123.45", "mode": "replace", "delay": 0, "submitted": False}),
+        ("invoke", {"target": "w3", "method": "setAmount", "args": {"value": "88.00"}, "observation": "full_tree"}, [("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}})], {"target": "w3", "method": "setAmount", "args": {"value": "88.00"}}),
+        ("input", {"target": "w3", "text": "abc", "mode": "append", "delay": 25, "submit": True, "observation": "full_tree"}, [("type", {"text": "abc", "delay": 25}), ("press", {"key": "Enter"})], {"target": "w3", "text": "abc", "mode": "append", "delay": 25, "submitted": True}),
+        ("press_key", {"target": "w3", "key": "Enter", "observation": "full_tree"}, [("press", {"key": "Enter"})], {"target": "w3", "key": "Enter"}),
+        ("choose", {"target": "w5", "label": "CNY", "observation": "full_tree"}, [("select_option", {"value": None, "index": None, "label": "CNY"})], {"target": "w5", "label": "CNY", "value": None, "index": None}),
+        ("hover", {"target": "w6", "observation": "full_tree"}, [("hover", {})], {"target": "w6"}),
+        ("focus", {"target": "w6", "observation": "full_tree"}, [("focus", {})], {"target": "w6"}),
+        ("scroll", {"target": "w6", "delta_x": 5, "delta_y": 10, "observation": "full_tree"}, [("scroll", {"delta_x": 5, "delta_y": 10})], {"target": "w6", "delta_x": 5, "delta_y": 10}),
     ],
 )
-def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_kwargs, expected_calls, expected_payload):
+def test_native_action_tools_can_include_observation(monkeypatch, tool_name, call_kwargs, expected_calls, expected_payload):
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -2191,7 +2281,7 @@ def test_native_action_tools_can_include_snapshot(monkeypatch, tool_name, call_k
     monkeypatch.setattr(
         mcp_server,
         "_action_result_with_snapshot",
-        lambda managed_connection, **payload: payload | {"observation": _v2_observation_payload("DemoWindow")},
+        lambda managed_connection, **payload: {"observation": _v2_observation_payload("DemoWindow")},
     )
 
     result = getattr(mcp_server, tool_name)(**call_kwargs)
@@ -2232,7 +2322,7 @@ def test_finalize_action_result_switches_active_window_and_uses_window_snapshot(
 
     result = mcp_server._finalize_action_result(
         connection,
-        include_snapshot=True,
+        observation="full_tree",
         snapshot_target="w2",
         ok=True,
         target="w2",
@@ -2330,7 +2420,7 @@ def test_mcp_tool_input_schema_describes_all_parameters():
             assert schema.get("description"), f"{tool['name']}.{property_name} is missing description"
 
     click_tool = next(tool for tool in dumped if tool["name"] == "click")
-    assert "post-action observation" in click_tool["inputSchema"]["properties"]["include_snapshot"]["description"]
+    assert "post-action observation" in click_tool["inputSchema"]["properties"]["observation"]["description"]
     click_schema = click_tool["inputSchema"]
     click_target_any_of = click_schema["properties"]["target"]["anyOf"]
     assert {entry["type"] for entry in click_target_any_of} == {"string", "object"}
@@ -3568,7 +3658,7 @@ def test_run_cli_typed_click_and_input(monkeypatch, capsys):
     monkeypatch.setattr(mcp_server, "click", fake_click)
     monkeypatch.setattr(mcp_server, "input", fake_input)
 
-    click_exit_code = mcp_server._run_cli(["click", "w12", "--count", "2", "--include-snapshot"])
+    click_exit_code = mcp_server._run_cli(["click", "w12", "--count", "2", "--observation", "full_tree"])
     click_payload = json.loads(capsys.readouterr().out)
 
     input_exit_code = mcp_server._run_cli(["input", "w7", "123.45", "--mode", "append", "--delay", "25", "--submit"])
@@ -3580,14 +3670,14 @@ def test_run_cli_typed_click_and_input(monkeypatch, capsys):
         "ok": True,
         "count": 2,
         "include_state": False,
-        "include_snapshot": True,
+        "observation": "full_tree",
         "target": "w12",
     }
     assert input_payload == {
         "ok": True,
         "delay": 25,
         "include_state": False,
-        "include_snapshot": False,
+        "observation": "none",
         "mode": "append",
         "submit": True,
         "target": "w7",
@@ -3618,7 +3708,7 @@ def test_run_cli_typed_input_clear_omits_text(monkeypatch, capsys):
                 "delay": 0,
                 "submit": False,
                 "include_state": False,
-                "include_snapshot": False,
+                "observation": "none",
             },
         )
     ]
@@ -3626,7 +3716,7 @@ def test_run_cli_typed_input_clear_omits_text(monkeypatch, capsys):
         "ok": True,
         "delay": 0,
         "include_state": False,
-        "include_snapshot": False,
+        "observation": "none",
         "mode": "clear",
         "submit": False,
         "target": "w7",
@@ -3651,7 +3741,7 @@ def test_run_cli_typed_focus(monkeypatch, capsys):
         "ok": True,
         "target": "w7",
         "include_state": True,
-        "include_snapshot": False,
+        "observation": "none",
     }
     assert captured == [
         (
@@ -3659,7 +3749,7 @@ def test_run_cli_typed_focus(monkeypatch, capsys):
             {
                 "target": "w7",
                 "include_state": True,
-                "include_snapshot": False,
+                "observation": "none",
             },
         )
     ]
@@ -3683,13 +3773,13 @@ def test_run_cli_typed_click_supports_include_state(monkeypatch, capsys):
         "target": "w12",
         "count": 1,
         "include_state": True,
-        "include_snapshot": False,
+        "observation": "none",
     }
     assert captured == {
         "target": "w12",
         "count": 1,
         "include_state": True,
-        "include_snapshot": False,
+        "observation": "none",
     }
 
 
@@ -3713,7 +3803,7 @@ def test_run_cli_typed_click_accepts_window_coordinates(monkeypatch, capsys):
         "x": 12,
         "y": 34,
         "include_state": False,
-        "include_snapshot": False,
+        "observation": "none",
     }
     assert captured == {
         "target": None,
@@ -3721,7 +3811,7 @@ def test_run_cli_typed_click_accepts_window_coordinates(monkeypatch, capsys):
         "x": 12,
         "y": 34,
         "include_state": False,
-        "include_snapshot": False,
+        "observation": "none",
     }
 
 
@@ -3745,7 +3835,7 @@ def test_run_cli_typed_wait_supports_condition(monkeypatch, capsys):
         "expected": True,
         "timeout": None,
         "include_state": True,
-        "include_snapshot": False,
+        "observation": "none",
     }
     assert captured == {
         "target": "w9",
@@ -3753,7 +3843,7 @@ def test_run_cli_typed_wait_supports_condition(monkeypatch, capsys):
         "expected": True,
         "timeout": None,
         "include_state": True,
-        "include_snapshot": False,
+        "observation": "none",
     }
 
 

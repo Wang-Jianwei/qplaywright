@@ -21,31 +21,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from examples.test_mcp_demo import (
+    _assert_screen_visible_tab_snapshot,
     _attach_session,
     _call_tool,
     _close_session,
     _discover_widget_handles,
-    _project_root,
+    _find_snapshot_node,
     _python_path_env,
+    _project_root,
 )
-
-
-def _find_snapshot_node(tree: Any, *, object_name: str) -> dict[str, Any] | None:
-    if isinstance(tree, dict):
-        if tree.get("objectName") == object_name:
-            return tree
-        for child in tree.get("children", []):
-            match = _find_snapshot_node(child, object_name=object_name)
-            if match is not None:
-                return match
-        return None
-
-    if isinstance(tree, list):
-        for entry in tree:
-            match = _find_snapshot_node(entry, object_name=object_name)
-            if match is not None:
-                return match
-    return None
 
 
 def _find_cpp_demo_executable(root: Path) -> Path:
@@ -114,7 +98,6 @@ async def main() -> None:
                     session,
                     [
                         "#main_tabs",
-                        "#data_refresh_btn",
                         "#amount_editor",
                         "#username",
                         "#password",
@@ -124,7 +107,6 @@ async def main() -> None:
                     ],
                 )
                 tabs_handle = handles_by_target["#main_tabs"]
-                data_refresh_handle = handles_by_target["#data_refresh_btn"]
                 amount_handle = handles_by_target["#amount_editor"]
                 username_handle = handles_by_target["#username"]
                 password_handle = handles_by_target["#password"]
@@ -132,7 +114,14 @@ async def main() -> None:
                 login_handle = handles_by_target["#login_btn"]
                 status_handle = handles_by_target["#status"]
 
-                tab_items = await _call_tool(session, "inspect_items", {"owner": tabs_handle, "max_items": 10})
+                await _assert_screen_visible_tab_snapshot(
+                    session,
+                    tabs_handle=tabs_handle,
+                    visible_object_name="login_btn",
+                    hidden_object_name="data_refresh_btn",
+                )
+
+                tab_items = await _call_tool(session, "inspect_items", {"target": tabs_handle, "max_items": 10})
                 print(f"Tab items: {tab_items['items']}")
                 assert tab_items["kind"] == "tab"
                 assert [entry["text"] for entry in tab_items["items"]] == ["Login", "Data", "Settings"]
@@ -143,6 +132,10 @@ async def main() -> None:
                     "click",
                     {"target": {"owner": tabs_handle, "item": {"kind": "tab_item", "label": "Data"}}},
                 )
+
+                data_refresh_handle = (
+                    await _discover_widget_handles(session, ["#data_refresh_btn"])
+                )["#data_refresh_btn"]
 
                 data_button = await _call_tool(session, "inspect", {"target": data_refresh_handle})
                 print(f"Data button after tab switch: {data_button}")
@@ -158,7 +151,7 @@ async def main() -> None:
                 status_after_tab = await _call_tool(session, "inspect", {"target": status_handle})
                 assert status_after_tab["text"] == "Status: Data tab refreshed"
 
-                updated_tab_items = await _call_tool(session, "inspect_items", {"owner": tabs_handle, "max_items": 10})
+                updated_tab_items = await _call_tool(session, "inspect_items", {"target": tabs_handle, "max_items": 10})
                 assert updated_tab_items["items"][1]["selected"] is True
 
                 await _call_tool(

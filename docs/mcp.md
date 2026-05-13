@@ -193,11 +193,16 @@ When you need structured item descendants, first resolve the owner widget, then 
 
 ### Optional Post-Action Observation
 
-Action tools support `include_snapshot=false` by default.
-When `include_snapshot=true`, the response also includes `observation`, where:
+Action tools support `observation="none"` by default.
+When `observation="full_tree"`, the response also includes `observation`, where:
 
 - `observation.root_handle`
 - `observation.tree`
+
+When `observation="screen_visible"`, the response includes the same `observation`
+shape but scopes it to an approximate screen-visible subtree under the action
+target. This mode requires a target-owning scope and does not fall back to the
+active window when the action changes windows.
 
 `window_changed` and `active_window` remain top-level action result fields.
 
@@ -214,7 +219,8 @@ The optional `attribute` object groups exceptional widget flags such as `{"trans
 `include_state` is intentionally compact. It is not a replacement for full `snapshot`
 or the richer widget/item payloads returned by `inspect` and `inspect_items`.
 
-`include_state` and `include_snapshot` are independent and may both be `true`
+`include_state` and `observation` are independent. You may request compact
+state together with `observation="full_tree"` or `observation="screen_visible"`
 in the same request.
 
 ## Tool Details
@@ -515,7 +521,7 @@ Common action request shape:
 {
   "target": "w12",
   "include_state": false,
-  "include_snapshot": true
+  "observation": "full_tree"
 }
 ```
 

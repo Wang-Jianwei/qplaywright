@@ -99,13 +99,13 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 
 该顺序是正式契约的一部分，调用方不得自行猜测、重排或在别处改成另一种槽位顺序。
 
-### Include Snapshot
+### Observation
 
 大多数动作工具支持：
 
-- `include_snapshot: boolean = false`
+- `observation: "none" | "full_tree" | "screen_visible" = "none"`
 
-当为 `true` 时，返回值附带 post-action snapshot 字段。
+当为 `full_tree` 或 `screen_visible` 时，返回值附带 post-action observation 字段。
 
 ### Timeout
 
@@ -176,7 +176,7 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 
 ### ActionObservation
 
-当动作工具传入 `include_snapshot=true` 时，附加以下结构：
+当动作工具传入 `observation!="none"` 时，附加以下结构：
 
 ```json
 {
@@ -205,6 +205,7 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 - `active_window`: 当前 active window 摘要
 - `observation.root_handle`: post-action observation 的根 handle
 - `observation.tree`: 与该 observation 一致的层级 widget tree
+- `observation.mode`: `full_tree` 或 `screen_visible`
 
 ## Error Model
 
@@ -697,7 +698,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 {
   "target": "w12",
   "count": 1,
-  "include_snapshot": false
+  "observation": "none"
 }
 ```
 
@@ -727,7 +728,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
-当 `include_snapshot=true` 时，附加 `ActionObservation` 中的 `observation`。
+当 `observation!="none"` 时，附加 `ActionObservation` 中的 `observation`。
 
 ## Input
 
@@ -744,7 +745,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "mode": "replace",
   "delay": 0,
   "submit": false,
-  "include_snapshot": false
+  "observation": "none"
 }
 ```
 
@@ -794,7 +795,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "label": "CNY",
   "value": null,
   "index": null,
-  "include_snapshot": false
+  "observation": "none"
 }
 ```
 
@@ -848,7 +849,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 {
   "target": null,
   "key": "Escape",
-  "include_snapshot": false
+  "observation": "none"
 }
 ```
 
@@ -893,7 +894,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 ```json
 {
   "target": "w21",
-  "include_snapshot": true
+  "observation": "full_tree"
 }
 ```
 
@@ -933,7 +934,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "target": "#result_table",
   "delta_x": 0,
   "delta_y": 480,
-  "include_snapshot": true
+  "observation": "screen_visible"
 }
 ```
 
@@ -984,7 +985,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "args": {
     "code": "CNY"
   },
-  "include_snapshot": false
+  "observation": "none"
 }
 ```
 
@@ -1036,7 +1037,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "target": "#status_label",
   "state": "visible",
   "timeout": 5.0,
-  "include_snapshot": false
+  "observation": "none"
 }
 ```
 
@@ -1048,7 +1049,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "condition": "text_contains",
   "expected": "Logged in",
   "timeout": 5.0,
-  "include_snapshot": false
+  "observation": "none"
 }
 ```
 
@@ -1060,7 +1061,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 - `condition` 允许值：`text_equals`、`text_contains`、`current_text_equals`、`current_text_contains`、`value_equals`、`checked_equals`、`count_equals`
 - 使用 `condition` 时，`expected` 必填
 - `timeout` 默认由服务端决定
-- `include_snapshot` 默认 `false`
+- `observation` 默认 `"none"`
 
 ### Wait Response
 
@@ -1094,7 +1095,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
-当 `include_snapshot=true` 时，附加 `ActionObservation` 中的 `observation`。
+当 `observation!="none"` 时，附加 `ActionObservation` 中的 `observation`。
 
 ## Screenshot
 

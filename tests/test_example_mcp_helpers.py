@@ -128,3 +128,71 @@ def test_attach_session_stops_after_total_deadline(monkeypatch):
         asyncio.run(module._attach_session(object(), port=29876, timeout=0.05))
 
     assert called["attach"] is False
+
+
+def test_find_snapshot_node_supports_public_and_legacy_object_name_keys():
+    module = _load_example_module()
+    tree = [
+        {"objectName": "legacy_root", "children": []},
+        {
+            "object_name": "public_root",
+            "children": [
+                {"object_name": "public_child", "children": []},
+                {"objectName": "legacy_child", "children": []},
+            ],
+        },
+    ]
+
+    public_match = module._find_snapshot_node(tree, object_name="public_child")
+    legacy_match = module._find_snapshot_node(tree, object_name="legacy_child")
+
+    assert public_match == {"object_name": "public_child", "children": []}
+    assert legacy_match == {"objectName": "legacy_child", "children": []}
+
+
+def test_assert_screen_visible_tab_snapshot_checks_full_and_visible_trees(monkeypatch):
+    module = _load_example_module()
+    captured_calls: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_call_tool(session, name, arguments):
+        captured_calls.append((name, arguments))
+        assert name == "snapshot"
+        if arguments.get("mode") == "screen_visible":
+            return {
+                "mode": "screen_visible",
+                "tree": [
+                    {
+                        "object_name": "main_tabs",
+                        "children": [
+                            {"object_name": "tab_login", "children": [{"object_name": "login_btn", "children": []}]}
+                        ],
+                    }
+                ],
+            }
+        return {
+            "tree": [
+                {
+                    "object_name": "main_tabs",
+                    "children": [
+                        {"object_name": "tab_login", "children": [{"object_name": "login_btn", "children": []}]},
+                        {"object_name": "tab_data", "children": [{"object_name": "add_entry_btn", "children": []}]},
+                    ],
+                }
+            ]
+        }
+
+    monkeypatch.setattr(module, "_call_tool", fake_call_tool)
+
+    asyncio.run(
+        module._assert_screen_visible_tab_snapshot(
+            object(),
+            tabs_handle="w-tabs",
+            visible_object_name="login_btn",
+            hidden_object_name="add_entry_btn",
+        )
+    )
+
+    assert captured_calls == [
+        ("snapshot", {"target": "w-tabs", "depth": 6}),
+        ("snapshot", {"target": "w-tabs", "mode": "screen_visible", "depth": 6}),
+    ]

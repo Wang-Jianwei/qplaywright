@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 from uuid import uuid4
 
 from pydantic import Field, ValidationError
@@ -126,6 +126,7 @@ SessionAction = Literal["attach", "launch", "close", "status"]
 WindowAction = Literal["list", "select", "resize", "close"]
 FindMode = Literal["auto", "exact", "fuzzy"]
 SnapshotMode = Literal["full_tree", "screen_visible"]
+ActionObservationMode = Literal["none", "full_tree", "screen_visible"]
 
 _ALLOWED_WAIT_STATES = {"visible", "hidden", "enabled", "disabled", "checked", "unchecked"}
 _ALLOWED_WAIT_CONDITIONS = {
@@ -351,9 +352,9 @@ IncludeStateArg = Annotated[
     bool,
     Field(description="When true, include a compact post-action target state in result.state."),
 ]
-IncludeSnapshotArg = Annotated[
-    bool,
-    Field(description="When true, include a post-action observation in result.observation. If the action changes windows, the observation falls back to the active window."),
+ActionObservationArg = Annotated[
+    ActionObservationMode,
+    Field(description="Select the post-action observation mode. Use 'none' to skip result.observation, 'full_tree' to include the default post-action tree, or 'screen_visible' for an approximate screen-visible subtree under the action target. If the action changes windows, screen_visible cannot fall back to the active window."),
 ]
 MethodArg = Annotated[
     str,
@@ -2263,11 +2264,24 @@ def _screen_visible_warnings(*, mode: SnapshotMode) -> list[str]:
     return [_SCREEN_VISIBLE_WARNING]
 
 
+def _normalize_action_observation_mode(observation: str) -> ActionObservationMode:
+    if observation not in {"none", "full_tree", "screen_visible"}:
+        raise ValueError("observation must be 'none', 'full_tree', or 'screen_visible'")
+    return cast(ActionObservationMode, observation)
+
+
 def _validate_snapshot_request(*, target: str | None, mode: SnapshotMode, topmost_only: bool) -> None:
     if mode == "screen_visible" and target is None:
         raise ValueError("snapshot mode='screen_visible' requires target")
     if mode == "screen_visible" and topmost_only:
         raise ValueError("snapshot mode='screen_visible' does not support topmost_only=true")
+
+
+def _validate_action_observation_request(*, observation: str, snapshot_target: str | None) -> ActionObservationMode:
+    normalized = _normalize_action_observation_mode(observation)
+    if normalized == "screen_visible" and snapshot_target is None:
+        raise ValueError("observation='screen_visible' requires a widget target or item target owner")
+    return normalized
 
 
 def _press_key_without_target(connection: ManagedConnection, *, key: str) -> None:
@@ -2306,6 +2320,7 @@ def _action_result_with_snapshot(
     managed_connection: ManagedConnection,
     *,
     target: str | None = None,
+    mode: SnapshotMode = "full_tree",
     depth: int = 3,
     timeout: float | None = None,
     **payload: Any,
@@ -2316,7 +2331,7 @@ def _action_result_with_snapshot(
         if q_application is not None:
             q_application.processEvents()
     result["observation"] = _public_observation_payload(
-        _snapshot_result(managed_connection, target=target, depth=depth, timeout=timeout)
+        _snapshot_result(managed_connection, target=target, mode=mode, depth=depth, timeout=timeout)
     )
     return result
 
@@ -2455,7 +2470,7 @@ def _finalize_action_result(
     managed_connection: ManagedConnection,
     *,
     include_state: bool = False,
-    include_snapshot: bool = False,
+    observation: ActionObservationMode = "none",
     state_target: str | dict[str, Any] | None = None,
     snapshot_target: str | None = None,
     snapshot_depth: int = 3,
@@ -2484,18 +2499,27 @@ def _finalize_action_result(
                 result["state"] = None
                 post_action_warnings.append(f"post-action target state unavailable: {exc}")
 
-    if not include_snapshot:
+    if observation == "none":
         if post_action_warnings:
             result["warnings"] = post_action_warnings
         return result
 
     window_changed = result.get("window_changed")
     effective_target = snapshot_target if window_changed is False else None
+    if observation == "screen_visible" and effective_target is None:
+        post_action_warnings.append(
+            "post-action observation unavailable: observation='screen_visible' requires the original target scope, but the active window changed. Resolve a fresh target and rerun snapshot(mode='screen_visible') if you need the new visible subtree."
+        )
+        if post_action_warnings:
+            result["warnings"] = post_action_warnings
+        return result
+
     try:
         result.update(
             _action_result_with_snapshot(
                 managed_connection,
                 target=effective_target,
+                mode="screen_visible" if observation == "screen_visible" else "full_tree",
                 depth=snapshot_depth,
                 timeout=postprocess_timeout,
             )
@@ -2911,7 +2935,7 @@ if FastMCP is not None:
         x: ClipXArg = None,
         y: ClipYArg = None,
         include_state: IncludeStateArg = False,
-        include_snapshot: IncludeSnapshotArg = False,
+        observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Click or double-click a target, or a window-relative coordinate in the active window."""
 
@@ -2920,6 +2944,8 @@ if FastMCP is not None:
 
         connection_state = _get_connection(_SERVER_STATE)
         coords = _pointer_action_coords(x=x, y=y)
+        snapshot_target = _target_owner_target(target) if target is not None else None
+        observation = _validate_action_observation_request(observation=observation, snapshot_target=snapshot_target)
         if target is None:
             if not coords:
                 raise ValueError("click requires either a target or x/y coordinates")
@@ -2948,12 +2974,10 @@ if FastMCP is not None:
                 raise ValueError(
                     f"{'dblclick' if count == 2 else 'click'} failed for target {target!r}: {exc}"
                 ) from exc
-
-        snapshot_target = _target_owner_target(target) if target is not None else None
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
-            include_snapshot=include_snapshot,
+            observation=observation,
             state_target=target,
             snapshot_target=snapshot_target,
             ok=True,
@@ -3004,7 +3028,7 @@ if FastMCP is not None:
         delay: InputDelayArg = 0,
         submit: SubmitArg = False,
         include_state: IncludeStateArg = False,
-        include_snapshot: IncludeSnapshotArg = False,
+        observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Input text into one widget resolved by stable handle."""
 
@@ -3018,6 +3042,7 @@ if FastMCP is not None:
             raise ValueError("text must not be empty unless mode='clear'")
 
         connection_state = _get_connection(_SERVER_STATE)
+        observation = _validate_action_observation_request(observation=observation, snapshot_target=target)
         locator = _resolve_widget_handle_locator(connection_state, target=target, action="input")
         try:
             if mode == "replace":
@@ -3041,7 +3066,7 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
-            include_snapshot=include_snapshot,
+            observation=observation,
             state_target=target,
             snapshot_target=target,
             ok=True,
@@ -3059,17 +3084,18 @@ if FastMCP is not None:
         method: MethodArg,
         args: InvokeArgsArg = None,
         include_state: IncludeStateArg = False,
-        include_snapshot: IncludeSnapshotArg = False,
+        observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Invoke one exposed custom widget method by exact name."""
 
         connection_state = _get_connection(_SERVER_STATE)
+        observation = _validate_action_observation_request(observation=observation, snapshot_target=target)
         locator = _resolve_widget_handle_locator(connection_state, target=target, action="invoke")
         result = _invoke_locator_method(locator, method_name=method, args=args)
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
-            include_snapshot=include_snapshot,
+            observation=observation,
             state_target=target,
             snapshot_target=target,
             ok=True,
@@ -3083,11 +3109,12 @@ if FastMCP is not None:
         key: KeyArg,
         target: OptionalWidgetHandleArg = None,
         include_state: IncludeStateArg = False,
-        include_snapshot: IncludeSnapshotArg = False,
+        observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Send a single key press to one widget resolved by stable handle."""
 
         connection_state = _get_connection(_SERVER_STATE)
+        observation = _validate_action_observation_request(observation=observation, snapshot_target=target)
         if target is None:
             _press_key_without_target(connection_state, key=key)
         else:
@@ -3096,7 +3123,7 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
-            include_snapshot=include_snapshot,
+            observation=observation,
             state_target=target,
             snapshot_target=target,
             ok=True,
@@ -3108,17 +3135,18 @@ if FastMCP is not None:
     def focus(
         target: WidgetHandleArg,
         include_state: IncludeStateArg = False,
-        include_snapshot: IncludeSnapshotArg = False,
+        observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Focus one widget resolved by stable handle."""
 
         connection_state = _get_connection(_SERVER_STATE)
+        observation = _validate_action_observation_request(observation=observation, snapshot_target=target)
         locator = _resolve_widget_handle_locator(connection_state, target=target, action="focus")
         _run_widget_tool_action(action="focus", target=target, callback=locator.focus)
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
-            include_snapshot=include_snapshot,
+            observation=observation,
             state_target=target,
             snapshot_target=target,
             ok=True,
@@ -3132,7 +3160,7 @@ if FastMCP is not None:
         index: ChooseIndexArg = None,
         label: ChooseLabelArg = None,
         include_state: IncludeStateArg = False,
-        include_snapshot: IncludeSnapshotArg = False,
+        observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Select a combobox option by value, index, or label."""
 
@@ -3143,6 +3171,7 @@ if FastMCP is not None:
             raise ValueError("Exactly one of value, index, or label must be provided")
 
         connection_state = _get_connection(_SERVER_STATE)
+        observation = _validate_action_observation_request(observation=observation, snapshot_target=target)
         locator = _resolve_widget_handle_locator(connection_state, target=target, action="choose")
         _run_widget_tool_action(
             action="choose",
@@ -3152,7 +3181,7 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
-            include_snapshot=include_snapshot,
+            observation=observation,
             state_target=target,
             snapshot_target=target,
             ok=True,
@@ -3171,7 +3200,7 @@ if FastMCP is not None:
         expected: WaitExpectedArg = None,
         timeout: OptionalTimeoutArg = None,
         include_state: IncludeStateArg = False,
-        include_snapshot: IncludeSnapshotArg = False,
+        observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Wait until a widget reaches a supported state."""
 
@@ -3194,6 +3223,7 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE)
         effective_timeout = timeout if timeout is not None else connection_state.timeout
         snapshot_target = _target_owner_target(target)
+        observation = _validate_action_observation_request(observation=observation, snapshot_target=snapshot_target)
 
         if isinstance(target, str):
             locator = _resolve_widget_handle_locator(connection_state, target=target, action="wait")
@@ -3256,7 +3286,7 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
-            include_snapshot=include_snapshot,
+            observation=observation,
             state_target=target,
             snapshot_target=snapshot_target,
             **payload,
@@ -3321,12 +3351,14 @@ if FastMCP is not None:
         x: ClipXArg = None,
         y: ClipYArg = None,
         include_state: IncludeStateArg = False,
-        include_snapshot: IncludeSnapshotArg = False,
+        observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Hover a target, or a window-relative coordinate in the active window."""
 
         connection_state = _get_connection(_SERVER_STATE)
         coords = _pointer_action_coords(x=x, y=y)
+        snapshot_target = _target_owner_target(target) if target is not None else None
+        observation = _validate_action_observation_request(observation=observation, snapshot_target=snapshot_target)
         if target is None:
             if not coords:
                 raise ValueError("hover requires either a target or x/y coordinates")
@@ -3343,12 +3375,10 @@ if FastMCP is not None:
                     locator.hover()
                 except QPlaywrightActionError as exc:
                     raise ValueError(f"hover failed for target {target!r}: {exc}") from exc
-
-        snapshot_target = _target_owner_target(target) if target is not None else None
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
-            include_snapshot=include_snapshot,
+            observation=observation,
             state_target=target,
             snapshot_target=snapshot_target,
             ok=True,
@@ -3362,13 +3392,14 @@ if FastMCP is not None:
         target: ItemTargetArg,
         expanded: ExpandedArg,
         include_state: IncludeStateArg = False,
-        include_snapshot: IncludeSnapshotArg = False,
+        observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Expand or collapse one structured tree node item target."""
 
         connection_state = _get_connection(_SERVER_STATE)
         locator = _resolve_item_locator(connection_state, target=target)
         snapshot_target = _target_owner_target(target)
+        observation = _validate_action_observation_request(observation=observation, snapshot_target=snapshot_target)
 
         try:
             if expanded:
@@ -3381,7 +3412,7 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
-            include_snapshot=include_snapshot,
+            observation=observation,
             state_target=target,
             snapshot_target=snapshot_target,
             ok=True,
@@ -3396,7 +3427,7 @@ if FastMCP is not None:
         delta_x: DeltaXArg = 0,
         delta_y: DeltaYArg = 0,
         include_state: IncludeStateArg = False,
-        include_snapshot: IncludeSnapshotArg = False,
+        observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Send a mouse wheel scroll event to one widget resolved by stable handle."""
 
@@ -3404,6 +3435,7 @@ if FastMCP is not None:
             raise ValueError("delta_x and delta_y cannot both be 0")
 
         connection_state = _get_connection(_SERVER_STATE)
+        observation = _validate_action_observation_request(observation=observation, snapshot_target=target)
         locator = _resolve_widget_handle_locator(connection_state, target=target, action="scroll")
         _run_widget_tool_action(
             action="scroll",
@@ -3413,7 +3445,7 @@ if FastMCP is not None:
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
-            include_snapshot=include_snapshot,
+            observation=observation,
             state_target=target,
             snapshot_target=target,
             ok=True,
@@ -3513,10 +3545,10 @@ def _cli_usage_text() -> str:
         "  window list|select\n"
         "  snapshot [--target TARGET] [--depth N] [--topmost-only] [--save-to PATH]\n"
         "  find [--mode auto|exact|fuzzy] [--keyword KEYWORD] [--root ROOT] [--role ROLE] [--text TEXT] [--class CLASS] [--object-name NAME] [--accessible-name NAME] [--limit N]\n"
-        "  click [TARGET] [--count 1|2] [--x X --y Y] [--include-snapshot]\n"
-        "  hover [TARGET] [--x X --y Y] [--include-snapshot]\n"
+        "  click [TARGET] [--count 1|2] [--x X --y Y] [--observation none|full_tree|screen_visible]\n"
+        "  hover [TARGET] [--x X --y Y] [--observation none|full_tree|screen_visible]\n"
         "  input TARGET [TEXT] [--mode replace|append|type|clear] [--delay MS] [--submit]\n"
-        "  focus TARGET [--include-state] [--include-snapshot]\n"
+        "  focus TARGET [--include-state] [--observation none|full_tree|screen_visible]\n"
         "  wait TARGET [--state STATE | --condition CONDITION --expected VALUE] [--timeout SEC]\n"
         "\n"
         "JSON/REPL commands:\n"
@@ -3844,7 +3876,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     click_parser.add_argument("--x", type=int)
     click_parser.add_argument("--y", type=int)
     click_parser.add_argument("--include-state", action="store_true")
-    click_parser.add_argument("--include-snapshot", action="store_true")
+    click_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
     input_parser = subparsers.add_parser("input", help="Input text into one widget resolved by stable handle.")
     input_parser.add_argument("target")
@@ -3853,7 +3885,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     input_parser.add_argument("--delay", type=int, default=0)
     input_parser.add_argument("--submit", action="store_true")
     input_parser.add_argument("--include-state", action="store_true")
-    input_parser.add_argument("--include-snapshot", action="store_true")
+    input_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
     inspect_parser = subparsers.add_parser("inspect", help="Inspect one target or return the current window tree.")
     inspect_parser.add_argument("target_arg", nargs="?")
@@ -3870,18 +3902,18 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     invoke_parser.add_argument("method")
     invoke_parser.add_argument("--args", default="{}")
     invoke_parser.add_argument("--include-state", action="store_true")
-    invoke_parser.add_argument("--include-snapshot", action="store_true")
+    invoke_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
     press_key_parser = subparsers.add_parser("press_key", help="Send a key press to one widget resolved by stable handle.")
     press_key_parser.add_argument("key")
     press_key_parser.add_argument("--target")
     press_key_parser.add_argument("--include-state", action="store_true")
-    press_key_parser.add_argument("--include-snapshot", action="store_true")
+    press_key_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
     focus_parser = subparsers.add_parser("focus", help="Focus one widget resolved by stable handle.")
     focus_parser.add_argument("target")
     focus_parser.add_argument("--include-state", action="store_true")
-    focus_parser.add_argument("--include-snapshot", action="store_true")
+    focus_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
     choose_parser = subparsers.add_parser("choose", help="Select a combobox option by value, index, or label.")
     choose_parser.add_argument("target")
@@ -3890,7 +3922,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     choose_group.add_argument("--index", type=int)
     choose_group.add_argument("--label")
     choose_parser.add_argument("--include-state", action="store_true")
-    choose_parser.add_argument("--include-snapshot", action="store_true")
+    choose_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
     wait_parser = subparsers.add_parser("wait", help="Wait until a widget reaches a supported state.")
     wait_parser.add_argument("target")
@@ -3900,7 +3932,7 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     wait_parser.add_argument("--expected")
     wait_parser.add_argument("--timeout", type=float)
     wait_parser.add_argument("--include-state", action="store_true")
-    wait_parser.add_argument("--include-snapshot", action="store_true")
+    wait_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
     screenshot_parser = subparsers.add_parser("screenshot", help="Capture a screenshot of the active window or one widget resolved by stable handle.")
     screenshot_parser.add_argument("--target")
@@ -3915,14 +3947,14 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     hover_parser.add_argument("--x", type=int)
     hover_parser.add_argument("--y", type=int)
     hover_parser.add_argument("--include-state", action="store_true")
-    hover_parser.add_argument("--include-snapshot", action="store_true")
+    hover_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
     scroll_parser = subparsers.add_parser("scroll", help="Send a mouse wheel scroll event to one widget resolved by stable handle.")
     scroll_parser.add_argument("target")
     scroll_parser.add_argument("--delta-x", type=int, default=0)
     scroll_parser.add_argument("--delta-y", type=int, default=0)
     scroll_parser.add_argument("--include-state", action="store_true")
-    scroll_parser.add_argument("--include-snapshot", action="store_true")
+    scroll_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
     return parser
 
@@ -3982,7 +4014,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "method": namespace.method,
             "args": json.loads(namespace.args),
             "include_state": namespace.include_state,
-            "include_snapshot": namespace.include_snapshot,
+            "observation": namespace.observation,
         }
 
     if command == "press_key":
@@ -3990,21 +4022,21 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "key": namespace.key,
             "target": namespace.target,
             "include_state": namespace.include_state,
-            "include_snapshot": namespace.include_snapshot,
+            "observation": namespace.observation,
         }
 
     if command == "focus":
         return "focus", {
             "target": namespace.target,
             "include_state": namespace.include_state,
-            "include_snapshot": namespace.include_snapshot,
+            "observation": namespace.observation,
         }
 
     if command == "choose":
         arguments = {
             "target": namespace.target,
             "include_state": namespace.include_state,
-            "include_snapshot": namespace.include_snapshot,
+            "observation": namespace.observation,
         }
         for field_name in ("value", "index", "label"):
             value = getattr(namespace, field_name, None)
@@ -4017,7 +4049,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "target": namespace.target,
             "timeout": namespace.timeout,
             "include_state": namespace.include_state,
-            "include_snapshot": namespace.include_snapshot,
+            "observation": namespace.observation,
         }
         if namespace.condition is not None:
             arguments["condition"] = namespace.condition
@@ -4041,7 +4073,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         arguments = {
             "target": namespace.target,
             "include_state": namespace.include_state,
-            "include_snapshot": namespace.include_snapshot,
+            "observation": namespace.observation,
         }
         if namespace.x is not None:
             arguments["x"] = namespace.x
@@ -4055,7 +4087,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "delta_x": namespace.delta_x,
             "delta_y": namespace.delta_y,
             "include_state": namespace.include_state,
-            "include_snapshot": namespace.include_snapshot,
+            "observation": namespace.observation,
         }
 
     if command == "resource":
@@ -4099,7 +4131,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "target": namespace.target,
             "count": namespace.count,
             "include_state": namespace.include_state,
-            "include_snapshot": namespace.include_snapshot,
+            "observation": namespace.observation,
         }
         if namespace.x is not None:
             arguments["x"] = namespace.x
@@ -4115,7 +4147,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
             "delay": namespace.delay,
             "submit": namespace.submit,
             "include_state": namespace.include_state,
-            "include_snapshot": namespace.include_snapshot,
+            "observation": namespace.observation,
         }
 
     raise ValueError(f"Unsupported typed CLI command: {command!r}")

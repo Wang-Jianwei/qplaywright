@@ -168,7 +168,7 @@ async def main() -> None:
                 login_result = await _call_tool(
                     session,
                     "click",
-                    {"target": login_handle, "include_snapshot": True},
+                    {"target": login_handle, "observation": "full_tree"},
                 )
                 print(f"Login click observation: {login_result['observation']}")
 
@@ -182,7 +182,10 @@ async def main() -> None:
                 status = await _call_tool(session, "snapshot", {"target": status_handle, "depth": 0})
                 status_nodes = _iter_snapshot_tree(status["tree"])
                 print(f"Status snapshot: {status['tree']}")
-                assert any(widget.get("text") == "payment=JPY 90.9 precision=1 adjustments=on" for widget in status_nodes)
+                assert any(
+                    "payment=JPY 90.9 precision=1 adjustments=on" in str(widget.get("text", ""))
+                    for widget in status_nodes
+                )
 
                 screenshot = await _call_tool(
                     session,

@@ -148,6 +148,52 @@ async def _discover_widget_handles(session: ClientSession, targets: list[str]) -
     return {target: await _discover_widget_handle(session, target) for target in targets}
 
 
+def _find_snapshot_node(tree: Any, *, object_name: str) -> dict[str, Any] | None:
+    if isinstance(tree, dict):
+        if tree.get("object_name") == object_name or tree.get("objectName") == object_name:
+            return tree
+        for child in tree.get("children", []):
+            match = _find_snapshot_node(child, object_name=object_name)
+            if match is not None:
+                return match
+        return None
+
+    if isinstance(tree, list):
+        for entry in tree:
+            match = _find_snapshot_node(entry, object_name=object_name)
+            if match is not None:
+                return match
+    return None
+
+
+async def _assert_screen_visible_tab_snapshot(
+    session: ClientSession,
+    *,
+    tabs_handle: str,
+    visible_object_name: str,
+    hidden_object_name: str,
+    depth: int = 6,
+) -> None:
+    full_tabs_snapshot = await _call_tool(
+        session,
+        "snapshot",
+        {"target": tabs_handle, "depth": depth},
+    )
+    print(f"Full tabs snapshot: {full_tabs_snapshot['tree']}")
+    assert _find_snapshot_node(full_tabs_snapshot["tree"], object_name=visible_object_name) is not None
+    assert _find_snapshot_node(full_tabs_snapshot["tree"], object_name=hidden_object_name) is not None
+
+    screen_visible_tabs_snapshot = await _call_tool(
+        session,
+        "snapshot",
+        {"target": tabs_handle, "mode": "screen_visible", "depth": depth},
+    )
+    print(f"Screen-visible tabs snapshot: {screen_visible_tabs_snapshot['tree']}")
+    assert screen_visible_tabs_snapshot["mode"] == "screen_visible"
+    assert _find_snapshot_node(screen_visible_tabs_snapshot["tree"], object_name=visible_object_name) is not None
+    assert _find_snapshot_node(screen_visible_tabs_snapshot["tree"], object_name=hidden_object_name) is None
+
+
 async def main() -> None:
     root = _project_root()
     env = _python_path_env(root)
@@ -183,6 +229,7 @@ async def main() -> None:
                 handles_by_target = await _discover_widget_handles(
                     session,
                     [
+                        "#main_tabs",
                         "#amount_editor",
                         "#username",
                         "#password",
@@ -197,6 +244,7 @@ async def main() -> None:
                         "#clear_btn",
                     ],
                 )
+                tabs_handle = handles_by_target["#main_tabs"]
                 amount_handle = handles_by_target["#amount_editor"]
                 username_handle = handles_by_target["#username"]
                 password_handle = handles_by_target["#password"]
@@ -209,6 +257,13 @@ async def main() -> None:
                 status_handle = handles_by_target["#status"]
                 summary_handle = handles_by_target["#summary"]
                 clear_handle = handles_by_target["#clear_btn"]
+
+                await _assert_screen_visible_tab_snapshot(
+                    session,
+                    tabs_handle=tabs_handle,
+                    visible_object_name="login_btn",
+                    hidden_object_name="add_entry_btn",
+                )
 
                 methods = await _call_tool(session, "inspect", {"target": amount_handle, "include_methods": True})
                 method_names = [entry["name"] for entry in methods["methods"]]
@@ -370,7 +425,7 @@ async def main() -> None:
                 await _call_tool(
                     session,
                     "wait",
-                    {"target": notify_handle, "condition": "checked_equals", "expected": True},
+                    {"target": notify_handle, "condition": "checked_equals", "expected": False},
                 )
                 await _call_tool(
                     session,

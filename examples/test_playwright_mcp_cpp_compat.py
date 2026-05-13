@@ -43,7 +43,7 @@ async def main() -> None:
     demo_process = subprocess.Popen([str(executable)], cwd=executable.parent, env=env)
 
     server_params = StdioServerParameters(
-        command="d:/workdir/wangjianwei/projects/bot/qt-use/.venv/Scripts/python.exe",
+        command=sys.executable,
         args=["-m", "qplaywright.mcp_server"],
         env=env,
     )
@@ -110,7 +110,7 @@ async def main() -> None:
                 login_result = await _call_tool(
                     session,
                     "click",
-                    {"target": login_handle, "include_snapshot": True},
+                    {"target": login_handle, "observation": "full_tree"},
                 )
                 print(f"Login click observation: {login_result['observation']}")
 
@@ -124,7 +124,7 @@ async def main() -> None:
                     "snapshot",
                     {"target": status_handle, "depth": 0},
                 )
-                print(f"Status snapshot: {status['snapshot']}")
+                print(f"Status snapshot: {status['tree']}")
 
                 screenshot = await _call_tool(
                     session,

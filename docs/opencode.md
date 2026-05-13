@@ -157,7 +157,7 @@ use qplaywright
 3. `snapshot` 先拿结构概览
 4. 必要时用 `find` 缩小候选范围
 5. 使用 `snapshot` 或 `find` 返回的 stable handle 继续调用 `input`、`click`、`choose`，并在 checkable widget 上用 `click` 或 `press_key` 后配合 `wait` / `inspect` 确认状态
-6. 使用 `inspect` 或附带 `include_snapshot=true` 的动作结果做断言
+6. 使用 `inspect` 或附带 `observation="full_tree"` / `observation="screen_visible"` 的动作结果做断言
 7. `session {"action": "close"}`
 
 补充说明：
