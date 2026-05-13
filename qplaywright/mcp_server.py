@@ -3638,12 +3638,23 @@ def _cli_tool_help_from_schema(tool_name: str) -> str | None:
             lines.append(line)
 
     if isinstance(properties, dict) and any(name in properties for name in ("target", "root", "owner")):
+        property_descriptions = [
+            str(property_schema.get("description") or "").lower()
+            for property_schema in properties.values()
+            if isinstance(property_schema, dict)
+        ]
         lines.extend([
             "",
             "Target guidance:",
-            "- Prefer the stable handle returned by snapshot, find, resolve_object_names, or inspect.",
-            f"- Selector fallback examples: {_SELECTOR_EXAMPLES}",
+            "- Use stable handles for repeatable agent actions; get them from snapshot, find, resolve_object_names, or inspect.",
         ])
+        if any("structured item target" in description for description in property_descriptions):
+            lines.append("- Reuse structured item targets returned by inspect_items for table, tree, list, or tab item actions.")
+        if any("selector" in description for description in property_descriptions):
+            lines.append(
+                "- Selectors are for observation or search scope setup; once you have the right widget, switch to stable handles for precise actions. "
+                f"Examples: {_SELECTOR_EXAMPLES}"
+            )
 
     return "\n".join(lines)
 

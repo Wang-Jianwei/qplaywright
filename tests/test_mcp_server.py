@@ -3516,6 +3516,12 @@ def test_cli_usage_text_lists_unified_find_modes():
     assert "find_fuzzy" not in usage
 
 
+def test_cli_usage_text_keeps_input_and_focus_on_separate_lines():
+    usage = mcp_server._cli_usage_text()
+
+    assert "input TARGET [TEXT] [--mode replace|append|type|clear] [--delay MS] [--submit]\n  focus TARGET" in usage
+
+
 def test_run_cli_typed_snapshot(monkeypatch, capsys):
     monkeypatch.setattr(
         mcp_server,
@@ -4574,6 +4580,7 @@ def test_cli_tool_help_includes_action_level_session_and_window_guidance():
     session_help = mcp_server._cli_tool_help("session", mcp_server.session)
     window_help = mcp_server._cli_tool_help("window", mcp_server.window)
     inspect_help = mcp_server._cli_tool_help("inspect", mcp_server.inspect)
+    click_help = mcp_server._cli_tool_help("click", mcp_server.click)
 
     assert "session.attach: attach to an already running Qt app" in session_help
     assert "session.status: report current session and active window" in session_help
@@ -4581,3 +4588,7 @@ def test_cli_tool_help_includes_action_level_session_and_window_guidance():
     assert "window.select: switch active window" in window_help
     assert "window.close: close one window or the active window" in window_help
     assert "geometry is Rect4 [x, y, width, height] in widget-local coordinates" in inspect_help
+    assert "Selectors are for observation or search scope setup" in inspect_help
+    assert "structured item targets returned by inspect_items" in click_help
+    assert "Selector fallback examples" not in click_help
+    assert "Selectors are for observation or search scope setup" not in click_help
