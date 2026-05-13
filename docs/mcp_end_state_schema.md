@@ -410,6 +410,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 ```json
 {
   "target": "w12",
+  "mode": "full_tree",
   "depth": 8,
   "topmost_only": false,
   "include_infrastructure": false,
@@ -420,8 +421,10 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 字段约束：
 
 - `target` 可选，缺省表示当前 active window
+- `mode` 默认为 `full_tree`；`mode="screen_visible"` 要求提供 `target`
 - `depth` 默认为 `10`
 - `topmost_only` 默认为 `false`，仅对 window-wide snapshot 有意义
+- `mode="screen_visible"` 与 `topmost_only=true` 互斥
 - `include_infrastructure` 默认为 `false`，用于控制是否保留 qplaywright overlay/debug/support widgets
 - `save_to` 可选，表示把文本快照写入文件，而不是保存图片
 
@@ -443,6 +446,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
     "geometry": [0, 0, 640, 720]
   },
   "target": null,
+  "mode": "full_tree",
   "root_handle": "w1",
   "tree": [],
   "warnings": [
@@ -454,6 +458,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 
 其中 `tree` 的元素类型为 `SnapshotTreeNode[]`。
 当 `topmost_only=true` 且 `target=null` 时，`warnings` 应明确指出结果可能不完整。
+当 `mode="screen_visible"` 时，`warnings` 应明确指出结果是近似 screen-visible subtree，而不是像素级遮挡精确分析。
 
 ## Find
 

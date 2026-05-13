@@ -56,6 +56,11 @@ _TOPMOST_ONLY_WARNING = (
     "topmost_only is an approximate frontmost-visible filter and may omit widgets or content. "
     "Rerun with topmost_only=false when you need a complete tree."
 )
+_SCREEN_VISIBLE_WARNING = (
+    "mode='screen_visible' is an approximate screen-visible subtree under the target. "
+    "It prefers currently shown pages, viewport-intersecting descendants, and frontmost hit-tested candidates, "
+    "but does not guarantee pixel-exact occlusion analysis."
+)
 _SCREENSHOT_TEMP_DIR = Path(tempfile.gettempdir()) / "qplaywright_screenshots" / uuid4().hex
 _INFRASTRUCTURE_WIDGET_CLASSES = {
     "QAbstractScrollAreaScrollBarContainer",
@@ -120,6 +125,7 @@ def _tighten_pointer_tool_schema(tool: Any | None, *, verb: str) -> None:
 SessionAction = Literal["attach", "launch", "close", "status"]
 WindowAction = Literal["list", "select", "resize", "close"]
 FindMode = Literal["auto", "exact", "fuzzy"]
+SnapshotMode = Literal["full_tree", "screen_visible"]
 
 _ALLOWED_WAIT_STATES = {"visible", "hidden", "enabled", "disabled", "checked", "unchecked"}
 _ALLOWED_WAIT_CONDITIONS = {
@@ -286,6 +292,15 @@ FindLimitArg = Annotated[
 DepthArg = Annotated[
     int,
     Field(description="Maximum widget tree depth to include in the returned snapshot or inspect tree."),
+]
+SnapshotModeArg = Annotated[
+    SnapshotMode,
+    Field(
+        description=(
+            "Observation mode for snapshot. full_tree preserves the current behavior; "
+            "screen_visible requires target and returns an approximate screen-visible subtree under that target."
+        )
+    ),
 ]
 TopmostOnlyArg = Annotated[
     bool,
@@ -763,12 +778,14 @@ def _widget_tree_raw(
     max_depth: int,
     window_wid: int | None = None,
     topmost_only: bool = False,
+    screen_visible_only: bool = False,
     include_interactable: bool = False,
     timeout: float | None = None,
 ) -> list[dict[str, Any]]:
     params: dict[str, Any] = {
         "max_depth": max_depth,
         "topmost_only": topmost_only,
+        "screen_visible_only": screen_visible_only,
         "include_interactable": include_interactable,
     }
     if window_wid is not None:
@@ -794,6 +811,7 @@ def _active_window_tree_raw(
     *,
     max_depth: int,
     topmost_only: bool = False,
+    screen_visible_only: bool = False,
     include_interactable: bool = False,
     timeout: float | None = None,
     operation: str,
@@ -804,6 +822,7 @@ def _active_window_tree_raw(
             max_depth=max_depth,
             window_wid=connection.active_window_wid,
             topmost_only=topmost_only,
+            screen_visible_only=screen_visible_only,
             include_interactable=include_interactable,
             timeout=timeout,
         )
@@ -2179,11 +2198,13 @@ def _snapshot_result(
     managed_connection: ManagedConnection,
     *,
     target: str | None = None,
+    mode: SnapshotMode = "full_tree",
     depth: int = 10,
     topmost_only: bool = False,
     include_infrastructure: bool = False,
     timeout: float | None = None,
 ) -> dict[str, Any]:
+    _validate_snapshot_request(target=target, mode=mode, topmost_only=topmost_only)
     target_params = _target_params(managed_connection, target, max_depth=depth) if target is not None else None
 
     if target is None:
@@ -2193,6 +2214,7 @@ def _snapshot_result(
                 managed_connection,
                 max_depth=depth,
                 topmost_only=topmost_only,
+                screen_visible_only=False,
                 include_interactable=True,
                 timeout=timeout,
                 operation="snapshot",
@@ -2204,6 +2226,7 @@ def _snapshot_result(
     assert target_params is not None
     find_params = dict(target_params)
     find_params["include_interactable"] = True
+    find_params["screen_visible_only"] = mode == "screen_visible"
     node = managed_connection.app._conn.send(
         METHOD_FIND,
         find_params,
@@ -2232,6 +2255,19 @@ def _topmost_only_warnings(*, topmost_only: bool, target: str | None = None) -> 
     if target is not None:
         return []
     return [_TOPMOST_ONLY_WARNING]
+
+
+def _screen_visible_warnings(*, mode: SnapshotMode) -> list[str]:
+    if mode != "screen_visible":
+        return []
+    return [_SCREEN_VISIBLE_WARNING]
+
+
+def _validate_snapshot_request(*, target: str | None, mode: SnapshotMode, topmost_only: bool) -> None:
+    if mode == "screen_visible" and target is None:
+        raise ValueError("snapshot mode='screen_visible' requires target")
+    if mode == "screen_visible" and topmost_only:
+        raise ValueError("snapshot mode='screen_visible' does not support topmost_only=true")
 
 
 def _press_key_without_target(connection: ManagedConnection, *, key: str) -> None:
@@ -2657,6 +2693,7 @@ if FastMCP is not None:
     @mcp.tool()
     def snapshot(
         target: OptionalWidgetDiscoveryTargetArg = None,
+        mode: SnapshotModeArg = "full_tree",
         depth: DepthArg = 10,
         topmost_only: TopmostOnlyArg = False,
         include_infrastructure: IncludeInfrastructureArg = False,
@@ -2665,7 +2702,9 @@ if FastMCP is not None:
         """Return a structured snapshot of the current active window or one target.
 
         Use target plus depth when you want to inspect one subtree and capture
-        several child handles in one call.
+        several child handles in one call. Use mode='screen_visible' with a
+        target when you want an approximate subtree that better matches what is
+        currently shown on screen.
 
         The returned payload is JSON-first. Use `tree` and `root_handle` as
         the primary observation surface. `save_to` can still export the internal
@@ -2683,11 +2722,13 @@ if FastMCP is not None:
         - text snapshot lines add [hidden], [disabled], and [non-interactable] only when those states apply
         """
 
+        _validate_snapshot_request(target=target, mode=mode, topmost_only=topmost_only)
         connection_state = _get_connection(_SERVER_STATE)
         active_window = _active_window_summary(connection_state)
         payload = _snapshot_result(
             connection_state,
             target=target,
+            mode=mode,
             depth=depth,
             topmost_only=topmost_only,
             include_infrastructure=include_infrastructure,
@@ -2699,11 +2740,13 @@ if FastMCP is not None:
             "session": _session_summary(connection_state),
             "window": active_window,
             "target": target,
+            "mode": mode,
             "topmost_only": topmost_only,
             "include_infrastructure": include_infrastructure,
             **public_payload,
         }
         warnings = _topmost_only_warnings(topmost_only=topmost_only, target=target)
+        warnings.extend(_screen_visible_warnings(mode=mode))
         if warnings:
             result["warnings"] = warnings
         if save_to is not None:

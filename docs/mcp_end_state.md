@@ -215,6 +215,7 @@ Qt 业务自动化的中心应当是：
 建议参数：
 
 - `target`
+- `mode`
 - `depth`
 - `topmost_only`
 - `save_to`
@@ -239,6 +240,7 @@ Qt 业务自动化的中心应当是：
 - `save_to` 表示把文本快照写入文件，不是保存图片
 - `widgets` 应包含节点 `geometry`，便于模型做空间推理
 - 当 `topmost_only=true` 且 `target` 为空时，结果是近似前景可见视图，应显式返回 warning 说明内容可能不完整
+- 当 `mode="screen_visible"` 时，应要求 `target`，并明确这是近似 screen-visible subtree，不保证像素级遮挡精确分析
 - 这样 `session.status` 的需求会被进一步压低
 
 ### 4. find

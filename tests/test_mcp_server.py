@@ -1328,9 +1328,16 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
 
     result = mcp_server.snapshot(depth=4, topmost_only=True, save_to="snapshot.txt")
 
-    assert captured["kwargs"] == {"target": None, "depth": 4, "topmost_only": True, "include_infrastructure": False}
+    assert captured["kwargs"] == {
+        "target": None,
+        "mode": "full_tree",
+        "depth": 4,
+        "topmost_only": True,
+        "include_infrastructure": False,
+    }
     assert result["ok"] is True
     assert result["window"]["wid"] == 11
+    assert result["mode"] == "full_tree"
     assert result["topmost_only"] is True
     assert result["warnings"] == [mcp_server._TOPMOST_ONLY_WARNING]
     assert result["save_to"] == "snapshot.txt"
@@ -1393,6 +1400,7 @@ def test_inspect_without_target_returns_active_window_tree(monkeypatch):
         "max_depth": 6,
         "window_wid": 11,
         "topmost_only": True,
+        "screen_visible_only": False,
         "include_interactable": False,
         "timeout": None,
     }
@@ -1566,6 +1574,49 @@ def test_snapshot_omits_topmost_warning_for_targeted_snapshot(monkeypatch):
 
     assert "snapshot" not in result
     assert "warnings" not in result
+
+
+def test_snapshot_screen_visible_requires_target():
+    with pytest.raises(ValueError, match="mode='screen_visible' requires target"):
+        mcp_server.snapshot(mode="screen_visible")
+
+
+def test_snapshot_screen_visible_rejects_topmost_only():
+    with pytest.raises(ValueError, match="mode='screen_visible' does not support topmost_only=true"):
+        mcp_server.snapshot(target="w7", mode="screen_visible", topmost_only=True)
+
+
+def test_snapshot_screen_visible_passes_mode_and_warning(monkeypatch):
+    state = mcp_server.ServerState()
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+    captured = {}
+
+    def fake_snapshot_result(managed_connection, **kwargs):
+        captured["kwargs"] = kwargs
+        return _v2_snapshot_payload("Visible")
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_snapshot_result", fake_snapshot_result)
+
+    result = mcp_server.snapshot(target="w7", mode="screen_visible", depth=2)
+
+    assert captured["kwargs"] == {
+        "target": "w7",
+        "mode": "screen_visible",
+        "depth": 2,
+        "topmost_only": False,
+        "include_infrastructure": False,
+    }
+    assert result["mode"] == "screen_visible"
+    assert result["warnings"] == [mcp_server._SCREEN_VISIBLE_WARNING]
 
 
 def test_snapshot_reports_stale_active_window_with_recovery_steps(monkeypatch):
@@ -2939,7 +2990,7 @@ def test_snapshot_result_uses_handle_and_passes_depth_for_target_snapshot():
     result = mcp_server._snapshot_result(connection, target="w9", depth=3)
 
     assert transport.calls == [
-        {"method": "find", "params": {"wid": 42, "max_depth": 3, "include_interactable": True}, "timeout": 30.0},
+        {"method": "find", "params": {"wid": 42, "max_depth": 3, "include_interactable": True, "screen_visible_only": False}, "timeout": 30.0},
         {"method": "list_windows", "params": None, "timeout": None},
     ]
     assert connection.handle_to_wid == {"w9": 42, "w10": 43}
@@ -3887,7 +3938,7 @@ def test_widget_tree_raw_includes_optional_window_wid():
 
     assert captured == {
         "method": mcp_server.METHOD_WIDGET_TREE,
-        "params": {"max_depth": 4, "topmost_only": True, "include_interactable": False, "wid": 12},
+        "params": {"max_depth": 4, "topmost_only": True, "screen_visible_only": False, "include_interactable": False, "wid": 12},
     }
 
 
@@ -4295,12 +4346,51 @@ def test_snapshot_result_scopes_to_active_window(monkeypatch):
         "max_depth": 3,
         "window_wid": 22,
         "topmost_only": True,
+        "screen_visible_only": False,
         "include_interactable": True,
         "timeout": None,
     }
     assert 'DialogWindow "Dialog"' in payload["snapshot"]
     assert payload["root_handle"] == "w1"
     assert payload["tree"][0]["handle"] == "w1"
+
+
+def test_snapshot_result_passes_screen_visible_only_for_target_snapshot():
+    transport = FakeTransportConn(
+        responses={
+            mcp_server.METHOD_FIND: {
+                "wid": 42,
+                "class": "DemoWindow",
+                "objectName": "",
+                "text": "Dialog",
+                "children": [],
+            }
+        }
+    )
+    app = FakeApp([])
+    app._conn = transport
+    connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        handle_to_wid={"w7": 7},
+        wid_to_handle={7: "w7"},
+        handle_counter=1,
+    )
+
+    mcp_server._snapshot_result(connection, target="w7", mode="screen_visible", depth=3)
+
+    assert transport.calls == [
+        {
+            "method": mcp_server.METHOD_FIND,
+            "params": {"wid": 7, "max_depth": 3, "include_interactable": True, "screen_visible_only": True},
+            "timeout": 30.0,
+        },
+        {"method": mcp_server.METHOD_LIST_WINDOWS, "params": None, "timeout": None},
+    ]
 
 
 def test_snapshot_window_payload_preserves_active_window_geometry_array(monkeypatch):

@@ -881,7 +881,63 @@ class _WidgetRegistry:
 _registry = _WidgetRegistry()
 
 
-def _iter_tree_children(widget, *, topmost_only: bool = False):
+def _rect_intersects(left: list[int], right: list[int]) -> bool:
+    return not (
+        left[0] + left[2] <= right[0]
+        or right[0] + right[2] <= left[0]
+        or left[1] + left[3] <= right[1]
+        or right[1] + right[3] <= left[1]
+    )
+
+
+def _widget_global_bounding_box(widget) -> list[int] | None:
+    target = _primary_event_target(widget)
+    if not _widget_is_visible(target):
+        return None
+    width = _widget_dimension(target, "width")
+    height = _widget_dimension(target, "height")
+    if width <= 0 or height <= 0:
+        return None
+    top_left = _widget_map_to_global(target, _rect_top_left(_widget_rect(target)))
+    return _rect4(_point_coordinate(top_left, "x"), _point_coordinate(top_left, "y"), width, height)
+
+
+def _ancestor_screen_visible_bounds(widget) -> list[int] | None:
+    bounds: list[int] | None = None
+    current = widget
+    while current is not None:
+        rect = _widget_global_bounding_box(current)
+        if rect is None:
+            return None
+        if bounds is None:
+            bounds = rect
+        else:
+            left = max(bounds[0], rect[0])
+            top = max(bounds[1], rect[1])
+            right = min(bounds[0] + bounds[2], rect[0] + rect[2])
+            bottom = min(bounds[1] + bounds[3], rect[1] + rect[3])
+            if right <= left or bottom <= top:
+                return None
+            bounds = [left, top, right - left, bottom - top]
+        parent_widget = getattr(current, "parentWidget", None)
+        current = parent_widget() if callable(parent_widget) else None
+    return bounds
+
+
+def _is_screen_visible_widget(widget) -> bool:
+    target = _primary_event_target(widget)
+    if not _widget_is_visible(target):
+        return False
+    widget_bounds = _widget_global_bounding_box(target)
+    ancestor_bounds = _ancestor_screen_visible_bounds(target)
+    if widget_bounds is None or ancestor_bounds is None:
+        return False
+    if not _rect_intersects(widget_bounds, ancestor_bounds):
+        return False
+    return _is_topmost_visible_widget(target)
+
+
+def _iter_tree_children(widget, *, topmost_only: bool = False, screen_visible_only: bool = False):
     for child in _iter_widget_children(widget):
         if _is_automation_overlay_widget(child):
             continue
@@ -890,6 +946,8 @@ def _iter_tree_children(widget, *, topmost_only: bool = False):
         if callable(is_window) and callable(is_visible) and is_window() and not is_visible():
             continue
         if topmost_only and not _is_topmost_visible_widget(child):
+            continue
+        if screen_visible_only and not _is_screen_visible_widget(child):
             continue
         yield child
 
@@ -900,6 +958,7 @@ def _widget_tree_to_dict(
     depth: int = 0,
     max_depth: int = 50,
     topmost_only: bool = False,
+    screen_visible_only: bool = False,
     include_interactable: bool = False,
 ) -> dict:
     """Serialize a widget tree and include stable widget ids for each node."""
@@ -914,13 +973,14 @@ def _widget_tree_to_dict(
 
     if depth < max_depth:
         children = []
-        for child in _iter_tree_children(widget, topmost_only=topmost_only):
+        for child in _iter_tree_children(widget, topmost_only=topmost_only, screen_visible_only=screen_visible_only):
             children.append(
                 _widget_tree_to_dict(
                     child,
                     depth=depth + 1,
                     max_depth=max_depth,
                     topmost_only=topmost_only,
+                    screen_visible_only=screen_visible_only,
                     include_interactable=include_interactable,
                 )
             )
@@ -3073,7 +3133,12 @@ def _handle_command(req: Request) -> Any:
         w = widgets[0]
         wid = _registry.register(w)
         if bool(params.get("include_interactable", False)):
-            result = _widget_tree_to_dict(w, max_depth=params.get("max_depth", 0), include_interactable=True)
+            result = _widget_tree_to_dict(
+                w,
+                max_depth=params.get("max_depth", 0),
+                screen_visible_only=bool(params.get("screen_visible_only", False)),
+                include_interactable=True,
+            )
             result["wid"] = wid
             return result
         return {"wid": wid, **widget_to_dict(w, max_depth=params.get("max_depth", 0))}
@@ -3084,7 +3149,12 @@ def _handle_command(req: Request) -> Any:
         for w in widgets:
             wid = _registry.register(w)
             if bool(params.get("include_interactable", False)):
-                entry = _widget_tree_to_dict(w, max_depth=params.get("max_depth", 0), include_interactable=True)
+                entry = _widget_tree_to_dict(
+                    w,
+                    max_depth=params.get("max_depth", 0),
+                    screen_visible_only=bool(params.get("screen_visible_only", False)),
+                    include_interactable=True,
+                )
                 entry["wid"] = wid
                 result.append(entry)
             else:
@@ -3097,6 +3167,7 @@ def _handle_command(req: Request) -> Any:
     if method == METHOD_WIDGET_TREE:
         wid = params.get("wid")
         topmost_only = bool(params.get("topmost_only", False))
+        screen_visible_only = bool(params.get("screen_visible_only", False))
         include_interactable = bool(params.get("include_interactable", False))
         if wid is not None:
             root = _registry.get(wid)
@@ -3110,6 +3181,7 @@ def _handle_command(req: Request) -> Any:
                 r,
                 max_depth=params.get("max_depth", 10),
                 topmost_only=topmost_only,
+                screen_visible_only=screen_visible_only,
                 include_interactable=include_interactable,
             )
             for r in roots

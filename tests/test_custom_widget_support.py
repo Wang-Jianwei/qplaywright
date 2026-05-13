@@ -110,6 +110,18 @@ class FakeWidget:
     def toolTip(self) -> str:
         return str(self._properties.get("toolTip", ""))
 
+    def rect(self):
+        return self
+
+    def topLeft(self):
+        return self
+
+    def mapToGlobal(self, point):
+        return point
+
+    def parentWidget(self):
+        return None
+
 
 class FakeTextWidget(FakeWidget):
     def text(self) -> str:
@@ -135,6 +147,20 @@ class FakeActionLike:
 
     def children(self):
         raise AssertionError("non-widget children should not be traversed")
+
+
+class FakeScreenWidget(FakeWidget):
+    def __init__(self, *, parent=None, visible: bool = True, screen_visible: bool = True, **kwargs):
+        super().__init__(**kwargs)
+        self._parent = parent
+        self._visible = visible
+        self._screen_visible = screen_visible
+
+    def isVisible(self) -> bool:
+        return self._visible
+
+    def parentWidget(self):
+        return self._parent
 
 
 def _metadata(*, role: str = "", methods: list[dict] | None = None) -> QPlaywrightClassMetadata:
@@ -412,6 +438,20 @@ def test_widget_tree_snapshot_captures_live_delegate_editor_widget():
     assert editor_payload["objectName"] == "status_editor"
     assert editor_payload["currentText"] == "Ready"
     assert editor_payload["accessibleName"] == "Status editor"
+
+
+def test_widget_tree_snapshot_screen_visible_only_filters_hidden_descendants(monkeypatch):
+    server._registry.clear()
+    root = FakeScreenWidget(class_name="QWidget", object_name="root")
+    visible_child = FakeScreenWidget(class_name="QPushButton", object_name="visible_child", parent=root)
+    hidden_child = FakeScreenWidget(class_name="QPushButton", object_name="hidden_child", parent=root, screen_visible=False)
+    root._children = [visible_child, hidden_child]
+
+    monkeypatch.setattr(server, "_is_topmost_visible_widget", lambda widget: getattr(widget, "_screen_visible", True))
+
+    payload = server._widget_tree_to_dict(root, max_depth=1, screen_visible_only=True)
+
+    assert [entry["objectName"] for entry in payload["children"]] == ["visible_child"]
 
 
 def test_widget_properties_include_qt_and_dynamic_properties():

@@ -1994,7 +1994,7 @@ private:
         return properties;
     }
 
-    QJsonObject serializeWidgetTree(QWidget *w, int depth = 0, int maxDepth = 10, bool topmostOnly = false, bool includeInteractable = false)
+    QJsonObject serializeWidgetTree(QWidget *w, int depth = 0, int maxDepth = 10, bool topmostOnly = false, bool includeInteractable = false, bool screenVisibleOnly = false)
     {
         if (isAutomationOverlayWidget(w))
             throw std::runtime_error("Automation overlay widgets are excluded from snapshot capture");
@@ -2071,7 +2071,9 @@ private:
                     continue;
                 if (topmostOnly && !isTopmostVisibleWidget(cw))
                     continue;
-                children.append(serializeWidgetTree(cw, depth + 1, maxDepth, topmostOnly, includeInteractable));
+                if (screenVisibleOnly && !isScreenVisibleWidget(cw))
+                    continue;
+                children.append(serializeWidgetTree(cw, depth + 1, maxDepth, topmostOnly, includeInteractable, screenVisibleOnly));
             }
             if (!children.isEmpty())
                 obj["children"] = children;
@@ -2108,7 +2110,8 @@ private:
                 0,
                 params["max_depth"].toInt(0),
                 false,
-                params.value("include_interactable").toBool(false)
+                params.value("include_interactable").toBool(false),
+                params.value("screen_visible_only").toBool(false)
             );
             r["wid"] = wid;
             return r;
@@ -2124,7 +2127,8 @@ private:
                     0,
                     params["max_depth"].toInt(0),
                     false,
-                    params.value("include_interactable").toBool(false)
+                    params.value("include_interactable").toBool(false),
+                    params.value("screen_visible_only").toBool(false)
                 );
                 r["wid"] = wid;
                 arr.append(r);
@@ -2139,6 +2143,7 @@ private:
         if (method == "widget_tree") {
             int maxDepth = params["max_depth"].toInt(10);
             const bool topmostOnly = params["topmost_only"].toBool(false);
+            const bool screenVisibleOnly = params.value("screen_visible_only").toBool(false);
             const bool includeInteractable = params.value("include_interactable").toBool(false);
             QJsonArray arr;
             QList<QWidget *> roots;
@@ -2152,7 +2157,7 @@ private:
             }
             for (QWidget *w : roots) {
                 if (w->isVisible())
-                    arr.append(serializeWidgetTree(w, 0, maxDepth, topmostOnly, includeInteractable));
+                    arr.append(serializeWidgetTree(w, 0, maxDepth, topmostOnly, includeInteractable, screenVisibleOnly));
             }
             return arr;
         }
@@ -4019,6 +4024,54 @@ private:
                 return true;
         }
         return false;
+    }
+
+    QRect widgetGlobalBoundingBox(QWidget *w)
+    {
+        QWidget *target = primaryEventTarget(w);
+        if (!target || !target->isVisible())
+            return QRect();
+
+        const int width = target->width();
+        const int height = target->height();
+        if (width <= 0 || height <= 0)
+            return QRect();
+
+        const QPoint topLeft = target->mapToGlobal(target->rect().topLeft());
+        return QRect(topLeft, QSize(width, height));
+    }
+
+    QRect ancestorScreenVisibleBounds(QWidget *w)
+    {
+        QRect bounds;
+        bool haveBounds = false;
+        QWidget *current = w;
+        while (current) {
+            const QRect rect = widgetGlobalBoundingBox(current);
+            if (rect.isEmpty())
+                return QRect();
+            bounds = haveBounds ? bounds.intersected(rect) : rect;
+            if (bounds.isEmpty())
+                return QRect();
+            haveBounds = true;
+            current = current->parentWidget();
+        }
+        return bounds;
+    }
+
+    bool isScreenVisibleWidget(QWidget *w)
+    {
+        QWidget *target = primaryEventTarget(w);
+        if (!target || !target->isVisible())
+            return false;
+
+        const QRect widgetBounds = widgetGlobalBoundingBox(target);
+        const QRect ancestorBounds = ancestorScreenVisibleBounds(target);
+        if (widgetBounds.isEmpty() || ancestorBounds.isEmpty())
+            return false;
+        if (!widgetBounds.intersects(ancestorBounds))
+            return false;
+        return isTopmostVisibleWidget(target);
     }
 
     struct ClickTarget
