@@ -45,7 +45,7 @@ from qplaywright.protocol import (
     METHOD_WIDGET_TREE,
 )
 from qplaywright._logging import configure_logging_from_env
-from qplaywright.errors import QPlaywrightActionError, QPlaywrightConnectionError
+from qplaywright.errors import QPlaywrightActionError, QPlaywrightAgentError, QPlaywrightConnectionError
 from qplaywright.sync_api import QPlaywright
 from qplaywright.sync_api._locator import ItemLocator, Locator
 
@@ -774,6 +774,43 @@ def _widget_tree_raw(
     if window_wid is not None:
         params["wid"] = window_wid
     return connection.app._conn.send(METHOD_WIDGET_TREE, params, timeout=timeout)
+
+
+def _is_stale_widget_tree_wid_error(exc: Exception) -> bool:
+    return isinstance(exc, QPlaywrightAgentError) and "Widget not found by wid" in str(exc)
+
+
+def _stale_active_window_message(connection: ManagedConnection, *, operation: str) -> str:
+    wid_fragment = f" wid={connection.active_window_wid}" if isinstance(connection.active_window_wid, int) else ""
+    return (
+        f"The active window{wid_fragment} became stale while running {operation} because that window no longer exists "
+        "in the current widget tree. This commonly happens after a transient menu or dialog closes, or when the UI rebuilds. "
+        "Run window(action='list') to select a current window or session(action='attach') to refresh the session, then retry."
+    )
+
+
+def _active_window_tree_raw(
+    connection: ManagedConnection,
+    *,
+    max_depth: int,
+    topmost_only: bool = False,
+    include_interactable: bool = False,
+    timeout: float | None = None,
+    operation: str,
+) -> list[dict[str, Any]]:
+    try:
+        return _widget_tree_raw(
+            connection,
+            max_depth=max_depth,
+            window_wid=connection.active_window_wid,
+            topmost_only=topmost_only,
+            include_interactable=include_interactable,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        if _is_stale_widget_tree_wid_error(exc):
+            raise ValueError(_stale_active_window_message(connection, operation=operation)) from exc
+        raise
 
 
 def _find_widgets_raw(
@@ -2152,13 +2189,13 @@ def _snapshot_result(
     if target is None:
         return _snapshot_payload(
             managed_connection,
-            _widget_tree_raw(
+            _active_window_tree_raw(
                 managed_connection,
                 max_depth=depth,
-                window_wid=managed_connection.active_window_wid,
                 topmost_only=topmost_only,
                 include_interactable=True,
                 timeout=timeout,
+                operation="snapshot",
             ),
             depth=depth,
             include_infrastructure=include_infrastructure,
@@ -2698,11 +2735,11 @@ if FastMCP is not None:
 
         connection_state = _get_connection(_SERVER_STATE)
         if target is None:
-            tree = _widget_tree_raw(
+            tree = _active_window_tree_raw(
                 connection_state,
                 max_depth=depth,
-                window_wid=connection_state.active_window_wid,
                 topmost_only=topmost_only,
+                operation="inspect",
             )
             if not include_infrastructure:
                 tree = _filter_infrastructure_nodes(tree)

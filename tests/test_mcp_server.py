@@ -9,7 +9,7 @@ from typing import Any, cast
 import pytest
 
 import qplaywright.mcp_server as mcp_server
-from qplaywright import QPlaywrightActionError, QPlaywrightConnectionError, QPlaywrightProtocolError
+from qplaywright import QPlaywrightActionError, QPlaywrightAgentError, QPlaywrightConnectionError, QPlaywrightProtocolError
 
 
 class FakeQPlaywright:
@@ -1389,7 +1389,13 @@ def test_inspect_without_target_returns_active_window_tree(monkeypatch):
 
     result = mcp_server.inspect(depth=6, topmost_only=True)
 
-    assert captured["kwargs"] == {"max_depth": 6, "window_wid": 11, "topmost_only": True}
+    assert captured["kwargs"] == {
+        "max_depth": 6,
+        "window_wid": 11,
+        "topmost_only": True,
+        "include_interactable": False,
+        "timeout": None,
+    }
     assert result == {
         "ok": True,
         "target": None,
@@ -1560,6 +1566,61 @@ def test_snapshot_omits_topmost_warning_for_targeted_snapshot(monkeypatch):
 
     assert "snapshot" not in result
     assert "warnings" not in result
+
+
+def test_snapshot_reports_stale_active_window_with_recovery_steps(monkeypatch):
+    state = mcp_server.ServerState()
+    app = FakeApp([FakeWindow(11, "Main")])
+    app._conn = FakeTransportConn(error=QPlaywrightAgentError("Agent error: Widget not found by wid"))
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_ping_connection", lambda connection: None)
+    monkeypatch.setattr(
+        mcp_server,
+        "_active_window_summary",
+        lambda connection, windows=None: {"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": [0, 0, 640, 480], "is_active": True, "is_modal": False},
+    )
+
+    with pytest.raises(ValueError, match="active window wid=11 became stale while running snapshot") as exc_info:
+        mcp_server.snapshot()
+
+    message = str(exc_info.value)
+    assert "window(action='list')" in message
+    assert "session(action='attach')" in message
+
+
+def test_inspect_reports_stale_active_window_with_recovery_steps(monkeypatch):
+    state = mcp_server.ServerState()
+    app = FakeApp([FakeWindow(11, "Main")])
+    app._conn = FakeTransportConn(error=QPlaywrightAgentError("Agent error: Widget not found by wid"))
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
+    )
+
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_ping_connection", lambda connection: None)
+
+    with pytest.raises(ValueError, match="active window wid=11 became stale while running inspect") as exc_info:
+        mcp_server.inspect()
+
+    message = str(exc_info.value)
+    assert "window(action='list')" in message
+    assert "session(action='attach')" in message
 
 
 def test_inspect_locator_handles_empty_and_present_results():
