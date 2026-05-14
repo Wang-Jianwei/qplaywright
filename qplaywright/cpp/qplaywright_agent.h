@@ -50,6 +50,7 @@
 #include <QStyle>
 #include <QStyleOptionButton>
 #include <QAbstractButton>
+#include <QAbstractSpinBox>
 #include <QLineEdit>
 #include <QTextEdit>
 #include <QPlainTextEdit>
@@ -790,7 +791,7 @@ inline bool matchesRole(const QWidget *widget, const QString &role)
         {"input",       {"QLineEdit", "QTextEdit", "QPlainTextEdit"}},
         {"combobox",    {"QComboBox"}},
         {"slider",      {"QSlider"}},
-        {"spinbox",     {"QSpinBox", "QDoubleSpinBox"}},
+        {"spinbox",     {"QSpinBox", "QDoubleSpinBox", "QDateEdit", "QTimeEdit", "QDateTimeEdit"}},
         {"tab",         {"QTabBar"}},
         {"tabwidget",   {"QTabWidget"}},
         {"table",       {"QTableWidget", "QTableView"}},
@@ -875,6 +876,8 @@ inline QString widgetInputValue(const QWidget *widget)
 {
     if (auto *combo = qobject_cast<const QComboBox *>(widget))
         return combo->currentText();
+    if (auto *spin = qobject_cast<const QAbstractSpinBox *>(widget))
+        return spin->text();
     if (auto *edit = qobject_cast<const QLineEdit *>(widget))
         return edit->text();
     if (auto *te = qobject_cast<const QTextEdit *>(widget))
@@ -4245,6 +4248,13 @@ private:
         if (auto *edit = qobject_cast<QLineEdit *>(w)) {
             edit->clear();
             edit->setText(value);
+        } else if (auto *spin = qobject_cast<QAbstractSpinBox *>(w)) {
+            spin->clear();
+            if (!value.isEmpty()) {
+                spin->setFocus();
+                QApplication::processEvents();
+                QTest::keyClicks(spin, value);
+            }
         } else if (auto *te = qobject_cast<QTextEdit *>(w)) {
             te->setPlainText(value);
         } else if (auto *pte = qobject_cast<QPlainTextEdit *>(w)) {

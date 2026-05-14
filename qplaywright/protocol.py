@@ -304,7 +304,7 @@ ROLE_MAP: dict[str, list[str]] = {
     "input": ["QLineEdit", "QTextEdit", "QPlainTextEdit"],
     "combobox": ["QComboBox"],
     "slider": ["QSlider"],
-    "spinbox": ["QSpinBox", "QDoubleSpinBox"],
+    "spinbox": ["QSpinBox", "QDoubleSpinBox", "QDateEdit", "QTimeEdit", "QDateTimeEdit"],
     "tab": ["QTabBar"],
     "tabwidget": ["QTabWidget"],
     "table": ["QTableWidget", "QTableView"],

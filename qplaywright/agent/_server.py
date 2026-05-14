@@ -3830,6 +3830,11 @@ def _fill_widget(widget, value: str):
     if hasattr(widget, "clear") and hasattr(widget, "setText"):
         widget.clear()
         widget.setText(value)
+    elif callable(getattr(widget, "lineEdit", None)) and callable(getattr(widget, "stepEnabled", None)):
+        widget.clear()
+        if value:
+            _type_text(widget, value, delay=0)
+            return
     elif hasattr(widget, "setPlainText"):
         widget.setPlainText(value)
     elif hasattr(widget, "setCurrentText"):

@@ -46,3 +46,12 @@ def test_cpp_header_role_map_covers_python_qwidget_roles():
         if role == "menuitem":
             continue
         assert f'{{"{role}",' in header_text
+
+
+def test_spinbox_role_includes_date_time_editors_in_python_and_cpp():
+    header_text = agent_header_path().read_text(encoding="utf-8")
+
+    assert {"QDateEdit", "QTimeEdit", "QDateTimeEdit"}.issubset(set(ROLE_MAP["spinbox"]))
+    assert '"QDateEdit"' in header_text
+    assert '"QTimeEdit"' in header_text
+    assert '"QDateTimeEdit"' in header_text

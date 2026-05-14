@@ -71,3 +71,55 @@ def test_start_agent_configures_logging_from_env(monkeypatch):
     assert calls["dispatcher_name"] == "_qplaywright_dispatcher"
     assert calls["started"] is True
     assert isinstance(server, FakeServer)
+
+
+def test_fill_widget_supports_abstract_spinbox_text_entry(monkeypatch):
+    events: list[tuple[str, object]] = []
+
+    class FakeSpinBox:
+        def clear(self):
+            events.append(("clear", None))
+
+        def lineEdit(self):
+            return object()
+
+        def stepEnabled(self):
+            return 0
+
+    monkeypatch.setattr(agent_server, "_import_qt", lambda: None)
+    monkeypatch.setattr(agent_server, "_widget_class_name", lambda widget: "QSpinBox")
+    monkeypatch.setattr(agent_server, "_type_text", lambda widget, text, delay=0: events.append(("type", (text, delay))))
+    monkeypatch.setattr(agent_server, "_process_events", lambda: events.append(("process", None)))
+
+    agent_server._fill_widget(FakeSpinBox(), "12.5")
+
+    assert events == [
+        ("clear", None),
+        ("type", ("12.5", 0)),
+    ]
+
+
+def test_fill_widget_clears_abstract_spinbox_without_typing(monkeypatch):
+    events: list[tuple[str, object]] = []
+
+    class FakeDateTimeEdit:
+        def clear(self):
+            events.append(("clear", None))
+
+        def lineEdit(self):
+            return object()
+
+        def stepEnabled(self):
+            return 0
+
+    monkeypatch.setattr(agent_server, "_import_qt", lambda: None)
+    monkeypatch.setattr(agent_server, "_widget_class_name", lambda widget: "QDateTimeEdit")
+    monkeypatch.setattr(agent_server, "_type_text", lambda widget, text, delay=0: events.append(("type", (text, delay))))
+    monkeypatch.setattr(agent_server, "_process_events", lambda: events.append(("process", None)))
+
+    agent_server._fill_widget(FakeDateTimeEdit(), "")
+
+    assert events == [
+        ("clear", None),
+        ("process", None),
+    ]
