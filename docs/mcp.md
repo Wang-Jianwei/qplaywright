@@ -81,7 +81,7 @@ qplaywright-mcp cli session status
 qplaywright-mcp cli session launch D:/path/to/app.exe -- --flag
 qplaywright-mcp cli window list
 qplaywright-mcp cli window select --title Dialog
-qplaywright-mcp cli snapshot --depth 4 --topmost-only
+qplaywright-mcp cli snapshot --target w12 --depth 4
 qplaywright-mcp cli click w12 --count 2
 qplaywright-mcp cli click --point 320,180
 qplaywright-mcp cli hover --point 320,180
@@ -314,10 +314,9 @@ Request:
 
 ```json
 {
-  "target": null,
-  "mode": "full_tree",
+  "target": "w12",
+  "mode": "screen_visible",
   "depth": 10,
-  "topmost_only": false,
   "include_infrastructure": false,
   "save_to": "snapshot.txt"
 }
@@ -352,15 +351,13 @@ If you need widget-local geometry or screen-space bounds, follow up with `inspec
 Stable widget handles are session-stable. They survive later `snapshot`, `find`, and `inspect` calls, and only fail
 once the widget is destroyed or the session is replaced.
 
-Use `snapshot(target=..., depth=N)` when you already know a container or owner widget and want to inspect a local subtree in one round-trip.
-Use `snapshot(target=..., mode="screen_visible")` when you already know a target and want an approximate subtree that better matches what is currently shown on screen.
+Use `snapshot(target=..., depth=N)` when you already know a container or owner widget and want to inspect a local subtree in one round-trip. By default this uses `mode="screen_visible"` so the returned tree stays focused on what is currently on screen.
+Use `snapshot(target=..., mode="screen_visible")` when you want to state that preference explicitly.
+Use `snapshot(target=..., mode="full_tree")` when you need the complete subtree, including offscreen descendants.
 Use `find(mode="exact")` when you already have deterministic predicates such as `object_name`, exact `text`, `role`, or `class` and want a small candidate set instead of a subtree dump.
 Use `find(mode="fuzzy")` when you only know an approximate phrase, semantic label, window title, or object name fragment.
 Use `resolve_object_names` when a known subtree exposes several deliberate `object_name` values and you want those exact handles in one round-trip.
 
-When `topmost_only=true` and `target` is omitted, the result is an approximate
-frontmost-visible view. It may omit widgets or content and returns a warning to
-make that limitation explicit.
 When `mode="screen_visible"`, `target` is required and the result becomes an
 approximate screen-visible subtree under that target. This mode prefers
 currently shown pages, viewport-intersecting descendants, and frontmost

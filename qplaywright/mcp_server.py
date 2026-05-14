@@ -17,6 +17,7 @@ import logging
 import re
 import shlex
 import shutil
+import socket
 import sys
 import tempfile
 import time
@@ -287,8 +288,8 @@ SnapshotModeArg = Annotated[
     SnapshotMode,
     Field(
         description=(
-            "Observation mode for snapshot. full_tree preserves the current behavior; "
-            "screen_visible requires target and returns an approximate screen-visible subtree under that target."
+            "Observation mode for snapshot. Default is screen_visible. Prefer screen_visible when you already have a target and want the smaller on-screen-relevant subtree with fewer offscreen descendants. "
+            "Use full_tree when you need the complete subtree under the target. screen_visible requires target and returns an approximate screen-visible subtree under that target."
         )
     ),
 ]
@@ -347,7 +348,7 @@ IncludeStateArg = Annotated[
 ]
 ActionObservationArg = Annotated[
     ActionObservationMode,
-    Field(description="Select the post-action observation mode. Use 'none' to skip result.observation, 'full_tree' to include the default post-action tree, or 'screen_visible' for an approximate screen-visible subtree under the action target. If the action changes windows, screen_visible cannot fall back to the active window."),
+    Field(description="Select the post-action observation mode. Use 'none' to skip result.observation. Prefer 'screen_visible' for target-scoped follow-up observation when you want a smaller on-screen-relevant subtree; use 'full_tree' when you need the complete target subtree. If the action changes windows, screen_visible cannot fall back to the active window."),
 ]
 MethodArg = Annotated[
     str,
@@ -1023,6 +1024,16 @@ def _stale_connection_message(connection: ManagedConnection, exc: Exception) -> 
     )
 
 
+def _should_drop_connection_after_ping_failure(exc: Exception) -> bool:
+    if isinstance(exc, TimeoutError):
+        return False
+    if isinstance(exc, socket.timeout):
+        return False
+    if isinstance(exc, QPlaywrightConnectionError):
+        return True
+    return isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError))
+
+
 def _get_connection(state: ServerState) -> ManagedConnection:
     connection = state.connection
     if connection is None:
@@ -1031,19 +1042,26 @@ def _get_connection(state: ServerState) -> ManagedConnection:
     try:
         _ping_connection(connection)
     except Exception as exc:
-        connection.close()
-        state.connection = None
-        raise QPlaywrightConnectionError(
-            _stale_connection_message(connection, exc),
-            code="stale_session",
-            context={
-                "host": connection.host,
-                "port": connection.port,
-                "timeout": connection.timeout,
-                "connection_name": connection.name,
-                "last_error": repr(exc),
-            },
-        ) from exc
+        if _should_drop_connection_after_ping_failure(exc):
+            connection.close()
+            state.connection = None
+            raise QPlaywrightConnectionError(
+                _stale_connection_message(connection, exc),
+                code="stale_session",
+                context={
+                    "host": connection.host,
+                    "port": connection.port,
+                    "timeout": connection.timeout,
+                    "connection_name": connection.name,
+                    "last_error": repr(exc),
+                },
+            ) from exc
+        LOGGER.warning(
+            "Ping preflight timed out for session %s at %s:%s; keeping the session and letting the action decide liveness.",
+            connection.name,
+            connection.host,
+            connection.port,
+        )
 
     return connection
 
@@ -2764,26 +2782,23 @@ if FastMCP is not None:
 
     @mcp.tool()
     def snapshot(
-        target: OptionalWidgetDiscoveryTargetArg = None,
-        mode: SnapshotModeArg = "full_tree",
+        target: WidgetDiscoveryTargetArg,
+        mode: SnapshotModeArg = "screen_visible",
         depth: DepthArg = 10,
-        topmost_only: TopmostOnlyArg = False,
         include_infrastructure: IncludeInfrastructureArg = False,
         save_to: SaveToArg = None,
     ) -> dict[str, Any]:
-        """Return a structured snapshot of the current active window or one target.
+        """Return a structured snapshot of one target subtree.
 
         Use target plus depth when you want to inspect one subtree and capture
-        several child handles in one call. Use mode='screen_visible' with a
-        target when you want an approximate subtree that better matches what is
-        currently shown on screen.
+        several child handles in one call. Prefer mode='screen_visible' with a
+        target when you want the smaller subtree that best matches what is
+        currently shown on screen. Use mode='full_tree' when you need the
+        complete subtree, including offscreen descendants.
 
         The returned payload is JSON-first. Use `tree` and `root_handle` as
         the primary observation surface. `save_to` can still export the internal
         text snapshot for external debugging.
-
-        When topmost_only is true, the window-wide snapshot becomes an approximate
-        frontmost-visible view and may be incomplete.
 
         Snapshot tree semantics:
         - tree nodes expose stable handles, semantic labels, sparse negative state, and children
@@ -2794,7 +2809,7 @@ if FastMCP is not None:
         - text snapshot lines add [hidden], [disabled], and [non-interactable] only when those states apply
         """
 
-        _validate_snapshot_request(target=target, mode=mode, topmost_only=topmost_only)
+        _validate_snapshot_request(target=target, mode=mode, topmost_only=False)
         connection_state = _get_connection(_SERVER_STATE)
         active_window = _active_window_summary(connection_state)
         payload = _snapshot_result(
@@ -2802,7 +2817,6 @@ if FastMCP is not None:
             target=target,
             mode=mode,
             depth=depth,
-            topmost_only=topmost_only,
             include_infrastructure=include_infrastructure,
         )
         text_snapshot = payload.get("snapshot")
@@ -2813,12 +2827,10 @@ if FastMCP is not None:
             "window": active_window,
             "target": target,
             "mode": mode,
-            "topmost_only": topmost_only,
             "include_infrastructure": include_infrastructure,
             **public_payload,
         }
-        warnings = _topmost_only_warnings(topmost_only=topmost_only, target=target)
-        warnings.extend(_screen_visible_warnings(mode=mode))
+        warnings = _screen_visible_warnings(mode=mode)
         if warnings:
             result["warnings"] = warnings
         if save_to is not None:
@@ -3601,7 +3613,7 @@ def _cli_usage_text() -> str:
         "  resource list|read URI\n"
         "  session attach|launch|status|close\n"
         "  window list|select\n"
-        "  snapshot [--target TARGET] [--depth N] [--topmost-only] [--save-to PATH]\n"
+        "  snapshot --target TARGET [--mode full_tree|screen_visible] [--depth N] [--save-to PATH]\n"
         "  find [--mode auto|exact|fuzzy] [--keyword KEYWORD] [--root ROOT] [--role ROLE] [--text TEXT] [--class CLASS] [--object-name NAME] [--accessible-name NAME] [--limit N]\n"
         "  click [TARGET] [--count 1|2] [--point X,Y] [--observation none|full_tree|screen_visible]\n"
         "  hover [TARGET] [--point X,Y] [--observation none|full_tree|screen_visible]\n"
@@ -3906,9 +3918,9 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     window_select_group.add_argument("--title")
 
     snapshot_parser = subparsers.add_parser("snapshot", help="Capture a text snapshot of the current UI.")
-    snapshot_parser.add_argument("--target")
+    snapshot_parser.add_argument("--target", required=True)
+    snapshot_parser.add_argument("--mode", choices=("full_tree", "screen_visible"), default="screen_visible")
     snapshot_parser.add_argument("--depth", type=int, default=10)
-    snapshot_parser.add_argument("--topmost-only", action="store_true")
     snapshot_parser.add_argument("--include-infrastructure", action="store_true")
     snapshot_parser.add_argument("--save-to")
 
@@ -4186,8 +4198,8 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
     if command == "snapshot":
         arguments = {
             "target": namespace.target,
+            "mode": namespace.mode,
             "depth": namespace.depth,
-            "topmost_only": namespace.topmost_only,
             "include_infrastructure": namespace.include_infrastructure,
             "save_to": namespace.save_to,
         }

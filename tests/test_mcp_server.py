@@ -348,6 +348,28 @@ def test_get_connection_removes_stale_session_from_state():
     assert exc_info.value.context["port"] == 19876
 
 
+def test_get_connection_keeps_session_on_ping_timeout():
+    app = FakeApp([])
+    app._conn = FakeTransportConn(error=TimeoutError("timed out"))
+    qplaywright = FakeQPlaywright()
+    connection = mcp_server.ManagedConnection(
+        name="default",
+        qplaywright=qplaywright,
+        app=app,
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+    )
+    state = mcp_server.ServerState(connection=connection)
+
+    result = mcp_server._get_connection(state)
+
+    assert result is connection
+    assert state.connection is connection
+    assert app.closed is False
+    assert qplaywright.closed is False
+
+
 def test_resolve_window_prefers_wid_then_title():
     first = FakeWindow(1, "Main Window")
     second = FakeWindow(2, "Preferences")
@@ -1332,20 +1354,18 @@ def test_snapshot_uses_active_window_scope_and_save_to(monkeypatch):
         lambda path, content: written.update({"path": path, "content": content}) or path,
     )
 
-    result = mcp_server.snapshot(depth=4, topmost_only=True, save_to="snapshot.txt")
+    result = mcp_server.snapshot(target="w7", depth=4, save_to="snapshot.txt")
 
     assert captured["kwargs"] == {
-        "target": None,
-        "mode": "full_tree",
+        "target": "w7",
+        "mode": "screen_visible",
         "depth": 4,
-        "topmost_only": True,
         "include_infrastructure": False,
     }
     assert result["ok"] is True
     assert result["window"]["wid"] == 11
-    assert result["mode"] == "full_tree"
-    assert result["topmost_only"] is True
-    assert result["warnings"] == [mcp_server._TOPMOST_ONLY_WARNING]
+    assert result["mode"] == "screen_visible"
+    assert result["warnings"] == [mcp_server._SCREEN_VISIBLE_WARNING]
     assert result["save_to"] == "snapshot.txt"
     assert "snapshot" not in result
     assert written == {"path": "snapshot.txt", "content": "- Main @w1"}
@@ -1557,7 +1577,12 @@ def test_inspect_without_target_can_include_infrastructure(monkeypatch):
     assert [child["wid"] for child in result["tree"][0]["children"]] == [12, 13]
 
 
-def test_snapshot_omits_topmost_warning_for_targeted_snapshot(monkeypatch):
+def test_snapshot_requires_target():
+    with pytest.raises(TypeError, match="missing 1 required positional argument: 'target'"):
+        mcp_server.snapshot()
+
+
+def test_snapshot_defaults_to_screen_visible_for_target(monkeypatch):
     state = mcp_server.ServerState()
     state.connection = mcp_server.ManagedConnection(
         name="demo",
@@ -1568,28 +1593,62 @@ def test_snapshot_omits_topmost_warning_for_targeted_snapshot(monkeypatch):
         timeout=30.0,
         active_window_wid=11,
     )
+    captured = {}
+
+    def fake_snapshot_result(managed_connection, **kwargs):
+        captured["kwargs"] = kwargs
+        return _v2_snapshot_payload("Visible")
 
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
-    monkeypatch.setattr(
-        mcp_server,
-        "_snapshot_result",
-        lambda managed_connection, **kwargs: _v2_snapshot_payload("Target"),
+    monkeypatch.setattr(mcp_server, "_snapshot_result", fake_snapshot_result)
+
+    result = mcp_server.snapshot(target="w7", depth=2)
+
+    assert captured["kwargs"] == {
+        "target": "w7",
+        "mode": "screen_visible",
+        "depth": 2,
+        "include_infrastructure": False,
+    }
+    assert result["mode"] == "screen_visible"
+    assert result["warnings"] == [mcp_server._SCREEN_VISIBLE_WARNING]
+
+
+def test_snapshot_explicit_full_tree_overrides_auto_target_default(monkeypatch):
+    state = mcp_server.ServerState()
+    state.connection = mcp_server.ManagedConnection(
+        name="demo",
+        qplaywright=FakeQPlaywright(),
+        app=FakeApp([FakeWindow(11, "Main")]),
+        host="127.0.0.1",
+        port=19876,
+        timeout=30.0,
+        active_window_wid=11,
     )
+    captured = {}
 
-    result = mcp_server.snapshot(target="#amount", topmost_only=True)
+    def fake_snapshot_result(managed_connection, **kwargs):
+        captured["kwargs"] = kwargs
+        return _v2_snapshot_payload("Target")
 
-    assert "snapshot" not in result
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server, "_snapshot_result", fake_snapshot_result)
+
+    result = mcp_server.snapshot(target="w7", mode="full_tree", depth=2)
+
+    assert captured["kwargs"] == {
+        "target": "w7",
+        "mode": "full_tree",
+        "depth": 2,
+        "include_infrastructure": False,
+    }
+    assert result["mode"] == "full_tree"
     assert "warnings" not in result
 
 
-def test_snapshot_screen_visible_requires_target():
+def test_validate_snapshot_request_rejects_targetless_screen_visible():
     with pytest.raises(ValueError, match="mode='screen_visible' requires target"):
-        mcp_server.snapshot(mode="screen_visible")
-
-
-def test_snapshot_screen_visible_rejects_topmost_only():
-    with pytest.raises(ValueError, match="mode='screen_visible' does not support topmost_only=true"):
-        mcp_server.snapshot(target="w7", mode="screen_visible", topmost_only=True)
+        mcp_server._validate_snapshot_request(target=None, mode="screen_visible", topmost_only=False)
 
 
 def test_snapshot_screen_visible_passes_mode_and_warning(monkeypatch):
@@ -1618,14 +1677,13 @@ def test_snapshot_screen_visible_passes_mode_and_warning(monkeypatch):
         "target": "w7",
         "mode": "screen_visible",
         "depth": 2,
-        "topmost_only": False,
         "include_infrastructure": False,
     }
     assert result["mode"] == "screen_visible"
     assert result["warnings"] == [mcp_server._SCREEN_VISIBLE_WARNING]
 
 
-def test_snapshot_reports_stale_active_window_with_recovery_steps(monkeypatch):
+def test_snapshot_result_reports_stale_active_window_with_recovery_steps(monkeypatch):
     state = mcp_server.ServerState()
     app = FakeApp([FakeWindow(11, "Main")])
     app._conn = FakeTransportConn(error=QPlaywrightAgentError("Agent error: Widget not found by wid"))
@@ -1648,7 +1706,7 @@ def test_snapshot_reports_stale_active_window_with_recovery_steps(monkeypatch):
     )
 
     with pytest.raises(ValueError, match="active window wid=11 became stale while running snapshot") as exc_info:
-        mcp_server.snapshot()
+        mcp_server._snapshot_result(state.connection, target=None, mode="full_tree", depth=10)
 
     message = str(exc_info.value)
     assert "window(action='list')" in message
@@ -2474,6 +2532,16 @@ def test_mcp_tool_input_schema_describes_all_parameters():
     assert wait_properties["condition"]["type"] == "string"
     assert wait_properties["expected"]["type"] == "string"
     assert wait_properties["timeout"]["type"] == "number"
+
+    snapshot_tool = next(tool for tool in dumped if tool["name"] == "snapshot")
+    snapshot_mode_description = snapshot_tool["inputSchema"]["properties"]["mode"]["description"]
+    assert "target" in snapshot_tool["inputSchema"].get("required", [])
+    assert snapshot_tool["inputSchema"]["properties"]["mode"]["default"] == "screen_visible"
+    assert snapshot_tool["inputSchema"]["properties"]["target"]["type"] == "string"
+    assert "Prefer screen_visible" in snapshot_mode_description
+    assert "complete subtree" in snapshot_mode_description
+
+    assert "Prefer 'screen_visible'" in click_tool["inputSchema"]["properties"]["observation"]["description"]
 
     resolve_object_names_tool = next(tool for tool in dumped if tool["name"] == "resolve_object_names")
     resolve_root_schema = resolve_object_names_tool["inputSchema"]["properties"]["root"]
@@ -3319,7 +3387,8 @@ def test_run_cli_help_snapshot_mentions_targeted_subtree_capture(capsys):
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "inspect one subtree and capture" in output
-    assert "frontmost-visible view" in output
+    assert "Return a structured snapshot of one target subtree" in output
+    assert "frontmost-visible view" not in output
     assert "omit geometry by default" in output
     assert "        Use target plus depth" not in output
 
@@ -3552,7 +3621,7 @@ def test_run_cli_typed_snapshot(monkeypatch, capsys):
         lambda **kwargs: {"ok": True, **kwargs},
     )
 
-    exit_code = mcp_server._run_cli(["snapshot", "--depth", "4", "--topmost-only", "--save-to", "snapshot.txt"])
+    exit_code = mcp_server._run_cli(["snapshot", "--target", "w7", "--mode", "screen_visible", "--depth", "4", "--save-to", "snapshot.txt"])
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
@@ -3560,9 +3629,9 @@ def test_run_cli_typed_snapshot(monkeypatch, capsys):
         "ok": True,
         "depth": 4,
         "include_infrastructure": False,
+        "mode": "screen_visible",
         "save_to": "snapshot.txt",
-        "target": None,
-        "topmost_only": True,
+        "target": "w7",
     }
 
 
