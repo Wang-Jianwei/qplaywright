@@ -394,6 +394,52 @@ def test_locator_wait_for_checked_and_unchecked_poll_is_checked():
     ]
 
 
+@pytest.mark.parametrize(
+    ("state", "responses", "expected_calls"),
+    [
+        (
+            "visible",
+            {"is_visible": [False, True]},
+            [
+                ("is_visible", {"wid": 42}, 0.5),
+                ("is_visible", {"wid": 42}, 0.5),
+            ],
+        ),
+        (
+            "hidden",
+            {"is_visible": [True, False]},
+            [
+                ("is_visible", {"wid": 42}, 0.5),
+                ("is_visible", {"wid": 42}, 0.5),
+            ],
+        ),
+        (
+            "enabled",
+            {"is_enabled": [False, True]},
+            [
+                ("is_enabled", {"wid": 42}, 0.5),
+                ("is_enabled", {"wid": 42}, 0.5),
+            ],
+        ),
+        (
+            "disabled",
+            {"is_enabled": [True, False]},
+            [
+                ("is_enabled", {"wid": 42}, 0.5),
+                ("is_enabled", {"wid": 42}, 0.5),
+            ],
+        ),
+    ],
+)
+def test_locator_wait_for_widget_handle_polls_direct_state(state, responses, expected_calls):
+    conn = SequencedConnection(responses)
+    locator = Locator(conn, "", widget_wid=42, timeout=0.5)
+
+    locator.wait_for(state=state, timeout=0.2)
+
+    assert conn.calls == expected_calls
+
+
 def test_window_screenshot_passes_clip_region():
     conn = FakeConnection()
     window = Window(conn, wid=7, timeout=6.0)

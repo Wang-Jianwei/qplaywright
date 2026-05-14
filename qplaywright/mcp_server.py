@@ -93,34 +93,23 @@ def _tighten_pointer_tool_schema(tool: Any | None, *, verb: str) -> None:
     parameters = tool.parameters
     properties = parameters.get("properties", {})
     target_schema = properties.get("target")
-    x_schema = properties.get("x")
-    y_schema = properties.get("y")
-    if not isinstance(target_schema, dict) or not isinstance(x_schema, dict) or not isinstance(y_schema, dict):
+    point_schema = properties.get("point")
+    if not isinstance(target_schema, dict) or not isinstance(point_schema, dict):
         return
 
     _strip_null_schema_type(target_schema)
-    target_schema.pop("default", None)
     target_schema["description"] = (
-        f"Stable widget handle, or a structured item target object {{owner, item}}. "
-        f"Use snapshot, find, or inspect to observe the UI and capture handles first. Provide target to {verb} a widget or item. Omit target only when using both x and y to {verb} "
+        f"Stable widget handle, or a structured item target reference string returned by inspect_items. "
+        f"Use snapshot, find, or inspect to observe the UI and capture handles first. Provide target to {verb} a widget or item. Use an empty string only when point is provided to {verb} "
         "a window-relative coordinate in the active window."
     )
 
-    for axis, axis_schema in (("x", x_schema), ("y", y_schema)):
-        axis_schema.pop("default", None)
-        axis_schema["description"] = (
-            f"Window-relative {axis} coordinate in pixels. Provide together with the other axis to {verb} "
-            "the active window when target is omitted."
-        )
+    point_schema["description"] = (
+        f"Window-relative coordinate point in pixels, formatted as x,y. Use point only when target is an empty string and the tool should {verb} the active window."
+    )
 
-    parameters["oneOf"] = [
-        {"required": ["target"]},
-        {"required": ["x", "y"]},
-    ]
-    parameters["allOf"] = [
-        {"not": {"required": ["target", "x"]}},
-        {"not": {"required": ["target", "y"]}},
-    ]
+    parameters.pop("oneOf", None)
+    parameters.pop("allOf", None)
 
 SessionAction = Literal["attach", "launch", "close", "status"]
 WindowAction = Literal["list", "select", "resize", "close"]
@@ -202,16 +191,16 @@ WidgetDiscoveryTargetArg = Annotated[
     Field(description="Stable widget handle or selector target used for observation or search, such as w12, #objectName, role=button, or text=Submit. Use selectors to narrow candidates; reuse returned handles for precise widget actions."),
 ]
 ItemTargetArg = Annotated[
-    dict[str, Any],
-    Field(description="Structured item target object: {owner: <widget stable handle or selector>, item: <table_cell/tree_node/list_item descriptor>}. Prefer a stable handle for owner when available."),
+    str,
+    Field(description="Structured item target reference string returned by inspect_items. Reuse this exact string with inspect, click, hover, wait, or set_expanded for table, tree, list, and tab items."),
 ]
 ActionTargetArg = Annotated[
-    str | dict[str, Any],
-    Field(description="Stable widget handle, or a structured item target object {owner, item}. Widget actions require stable handles; item actions use structured targets returned by inspect_items."),
+    str,
+    Field(description="Stable widget handle, or a structured item target reference string returned by inspect_items. Widget actions require stable handles; item actions reuse the returned item target reference."),
 ]
 OptionalActionTargetArg = Annotated[
-    str | dict[str, Any] | None,
-    Field(description="Optional stable widget handle, or a structured item target object {owner, item}. Widget actions require stable handles; item actions use structured targets returned by inspect_items. Omit only when the tool supports targetless operation."),
+    str,
+    Field(description="Stable widget handle, or a structured item target reference string returned by inspect_items. Widget actions require stable handles; item actions reuse the returned item target reference. Use an empty string only when the tool supports point-based operation in the active window."),
 ]
 OptionalWidgetHandleArg = Annotated[
     str | None,
@@ -222,12 +211,12 @@ OptionalWidgetDiscoveryTargetArg = Annotated[
     Field(description="Optional stable widget handle or selector target used for observation or search. Use selectors to narrow candidates; reuse returned handles for precise widget actions. Omit to inspect or snapshot the active window when supported."),
 ]
 OptionalDiscoveryOrItemTargetArg = Annotated[
-    str | dict[str, Any] | None,
-    Field(description="Optional stable widget handle, selector target used for observation or search, or structured item target object {owner, item}. Omit to inspect the active window when the tool supports it."),
+    str | None,
+    Field(description="Optional stable widget handle, selector target used for observation or search, or a structured item target reference string returned by inspect_items. Omit to inspect the active window when the tool supports it."),
 ]
 FindRootArg = Annotated[
-    str | None,
-    Field(description="Optional find scope root: stable widget handle or selector. Use selectors to narrow candidate search; reuse returned handles for precise widget actions. Omit to search under the active window."),
+    str,
+    Field(description="Find scope root: stable widget handle or selector. Use selectors to narrow candidate search; reuse returned handles for precise widget actions. Use an empty string to search under the active window."),
 ]
 FindRoleArg = Annotated[
     str | None,
@@ -332,6 +321,10 @@ ClickCountArg = Annotated[
     int,
     Field(description="Click count. Use 1 for a single click or 2 for a double click."),
 ]
+PointerPointArg = Annotated[
+    str,
+    Field(description="Window-relative coordinate point in pixels, formatted as x,y."),
+]
 InputTextArg = Annotated[
     str,
     Field(description="Text to input into the stable-handle target widget."),
@@ -360,9 +353,9 @@ MethodArg = Annotated[
     str,
     Field(description="Exact exposed custom widget method name to invoke."),
 ]
-InvokeArgsArg = Annotated[
-    dict[str, Any] | None,
-    Field(description="Optional keyword argument object passed to the custom widget method."),
+InvokeArgsJsonArg = Annotated[
+    str | None,
+    Field(description="Optional JSON object string passed as keyword arguments to the custom widget method. The JSON value must decode to an object, for example {\"code\": \"CNY\"}."),
 ]
 KeyArg = Annotated[
     str,
@@ -381,20 +374,24 @@ ChooseLabelArg = Annotated[
     Field(description="Combobox option label or current text to select. Provide exactly one of value, index, or label."),
 ]
 WaitStateArg = Annotated[
-    str | None,
-    Field(description="Built-in wait state to wait for: visible, hidden, enabled, disabled, checked, or unchecked."),
+    str,
+    Field(description="Built-in wait state to wait for: visible, hidden, enabled, disabled, checked, or unchecked. Used when mode is state."),
 ]
 WaitConditionArg = Annotated[
-    str | None,
-    Field(description="Higher-level wait condition such as text_equals, text_contains, current_text_equals, current_text_contains, value_equals, checked_equals, or count_equals."),
+    str,
+    Field(description="Higher-level wait condition such as text_equals, text_contains, current_text_equals, current_text_contains, value_equals, checked_equals, or count_equals. Used when mode is condition."),
 ]
 WaitExpectedArg = Annotated[
-    str | int | bool | None,
-    Field(description="Expected value used with condition. Its type depends on the selected condition."),
+    str,
+    Field(description="Expected value used with condition, expressed as text. For checked_equals use true or false. For count_equals use integer text. Required when mode is condition."),
 ]
-OptionalTimeoutArg = Annotated[
-    float | None,
-    Field(description="Optional timeout in seconds for the operation. When omitted, the active session timeout is used."),
+WaitModeArg = Annotated[
+    str,
+    Field(description="Wait mode. Use state for built-in state waits, or condition for higher-level condition waits."),
+]
+WaitTimeoutArg = Annotated[
+    float,
+    Field(description="Timeout in seconds for the operation. Use 0 to fall back to the active session timeout."),
 ]
 ScreenshotPathArg = Annotated[
     str | None,
@@ -504,6 +501,8 @@ if _MCP_IMPORT_ERROR is None:
 
 _MCP_CANCEL_NOTIFICATION_METHOD = "notifications/cancelled"
 _HANDLE_PATTERN = re.compile(r"^w\d+$")
+_ITEM_REF_PREFIX = "itemref:"
+_ITEM_REF_VERSION = 1
 _SELECTOR_EXAMPLES = "role=button, text=Submit, has-text=partial, a11y-name=Submit, #objectName, name=objectName, .QLabel"
 
 
@@ -1247,29 +1246,62 @@ def _raise_if_hidden_click_target(locator: Any, *, target: str, action: str, exc
         ) from exc
 
 
-def _is_item_target(target: Any) -> bool:
-    return isinstance(target, dict) and "owner" in target and "item" in target
-
-
-def _normalize_item_target(target: Any) -> dict[str, Any]:
-    if not _is_item_target(target):
-        raise ValueError("item target must be an object with owner and item keys")
-
-    owner = target.get("owner")
-    item = target.get("item")
+def _normalize_item_target_parts(owner: Any, item: Any) -> dict[str, Any]:
     if not isinstance(owner, str) or not owner.strip():
         raise ValueError("item target owner must be a non-empty widget selector or stable handle")
     if not isinstance(item, dict):
         raise ValueError("item target item must be an object descriptor")
-    return {"owner": owner, "item": dict(item)}
+    return {"owner": owner.strip(), "item": dict(item)}
 
 
-def _target_owner_target(target: str | dict[str, Any] | None) -> str | None:
+def _is_item_ref_string(target: Any) -> bool:
+    return isinstance(target, str) and target.startswith(_ITEM_REF_PREFIX)
+
+
+def _encode_item_target_ref(*, owner: str, item: dict[str, Any]) -> str:
+    payload = {
+        "version": _ITEM_REF_VERSION,
+        **_normalize_item_target_parts(owner, item),
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    return f"{_ITEM_REF_PREFIX}{encoded}"
+
+
+def _decode_item_target_ref(target: str) -> dict[str, Any]:
+    if not _is_item_ref_string(target):
+        raise ValueError("item target must be a structured item target reference string returned by inspect_items")
+
+    encoded = target[len(_ITEM_REF_PREFIX) :]
+    if not encoded:
+        raise ValueError("item target reference is empty")
+
+    padding = "=" * (-len(encoded) % 4)
+    try:
+        raw_payload = base64.urlsafe_b64decode((encoded + padding).encode("ascii")).decode("utf-8")
+    except Exception as exc:
+        raise ValueError("item target reference is not valid base64url payload") from exc
+
+    try:
+        payload = json.loads(raw_payload)
+    except Exception as exc:
+        raise ValueError("item target reference is not valid JSON payload") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("item target reference payload must decode to an object")
+    if payload.get("version") != _ITEM_REF_VERSION:
+        raise ValueError("item target reference version is not supported")
+
+    return _normalize_item_target_parts(payload.get("owner"), payload.get("item"))
+
+
+def _target_owner_target(target: str | None) -> str | None:
     if target is None:
         return None
-    if isinstance(target, str):
-        return target
-    return _normalize_item_target(target)["owner"]
+    if _is_item_ref_string(target):
+        return _decode_item_target_ref(target)["owner"]
+    return target
 
 
 def _resolve_locator_owner_wid(locator: Any, *, context: str) -> int:
@@ -1288,9 +1320,9 @@ def _resolve_locator_owner_wid(locator: Any, *, context: str) -> int:
 def _resolve_item_locator(
     connection: ManagedConnection,
     *,
-    target: dict[str, Any],
+    target: str,
 ) -> ItemLocator:
-    normalized = _normalize_item_target(target)
+    normalized = _decode_item_target_ref(target)
     owner_locator = _resolve_locator(connection, target=normalized["owner"])
     owner_wid = _resolve_locator_owner_wid(owner_locator, context=f"Item target owner {normalized['owner']!r}")
     client = _require_session_transport(connection, action="item target operations")
@@ -1604,10 +1636,24 @@ def _item_view_inspect(
         enriched = dict(entry)
         descriptor = enriched.get("item")
         if isinstance(descriptor, dict):
-            enriched["target"] = {"owner": target, "item": dict(descriptor)}
+            enriched["target"] = _encode_item_target_ref(owner=target, item=dict(descriptor))
         items.append(enriched)
     payload["items"] = items
     return payload
+
+
+def _parse_invoke_args_json(args_json: str | None) -> dict[str, Any] | None:
+    if args_json is None:
+        return None
+
+    try:
+        payload = json.loads(args_json)
+    except Exception as exc:
+        raise ValueError("args_json must be valid JSON text") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("args_json must decode to a JSON object")
+    return dict(payload)
 
 
 def _invoke_locator_method(
@@ -1669,11 +1715,7 @@ def _selector_help_text() -> str:
         "- #objectName\n"
         "- name=objectName\n"
         "- .QLabel\n\n"
-        "Structured item targets use the form {owner, item}, for example:\n"
-        "- {\"owner\": \"w12\", \"item\": {\"kind\": \"table_cell\", \"row\": 3, \"column\": 1}}\n"
-        "- {\"owner\": \"w9\", \"item\": {\"kind\": \"tree_node\", \"path\": [0, 1]}}\n"
-        "- {\"owner\": \"w5\", \"item\": {\"kind\": \"list_item\", \"row\": 2}}\n"
-        "- {\"owner\": \"w3\", \"item\": {\"kind\": \"tab_item\", \"index\": 1}}\n\n"
+        "Structured item targets are returned as opaque itemref:... strings by inspect_items. Reuse the exact returned string with inspect, click, hover, wait, or set_expanded.\n\n"
         "Geometry help:\n"
         "- Read qplaywright://help/geometry when you need the exact meaning of geometry, bounding_box, and global_bounding_box\n\n"
         "Typical workflow:\n"
@@ -2014,7 +2056,7 @@ def _resolve_find_root_wid(connection: ManagedConnection, root: str | None) -> i
 
     candidate = root.strip()
     if not candidate:
-        raise ValueError("root must be a non-empty selector or stable handle")
+        return _resolve_window(connection).wid
 
     if _HANDLE_PATTERN.match(candidate):
         return connection.wid_for_handle(candidate)
@@ -2293,17 +2335,23 @@ def _press_key_without_target(connection: ManagedConnection, *, key: str) -> Non
     client.send(METHOD_PRESS, params, timeout=connection.timeout)
 
 
-def _pointer_action_coords(*, x: int | None, y: int | None) -> dict[str, int]:
-    if (x is None) != (y is None):
-        raise ValueError("Coordinate pointer actions require x and y together")
-    if x is None:
+def _pointer_action_coords(*, point: str) -> dict[str, int]:
+    candidate = point.strip()
+    if not candidate:
         return {}
-    assert y is not None
 
-    point_x = int(x)
-    point_y = int(y)
+    parts = [part.strip() for part in candidate.split(",")]
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise ValueError("point must be formatted as 'x,y'")
+
+    try:
+        point_x = int(parts[0])
+        point_y = int(parts[1])
+    except ValueError as exc:
+        raise ValueError("point must be formatted as 'x,y'") from exc
+
     if point_x < 0 or point_y < 0:
-        raise ValueError("Coordinate pointer actions require non-negative x and y")
+        raise ValueError("point requires non-negative x and y")
     return {"x": point_x, "y": point_y}
 
 
@@ -2362,9 +2410,9 @@ def _observe_action_window_state(
 def _observe_action_target_state(
     managed_connection: ManagedConnection,
     *,
-    target: str | dict[str, Any],
+    target: str,
 ) -> dict[str, Any]:
-    if isinstance(target, str):
+    if not _is_item_ref_string(target):
         locator = _resolve_widget_handle_locator(managed_connection, target=target, action="state inspection")
         return _compact_action_state(managed_connection, locator)
 
@@ -2471,7 +2519,7 @@ def _finalize_action_result(
     *,
     include_state: bool = False,
     observation: ActionObservationMode = "none",
-    state_target: str | dict[str, Any] | None = None,
+    state_target: str | None = None,
     snapshot_target: str | None = None,
     snapshot_depth: int = 3,
     **payload: Any,
@@ -2822,7 +2870,7 @@ if FastMCP is not None:
                 result["warnings"] = warnings
             return result
 
-        if isinstance(target, str):
+        if not _is_item_ref_string(target):
             locator = _resolve_locator(connection_state, target=target)
             result = _inspect_locator(
                 locator,
@@ -2850,7 +2898,7 @@ if FastMCP is not None:
     def find(
         mode: FindModeArg = "auto",
         keyword: FindKeywordArg = None,
-        root: FindRootArg = None,
+        root: FindRootArg = "",
         role: FindRoleArg = None,
         text: FindTextArg = None,
         class_: FindClassArg = None,
@@ -2904,7 +2952,7 @@ if FastMCP is not None:
     @mcp.tool()
     def resolve_object_names(
         object_names: ResolveObjectNamesArg,
-        root: FindRootArg = None,
+        root: FindRootArg = "",
         depth: DepthArg = 10,
         include_infrastructure: IncludeInfrastructureArg = False,
     ) -> dict[str, Any]:
@@ -2930,10 +2978,9 @@ if FastMCP is not None:
 
     @mcp.tool()
     def click(
-        target: OptionalActionTargetArg = None,
+        target: OptionalActionTargetArg = "",
         count: ClickCountArg = 1,
-        x: ClipXArg = None,
-        y: ClipYArg = None,
+        point: PointerPointArg = "",
         include_state: IncludeStateArg = False,
         observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
@@ -2943,46 +2990,47 @@ if FastMCP is not None:
             raise ValueError("count must be 1 or 2")
 
         connection_state = _get_connection(_SERVER_STATE)
-        coords = _pointer_action_coords(x=x, y=y)
-        snapshot_target = _target_owner_target(target) if target is not None else None
+        normalized_target = target.strip()
+        coords = _pointer_action_coords(point=point)
+        snapshot_target = _target_owner_target(normalized_target) if normalized_target else None
         observation = _validate_action_observation_request(observation=observation, snapshot_target=snapshot_target)
-        if target is None:
+        if not normalized_target:
             if not coords:
-                raise ValueError("click requires either a target or x/y coordinates")
+                raise ValueError("click requires either a target or point")
             method = METHOD_DBLCLICK if count == 2 else METHOD_CLICK
             _pointer_action_without_target(connection_state, method=method, x=coords["x"], y=coords["y"])
         else:
             if coords:
-                raise ValueError("click does not accept x/y together with target")
-            if isinstance(target, str):
-                locator = _resolve_widget_handle_locator(connection_state, target=target, action="click")
+                raise ValueError("click does not accept point together with target")
+            if not _is_item_ref_string(normalized_target):
+                locator = _resolve_widget_handle_locator(connection_state, target=normalized_target, action="click")
             else:
-                locator = _resolve_item_locator(connection_state, target=target)
+                locator = _resolve_item_locator(connection_state, target=normalized_target)
             try:
                 if count == 2:
                     locator.dblclick()
                 else:
                     locator.click()
             except QPlaywrightActionError as exc:
-                if isinstance(target, str):
+                if not _is_item_ref_string(normalized_target):
                     _raise_if_hidden_click_target(
                         locator,
-                        target=target,
+                        target=normalized_target,
                         action="dblclick" if count == 2 else "click",
                         exc=exc,
                     )
                 raise ValueError(
-                    f"{'dblclick' if count == 2 else 'click'} failed for target {target!r}: {exc}"
+                    f"{'dblclick' if count == 2 else 'click'} failed for target {normalized_target!r}: {exc}"
                 ) from exc
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
             observation=observation,
-            state_target=target,
+            state_target=normalized_target or None,
             snapshot_target=snapshot_target,
             ok=True,
             count=count,
-            target=target,
+            target=normalized_target or None,
             **coords,
         )
 
@@ -3082,7 +3130,7 @@ if FastMCP is not None:
     def invoke(
         target: WidgetHandleArg,
         method: MethodArg,
-        args: InvokeArgsArg = None,
+        args_json: InvokeArgsJsonArg = None,
         include_state: IncludeStateArg = False,
         observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
@@ -3091,6 +3139,7 @@ if FastMCP is not None:
         connection_state = _get_connection(_SERVER_STATE)
         observation = _validate_action_observation_request(observation=observation, snapshot_target=target)
         locator = _resolve_widget_handle_locator(connection_state, target=target, action="invoke")
+        args = _parse_invoke_args_json(args_json)
         result = _invoke_locator_method(locator, method_name=method, args=args)
         return _finalize_action_result(
             connection_state,
@@ -3195,75 +3244,83 @@ if FastMCP is not None:
     @mcp.tool()
     def wait(
         target: ActionTargetArg,
-        state: WaitStateArg = None,
-        condition: WaitConditionArg = None,
-        expected: WaitExpectedArg = None,
-        timeout: OptionalTimeoutArg = None,
+        mode: WaitModeArg = "state",
+        state: WaitStateArg = "visible",
+        condition: WaitConditionArg = "",
+        expected: WaitExpectedArg = "",
+        timeout: WaitTimeoutArg = 0.0,
         include_state: IncludeStateArg = False,
         observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Wait until a widget reaches a supported state."""
 
-        if state is None and condition is None:
-            state = "visible"
+        normalized_mode = mode.strip().lower()
+        if normalized_mode not in {"state", "condition"}:
+            raise ValueError("mode must be 'state' or 'condition'")
 
-        if state is not None and condition is not None:
-            raise ValueError("state and condition are mutually exclusive")
-
-        if condition is None and state not in _ALLOWED_WAIT_STATES:
-            raise ValueError(f"state must be one of {sorted(_ALLOWED_WAIT_STATES)!r}")
-
-        if condition is not None and condition not in _ALLOWED_WAIT_CONDITIONS:
-            raise ValueError(f"condition must be one of {sorted(_ALLOWED_WAIT_CONDITIONS)!r}")
+        normalized_state = state.strip()
+        normalized_condition = condition.strip()
+        if normalized_mode == "state":
+            normalized_state = normalized_state or "visible"
+            if normalized_state not in _ALLOWED_WAIT_STATES:
+                raise ValueError(f"state must be one of {sorted(_ALLOWED_WAIT_STATES)!r}")
+        else:
+            if not normalized_condition:
+                raise ValueError("condition is required when mode='condition'")
+            if normalized_condition not in _ALLOWED_WAIT_CONDITIONS:
+                raise ValueError(f"condition must be one of {sorted(_ALLOWED_WAIT_CONDITIONS)!r}")
+            if expected == "":
+                raise ValueError("expected is required when mode='condition'")
 
         normalized_expected: str | int | bool | None = None
-        if condition is not None:
-            normalized_expected = _normalize_wait_expected(condition, expected)
+        if normalized_mode == "condition":
+            normalized_expected = _normalize_wait_expected(normalized_condition, expected)
 
         connection_state = _get_connection(_SERVER_STATE)
-        effective_timeout = timeout if timeout is not None else connection_state.timeout
+        effective_timeout = timeout if timeout > 0 else connection_state.timeout
         snapshot_target = _target_owner_target(target)
         observation = _validate_action_observation_request(observation=observation, snapshot_target=snapshot_target)
 
-        if isinstance(target, str):
+        if not _is_item_ref_string(target):
             locator = _resolve_widget_handle_locator(connection_state, target=target, action="wait")
 
-            if condition is None:
-                assert state is not None
+            if normalized_mode == "state":
                 try:
-                    locator.wait_for(state=state, timeout=timeout)
+                    locator.wait_for(state=normalized_state, timeout=timeout if timeout > 0 else None)
                 except QPlaywrightActionError as exc:
                     raise ValueError(f"wait failed for target {target!r}: {exc}") from exc
                 payload = {
                     "ok": True,
                     "target": target,
-                    "state": state,
+                    "mode": "state",
+                    "state": normalized_state,
                     "timeout": timeout,
                 }
             else:
                 assert normalized_expected is not None
                 _wait_for_locator_condition(
                     locator,
-                    condition=condition,
+                    condition=normalized_condition,
                     expected=normalized_expected,
                     timeout=effective_timeout,
                 )
                 payload = {
                     "ok": True,
                     "target": target,
-                    "condition": condition,
+                    "mode": "condition",
+                    "condition": normalized_condition,
                     "expected": normalized_expected,
                     "timeout": timeout,
                 }
         else:
             locator = _resolve_item_locator(connection_state, target=target)
-            if condition is None:
-                assert state is not None
-                _wait_for_item_locator_state(locator, state=state, timeout=effective_timeout)
+            if normalized_mode == "state":
+                _wait_for_item_locator_state(locator, state=normalized_state, timeout=effective_timeout)
                 payload = {
                     "ok": True,
                     "target": target,
-                    "state": state,
+                    "mode": "state",
+                    "state": normalized_state,
                     "timeout": timeout,
                 }
             else:
@@ -3271,14 +3328,15 @@ if FastMCP is not None:
                     raise ValueError("item target waits require a string expected value")
                 _wait_for_item_locator_condition(
                     locator,
-                    condition=condition,
+                    condition=normalized_condition,
                     expected=normalized_expected,
                     timeout=effective_timeout,
                 )
                 payload = {
                     "ok": True,
                     "target": target,
-                    "condition": condition,
+                    "mode": "condition",
+                    "condition": normalized_condition,
                     "expected": normalized_expected,
                     "timeout": timeout,
                 }
@@ -3347,42 +3405,42 @@ if FastMCP is not None:
 
     @mcp.tool()
     def hover(
-        target: OptionalActionTargetArg = None,
-        x: ClipXArg = None,
-        y: ClipYArg = None,
+        target: OptionalActionTargetArg = "",
+        point: PointerPointArg = "",
         include_state: IncludeStateArg = False,
         observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
         """Hover a target, or a window-relative coordinate in the active window."""
 
         connection_state = _get_connection(_SERVER_STATE)
-        coords = _pointer_action_coords(x=x, y=y)
-        snapshot_target = _target_owner_target(target) if target is not None else None
+        normalized_target = target.strip()
+        coords = _pointer_action_coords(point=point)
+        snapshot_target = _target_owner_target(normalized_target) if normalized_target else None
         observation = _validate_action_observation_request(observation=observation, snapshot_target=snapshot_target)
-        if target is None:
+        if not normalized_target:
             if not coords:
-                raise ValueError("hover requires either a target or x/y coordinates")
+                raise ValueError("hover requires either a target or point")
             _pointer_action_without_target(connection_state, method=METHOD_HOVER, x=coords["x"], y=coords["y"])
         else:
             if coords:
-                raise ValueError("hover does not accept x/y together with target")
-            if isinstance(target, str):
-                locator = _resolve_widget_handle_locator(connection_state, target=target, action="hover")
-                _run_widget_tool_action(action="hover", target=target, callback=locator.hover)
+                raise ValueError("hover does not accept point together with target")
+            if not _is_item_ref_string(normalized_target):
+                locator = _resolve_widget_handle_locator(connection_state, target=normalized_target, action="hover")
+                _run_widget_tool_action(action="hover", target=normalized_target, callback=locator.hover)
             else:
-                locator = _resolve_item_locator(connection_state, target=target)
+                locator = _resolve_item_locator(connection_state, target=normalized_target)
                 try:
                     locator.hover()
                 except QPlaywrightActionError as exc:
-                    raise ValueError(f"hover failed for target {target!r}: {exc}") from exc
+                    raise ValueError(f"hover failed for target {normalized_target!r}: {exc}") from exc
         return _finalize_action_result(
             connection_state,
             include_state=include_state,
             observation=observation,
-            state_target=target,
+            state_target=normalized_target or None,
             snapshot_target=snapshot_target,
             ok=True,
-            target=target,
+            target=normalized_target or None,
             **coords,
         )
 
@@ -3394,7 +3452,7 @@ if FastMCP is not None:
         include_state: IncludeStateArg = False,
         observation: ActionObservationArg = "none",
     ) -> dict[str, Any]:
-        """Expand or collapse one structured tree node item target."""
+        """Expand or collapse one tree node item target reference returned by inspect_items."""
 
         connection_state = _get_connection(_SERVER_STATE)
         locator = _resolve_item_locator(connection_state, target=target)
@@ -3545,11 +3603,11 @@ def _cli_usage_text() -> str:
         "  window list|select\n"
         "  snapshot [--target TARGET] [--depth N] [--topmost-only] [--save-to PATH]\n"
         "  find [--mode auto|exact|fuzzy] [--keyword KEYWORD] [--root ROOT] [--role ROLE] [--text TEXT] [--class CLASS] [--object-name NAME] [--accessible-name NAME] [--limit N]\n"
-        "  click [TARGET] [--count 1|2] [--x X --y Y] [--observation none|full_tree|screen_visible]\n"
-        "  hover [TARGET] [--x X --y Y] [--observation none|full_tree|screen_visible]\n"
+        "  click [TARGET] [--count 1|2] [--point X,Y] [--observation none|full_tree|screen_visible]\n"
+        "  hover [TARGET] [--point X,Y] [--observation none|full_tree|screen_visible]\n"
         "  input TARGET [TEXT] [--mode replace|append|type|clear] [--delay MS] [--submit]\n"
         "  focus TARGET [--include-state] [--observation none|full_tree|screen_visible]\n"
-        "  wait TARGET [--state STATE | --condition CONDITION --expected VALUE] [--timeout SEC]\n"
+        "  wait TARGET [--mode state|condition] [--state STATE] [--condition CONDITION --expected VALUE] [--timeout SEC]\n"
         "\n"
         "JSON/REPL commands:\n"
         "  resource {JSON}       Read one resource or list resources when JSON is omitted\n"
@@ -3648,8 +3706,8 @@ def _cli_tool_help_from_schema(tool_name: str) -> str | None:
             "Target guidance:",
             "- Use stable handles for repeatable agent actions; get them from snapshot, find, resolve_object_names, or inspect.",
         ])
-        if any("structured item target" in description for description in property_descriptions):
-            lines.append("- Reuse structured item targets returned by inspect_items for table, tree, list, or tab item actions.")
+        if any("item target reference" in description or "itemref:" in description for description in property_descriptions):
+            lines.append("- Reuse the structured item target reference string returned by inspect_items for table, tree, list, or tab item actions.")
         if any("selector" in description for description in property_descriptions):
             lines.append(
                 "- Selectors are for observation or search scope setup; once you have the right widget, switch to stable handles for precise actions. "
@@ -3882,10 +3940,9 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     resolve_object_names_parser.add_argument("--include-infrastructure", action="store_true")
 
     click_parser = subparsers.add_parser("click", help="Click a target or a window-relative coordinate.")
-    click_parser.add_argument("target", nargs="?")
+    click_parser.add_argument("target", nargs="?", default="")
     click_parser.add_argument("--count", type=int, choices=(1, 2), default=1)
-    click_parser.add_argument("--x", type=int)
-    click_parser.add_argument("--y", type=int)
+    click_parser.add_argument("--point", default="")
     click_parser.add_argument("--include-state", action="store_true")
     click_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
@@ -3937,11 +3994,11 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
 
     wait_parser = subparsers.add_parser("wait", help="Wait until a widget reaches a supported state.")
     wait_parser.add_argument("target")
-    wait_group = wait_parser.add_mutually_exclusive_group()
-    wait_group.add_argument("--state", choices=tuple(sorted(_ALLOWED_WAIT_STATES)))
-    wait_group.add_argument("--condition", choices=tuple(sorted(_ALLOWED_WAIT_CONDITIONS)))
-    wait_parser.add_argument("--expected")
-    wait_parser.add_argument("--timeout", type=float)
+    wait_parser.add_argument("--mode", choices=("state", "condition"), default="state")
+    wait_parser.add_argument("--state", choices=tuple(sorted(_ALLOWED_WAIT_STATES)), default="visible")
+    wait_parser.add_argument("--condition", choices=tuple(sorted(_ALLOWED_WAIT_CONDITIONS)), default="")
+    wait_parser.add_argument("--expected", default="")
+    wait_parser.add_argument("--timeout", type=float, default=0.0)
     wait_parser.add_argument("--include-state", action="store_true")
     wait_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
@@ -3954,9 +4011,8 @@ def _build_typed_cli_parser() -> argparse.ArgumentParser:
     screenshot_parser.add_argument("--height", type=int)
 
     hover_parser = subparsers.add_parser("hover", help="Hover a target or a window-relative coordinate.")
-    hover_parser.add_argument("target", nargs="?")
-    hover_parser.add_argument("--x", type=int)
-    hover_parser.add_argument("--y", type=int)
+    hover_parser.add_argument("target", nargs="?", default="")
+    hover_parser.add_argument("--point", default="")
     hover_parser.add_argument("--include-state", action="store_true")
     hover_parser.add_argument("--observation", choices=("none", "full_tree", "screen_visible"), default="none")
 
@@ -4058,15 +4114,16 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
     if command == "wait":
         arguments = {
             "target": namespace.target,
+            "mode": namespace.mode,
             "timeout": namespace.timeout,
             "include_state": namespace.include_state,
             "observation": namespace.observation,
         }
-        if namespace.condition is not None:
+        if namespace.mode == "condition":
             arguments["condition"] = namespace.condition
-            arguments["expected"] = _normalize_wait_expected(namespace.condition, namespace.expected)
+            arguments["expected"] = namespace.expected
         else:
-            arguments["state"] = namespace.state or "visible"
+            arguments["state"] = namespace.state
         return "wait", arguments
 
     if command == "screenshot":
@@ -4082,14 +4139,13 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
 
     if command == "hover":
         arguments = {
-            "target": namespace.target,
             "include_state": namespace.include_state,
             "observation": namespace.observation,
         }
-        if namespace.x is not None:
-            arguments["x"] = namespace.x
-        if namespace.y is not None:
-            arguments["y"] = namespace.y
+        if namespace.target:
+            arguments["target"] = namespace.target
+        if namespace.point:
+            arguments["point"] = namespace.point
         return "hover", arguments
 
     if command == "scroll":
@@ -4139,15 +4195,14 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
 
     if command == "click":
         arguments = {
-            "target": namespace.target,
             "count": namespace.count,
             "include_state": namespace.include_state,
             "observation": namespace.observation,
         }
-        if namespace.x is not None:
-            arguments["x"] = namespace.x
-        if namespace.y is not None:
-            arguments["y"] = namespace.y
+        if namespace.target:
+            arguments["target"] = namespace.target
+        if namespace.point:
+            arguments["point"] = namespace.point
         return "click", arguments
 
     if command == "input":

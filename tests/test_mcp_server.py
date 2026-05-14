@@ -214,11 +214,11 @@ class FakeLocator:
         return self._widget_wid
 
 
-def _item_target(owner: str = "#tree") -> dict[str, object]:
-    return {
-        "owner": owner,
-        "item": {"kind": "tree_node", "path": [0, 1]},
-    }
+def _item_target(owner: str = "#tree") -> str:
+    return mcp_server._encode_item_target_ref(
+        owner=owner,
+        item={"kind": "tree_node", "path": [0, 1]},
+    )
 
 
 def _v2_snapshot_payload(label: str, *, handle: str = "w1", class_name: str = "DemoWindow") -> dict[str, object]:
@@ -533,6 +533,8 @@ def test_inspect_items_wraps_entries_with_reusable_targets(monkeypatch):
 
     result = mcp_server.inspect_items(target="#tree", max_depth=2)
 
+    item_target = mcp_server._encode_item_target_ref(owner="#tree", item={"kind": "tree_node", "path": [0]})
+
     assert result == {
         "ok": True,
         "target": "#tree",
@@ -543,7 +545,7 @@ def test_inspect_items_wraps_entries_with_reusable_targets(monkeypatch):
                 "text": "Settings",
                 "visible": True,
                 "expanded": True,
-                "target": {"owner": "#tree", "item": {"kind": "tree_node", "path": [0]}},
+                "target": item_target,
             }
         ],
         "truncated": False,
@@ -584,6 +586,8 @@ def test_inspect_items_wraps_tab_entries_with_reusable_targets(monkeypatch):
 
     result = mcp_server.inspect_items(target="#main_tabs", max_items=10)
 
+    item_target = mcp_server._encode_item_target_ref(owner="#main_tabs", item={"kind": "tab_item", "index": 1})
+
     assert result == {
         "ok": True,
         "target": "#main_tabs",
@@ -593,7 +597,7 @@ def test_inspect_items_wraps_tab_entries_with_reusable_targets(monkeypatch):
                 "item": {"kind": "tab_item", "index": 1},
                 "text": "Data",
                 "selected": False,
-                "target": {"owner": "#main_tabs", "item": {"kind": "tab_item", "index": 1}},
+                "target": item_target,
             }
         ],
         "truncated": False,
@@ -705,7 +709,7 @@ def test_click_without_target_uses_active_window_transport(monkeypatch):
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
     monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
 
-    result = mcp_server.click(x=12, y=34, observation="full_tree")
+    result = mcp_server.click(point="12,34", observation="full_tree")
 
     assert app._conn.calls[-1] == {
         "method": "click",
@@ -734,8 +738,8 @@ def test_click_rejects_mixed_target_and_coordinates(monkeypatch):
     )
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
 
-    with pytest.raises(ValueError, match="does not accept x/y together with target"):
-        mcp_server.click(target="w2", x=1, y=2)
+    with pytest.raises(ValueError, match="does not accept point together with target"):
+        mcp_server.click(target="w2", point="1,2")
 
 
 def test_click_hidden_stable_handle_reports_clearer_error(monkeypatch):
@@ -913,7 +917,7 @@ def test_hover_without_target_uses_active_window_transport(monkeypatch):
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
     monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
 
-    result = mcp_server.hover(x=7, y=9)
+    result = mcp_server.hover(point="7,9")
 
     assert app._conn.calls[-1] == {
         "method": "hover",
@@ -969,9 +973,10 @@ def test_wait_accepts_item_target_visible_state(monkeypatch):
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
     monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
 
-    result = mcp_server.wait(target=_item_target(), state="visible", timeout=0.2)
+    result = mcp_server.wait(target=_item_target(), mode="state", state="visible", timeout=0.2)
 
     assert result["state"] == "visible"
+    assert result["mode"] == "state"
     assert [call["method"] for call in app._conn.calls][-2:] == ["item_visible", "item_visible"]
 
 
@@ -993,9 +998,10 @@ def test_wait_accepts_item_target_text_condition(monkeypatch):
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
     monkeypatch.setattr(mcp_server, "_finalize_action_result", lambda *args, **kwargs: kwargs)
 
-    result = mcp_server.wait(target=_item_target(), condition="text_contains", expected="ead", timeout=0.2)
+    result = mcp_server.wait(target=_item_target(), mode="condition", condition="text_contains", expected="ead", timeout=0.2)
 
     assert result["condition"] == "text_contains"
+    assert result["mode"] == "condition"
     assert [call["method"] for call in app._conn.calls][-2:] == ["item_text", "item_text"]
 
 
@@ -1778,6 +1784,15 @@ def test_invoke_locator_method_wraps_action_errors():
         mcp_server._invoke_locator_method(locator, method_name="setAmount", args={"value": "123.45"})
 
 
+def test_parse_invoke_args_json_accepts_object_text():
+    assert mcp_server._parse_invoke_args_json('{"value":"88.00"}') == {"value": "88.00"}
+
+
+def test_parse_invoke_args_json_rejects_non_object_values():
+    with pytest.raises(ValueError, match="args_json must decode to a JSON object"):
+        mcp_server._parse_invoke_args_json('["bad"]')
+
+
 def test_wait_can_include_full_tree_observation(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
@@ -1803,10 +1818,11 @@ def test_wait_can_include_full_tree_observation(monkeypatch):
         lambda managed_connection, **payload: {"observation": _v2_observation_payload("DemoWindow")},
     )
 
-    result = mcp_server.wait(target="w7", state="visible", timeout=5.0, observation="full_tree")
+    result = mcp_server.wait(target="w7", mode="state", state="visible", timeout=5.0, observation="full_tree")
 
     assert locator.wait_calls == [{"state": "visible", "timeout": 5.0}]
     assert result["ok"] is True
+    assert result["mode"] == "state"
     assert result["target"] == "w7"
     assert result["window_changed"] is False
     assert result["active_window"]["wid"] == 11
@@ -1836,7 +1852,7 @@ def test_wait_wraps_action_errors_with_target_context(monkeypatch):
     monkeypatch.setattr(mcp_server, "_resolve_widget_handle_locator", lambda *args, **kwargs: FailingWaitLocator(count=1))
 
     with pytest.raises(ValueError, match="wait failed for target 'w7'"):
-        mcp_server.wait(target="w7", state="visible", timeout=5.0)
+        mcp_server.wait(target="w7", mode="state", state="visible", timeout=5.0)
 
 
 def test_wait_can_use_text_contains_condition(monkeypatch):
@@ -1859,16 +1875,17 @@ def test_wait_can_use_text_contains_condition(monkeypatch):
         lambda managed_connection, **kwargs: [{"wid": 11, "title": "Main", "class": "DemoWindow", "geometry": {"x": 5, "y": 7, "width": 640, "height": 720}, "is_modal": False}],
     )
 
-    result = mcp_server.wait(target="w7", condition="text_contains", expected="ave", timeout=5.0)
+    result = mcp_server.wait(target="w7", mode="condition", condition="text_contains", expected="ave", timeout=5.0)
 
     assert locator.wait_calls == []
     assert result["ok"] is True
+    assert result["mode"] == "condition"
     assert result["condition"] == "text_contains"
     assert result["expected"] == "ave"
     assert result["window_changed"] is False
 
 
-def test_wait_rejects_state_and_condition_together(monkeypatch):
+def test_wait_condition_mode_requires_condition(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -1880,11 +1897,11 @@ def test_wait_rejects_state_and_condition_together(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
 
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        mcp_server.wait(target="w7", state="visible", condition="text_contains", expected="ok")
+    with pytest.raises(ValueError, match="condition is required when mode='condition'"):
+        mcp_server.wait(target="w7", mode="condition")
 
 
-def test_wait_condition_requires_expected(monkeypatch):
+def test_wait_condition_mode_requires_expected(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
         qplaywright=FakeQPlaywright(),
@@ -1896,8 +1913,8 @@ def test_wait_condition_requires_expected(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
 
-    with pytest.raises(ValueError, match="expected is required"):
-        mcp_server.wait(target="w7", condition="text_contains")
+    with pytest.raises(ValueError, match="expected is required when mode='condition'"):
+        mcp_server.wait(target="w7", mode="condition", condition="text_contains")
 
 
 def test_finalize_action_result_can_include_compact_state(monkeypatch):
@@ -2098,7 +2115,7 @@ def test_click_rejects_screen_visible_observation_without_target(monkeypatch):
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
 
     with pytest.raises(ValueError, match="observation='screen_visible' requires a widget target or item target owner"):
-        mcp_server.click(x=12, y=34, observation="screen_visible")
+        mcp_server.click(point="12,34", observation="screen_visible")
 
 
 def test_finalize_action_result_warns_when_screen_visible_scope_is_lost(monkeypatch):
@@ -2152,7 +2169,7 @@ def test_wait_rejects_undocumented_state(monkeypatch):
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
 
     with pytest.raises(ValueError, match="state must be one of"):
-        mcp_server.wait(target="w7", state="attached")
+        mcp_server.wait(target="w7", mode="state", state="attached")
 
 
 def test_wait_rejects_undocumented_condition(monkeypatch):
@@ -2168,7 +2185,7 @@ def test_wait_rejects_undocumented_condition(monkeypatch):
     monkeypatch.setattr(mcp_server, "_get_connection", lambda state: connection)
 
     with pytest.raises(ValueError, match="condition must be one of"):
-        mcp_server.wait(target="w7", condition="text_matches", expected="ok")
+        mcp_server.wait(target="w7", mode="condition", condition="text_matches", expected="ok")
 
 
 def test_choose_ignores_blank_unused_string_values(monkeypatch):
@@ -2250,7 +2267,7 @@ def test_widget_action_tools_wrap_action_errors(monkeypatch, tool_name, call_kwa
         ("click", {"target": "w2", "observation": "full_tree"}, [("click", {})], {"target": "w2", "count": 1}),
         ("click", {"target": "w2", "count": 2, "observation": "full_tree"}, [("dblclick", {})], {"target": "w2", "count": 2}),
         ("input", {"target": "w3", "text": "123.45", "observation": "full_tree"}, [("fill", {"value": "123.45"})], {"target": "w3", "text": "123.45", "mode": "replace", "delay": 0, "submitted": False}),
-        ("invoke", {"target": "w3", "method": "setAmount", "args": {"value": "88.00"}, "observation": "full_tree"}, [("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}})], {"target": "w3", "method": "setAmount", "args": {"value": "88.00"}}),
+        ("invoke", {"target": "w3", "method": "setAmount", "args_json": '{"value": "88.00"}', "observation": "full_tree"}, [("invoke", {"method_name": "setAmount", "args": {"value": "88.00"}})], {"target": "w3", "method": "setAmount", "args": {"value": "88.00"}}),
         ("input", {"target": "w3", "text": "abc", "mode": "append", "delay": 25, "submit": True, "observation": "full_tree"}, [("type", {"text": "abc", "delay": 25}), ("press", {"key": "Enter"})], {"target": "w3", "text": "abc", "mode": "append", "delay": 25, "submitted": True}),
         ("press_key", {"target": "w3", "key": "Enter", "observation": "full_tree"}, [("press", {"key": "Enter"})], {"target": "w3", "key": "Enter"}),
         ("choose", {"target": "w5", "label": "CNY", "observation": "full_tree"}, [("select_option", {"value": None, "index": None, "label": "CNY"})], {"target": "w5", "label": "CNY", "value": None, "index": None}),
@@ -2399,7 +2416,7 @@ def test_hover_without_target_missing_transport_raises_connection_error(monkeypa
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
 
     with pytest.raises(QPlaywrightConnectionError, match="targetless hover") as exc_info:
-        mcp_server.hover(x=7, y=9)
+        mcp_server.hover(point="7,9")
 
     assert exc_info.value.code == "transport_unavailable"
 
@@ -2422,28 +2439,18 @@ def test_mcp_tool_input_schema_describes_all_parameters():
     click_tool = next(tool for tool in dumped if tool["name"] == "click")
     assert "post-action observation" in click_tool["inputSchema"]["properties"]["observation"]["description"]
     click_schema = click_tool["inputSchema"]
-    click_target_any_of = click_schema["properties"]["target"]["anyOf"]
-    assert {entry["type"] for entry in click_target_any_of} == {"string", "object"}
-    assert click_schema["oneOf"] == [
-        {"required": ["target"]},
-        {"required": ["x", "y"]},
-    ]
-    assert click_schema["allOf"] == [
-        {"not": {"required": ["target", "x"]}},
-        {"not": {"required": ["target", "y"]}},
-    ]
-    assert "Omit target only when using both x and y" in click_schema["properties"]["target"]["description"]
-    assert "Window-relative x coordinate" in click_schema["properties"]["x"]["description"]
-    assert "Window-relative y coordinate" in click_schema["properties"]["y"]["description"]
+    assert click_schema["properties"]["target"]["type"] == "string"
+    assert click_schema["properties"]["point"]["type"] == "string"
+    assert "Use an empty string only when point is provided" in click_schema["properties"]["target"]["description"]
+    assert "formatted as x,y" in click_schema["properties"]["point"]["description"]
+    assert "oneOf" not in click_schema
+    assert "allOf" not in click_schema
 
     hover_tool = next(tool for tool in dumped if tool["name"] == "hover")
     hover_schema = hover_tool["inputSchema"]
-    hover_target_any_of = hover_schema["properties"]["target"]["anyOf"]
-    assert {entry["type"] for entry in hover_target_any_of} == {"string", "object"}
-    assert hover_schema["oneOf"] == [
-        {"required": ["target"]},
-        {"required": ["x", "y"]},
-    ]
+    assert hover_schema["properties"]["target"]["type"] == "string"
+    assert hover_schema["properties"]["point"]["type"] == "string"
+    assert "Use an empty string only when point is provided" in hover_schema["properties"]["target"]["description"]
 
     input_tool = next(tool for tool in dumped if tool["name"] == "input")
     input_mode_description = input_tool["inputSchema"]["properties"]["mode"]["description"]
@@ -2451,11 +2458,28 @@ def test_mcp_tool_input_schema_describes_all_parameters():
     assert "append" in input_mode_description
     assert "type" in input_mode_description
     assert "clear" in input_mode_description
-    assert hover_schema["allOf"] == [
-        {"not": {"required": ["target", "x"]}},
-        {"not": {"required": ["target", "y"]}},
-    ]
-    assert "Omit target only when using both x and y" in hover_schema["properties"]["target"]["description"]
+    assert "allOf" not in hover_schema
+
+    invoke_tool = next(tool for tool in dumped if tool["name"] == "invoke")
+    invoke_properties = invoke_tool["inputSchema"]["properties"]
+    assert "args_json" in invoke_properties
+    assert "args" not in invoke_properties
+    assert "JSON object string" in invoke_properties["args_json"]["description"]
+
+    wait_tool = next(tool for tool in dumped if tool["name"] == "wait")
+    wait_properties = wait_tool["inputSchema"]["properties"]
+    assert wait_properties["mode"]["type"] == "string"
+    assert wait_properties["mode"]["default"] == "state"
+    assert wait_properties["state"]["type"] == "string"
+    assert wait_properties["condition"]["type"] == "string"
+    assert wait_properties["expected"]["type"] == "string"
+    assert wait_properties["timeout"]["type"] == "number"
+
+    resolve_object_names_tool = next(tool for tool in dumped if tool["name"] == "resolve_object_names")
+    resolve_root_schema = resolve_object_names_tool["inputSchema"]["properties"]["root"]
+    assert resolve_root_schema["type"] == "string"
+    assert resolve_root_schema["default"] == ""
+    assert "Use an empty string to search under the active window" in resolve_root_schema["description"]
 
     find_tool = next(tool for tool in dumped if tool["name"] == "find")
     assert "class" in find_tool["inputSchema"]["properties"]
@@ -3284,8 +3308,7 @@ def test_run_cli_help_click_uses_mcp_schema(capsys):
 
     assert exit_code == 0
     output = capsys.readouterr().out
-    assert "Allowed request shapes:" in output
-    assert "Window-relative x coordinate in pixels." in output
+    assert "formatted as x,y" in output
     assert "Use snapshot, find, or inspect to observe the UI and capture handles first." in output
     assert "screenshot clipping" not in output
 
@@ -3798,24 +3821,20 @@ def test_run_cli_typed_click_accepts_window_coordinates(monkeypatch, capsys):
 
     monkeypatch.setattr(mcp_server, "click", fake_click)
 
-    exit_code = mcp_server._run_cli(["click", "--x", "12", "--y", "34"])
+    exit_code = mcp_server._run_cli(["click", "--point", "12,34"])
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload == {
         "ok": True,
-        "target": None,
         "count": 1,
-        "x": 12,
-        "y": 34,
+        "point": "12,34",
         "include_state": False,
         "observation": "none",
     }
     assert captured == {
-        "target": None,
         "count": 1,
-        "x": 12,
-        "y": 34,
+        "point": "12,34",
         "include_state": False,
         "observation": "none",
     }
@@ -3830,24 +3849,26 @@ def test_run_cli_typed_wait_supports_condition(monkeypatch, capsys):
 
     monkeypatch.setattr(mcp_server, "wait", fake_wait)
 
-    exit_code = mcp_server._run_cli(["wait", "w9", "--condition", "checked_equals", "--expected", "true", "--include-state"])
+    exit_code = mcp_server._run_cli(["wait", "w9", "--mode", "condition", "--condition", "checked_equals", "--expected", "true", "--include-state"])
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload == {
         "ok": True,
         "target": "w9",
+        "mode": "condition",
         "condition": "checked_equals",
-        "expected": True,
-        "timeout": None,
+        "expected": "true",
+        "timeout": 0.0,
         "include_state": True,
         "observation": "none",
     }
     assert captured == {
         "target": "w9",
+        "mode": "condition",
         "condition": "checked_equals",
-        "expected": True,
-        "timeout": None,
+        "expected": "true",
+        "timeout": 0.0,
         "include_state": True,
         "observation": "none",
     }
@@ -4418,6 +4439,24 @@ def test_resolve_object_names_tool_returns_ok_payload(monkeypatch):
     }
 
 
+def test_resolve_object_names_tool_uses_empty_root_default_via_mcp_transport(monkeypatch):
+    assert mcp_server.mcp is not None
+    tool = cast(Any, mcp_server.mcp._tool_manager.get_tool("resolve_object_names"))
+    assert tool is not None
+
+    monkeypatch.setattr(mcp_server, "_get_connection", lambda state: object())
+    monkeypatch.setattr(mcp_server, "_resolve_object_names_result", lambda connection_state, **kwargs: kwargs)
+
+    async def run_tool():
+        return await tool.run({"object_names": ["main_tabs"]})
+
+    result = anyio.run(run_tool)
+
+    assert result["ok"] is True
+    assert result["root"] == ""
+    assert result["object_names"] == ["main_tabs"]
+
+
 def test_snapshot_result_scopes_to_active_window(monkeypatch):
     connection = mcp_server.ManagedConnection(
         name="demo",
@@ -4563,7 +4602,7 @@ def test_selector_help_text_prefers_handles_for_repeatable_actions():
     assert "observe the UI and capture stable handles for repeatable actions" in text
     assert "qplaywright://help/geometry" in text
     assert "use snapshot with target+depth when you want one subtree and several child handles" in text
-    assert '{"owner": "w12", "item": {"kind": "table_cell", "row": 3, "column": 1}}' in text
+    assert "opaque itemref:... strings" in text
     assert "invoke with those handles" in text
 
 
@@ -4589,6 +4628,6 @@ def test_cli_tool_help_includes_action_level_session_and_window_guidance():
     assert "window.close: close one window or the active window" in window_help
     assert "geometry is Rect4 [x, y, width, height] in widget-local coordinates" in inspect_help
     assert "Selectors are for observation or search scope setup" in inspect_help
-    assert "structured item targets returned by inspect_items" in click_help
+    assert "structured item target reference string returned by inspect_items" in click_help
     assert "Selector fallback examples" not in click_help
     assert "Selectors are for observation or search scope setup" not in click_help

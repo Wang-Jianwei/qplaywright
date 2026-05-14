@@ -83,8 +83,8 @@ qplaywright-mcp cli window list
 qplaywright-mcp cli window select --title Dialog
 qplaywright-mcp cli snapshot --depth 4 --topmost-only
 qplaywright-mcp cli click w12 --count 2
-qplaywright-mcp cli click --x 320 --y 180
-qplaywright-mcp cli hover --x 320 --y 180
+qplaywright-mcp cli click --point 320,180
+qplaywright-mcp cli hover --point 320,180
 qplaywright-mcp cli input w7 123.45 --submit
 qplaywright-mcp cli input w7 --mode clear
 qplaywright-mcp cli focus w7 --include-state
@@ -107,8 +107,8 @@ If the active window is not the desired scope, switch it first with `window sele
 2. `window` with `action="list"` to list visible top-level windows.
 3. `window` with `action="select"` when the desired scope is not the current active window.
 4. `snapshot`, `find`, `resolve_object_names`, or `inspect` to understand the widget tree and obtain stable handles.
-5. `inspect_items` when the target widget is a table, tree, or list and you need structured descendant item targets.
-6. Use action tools like `click`, `input`, `invoke`, `set_expanded`, `press_key`, `focus`, `hover`, `scroll`, `choose`, `wait`, and targeted `screenshot` with those handles, or reuse the structured item targets returned by `inspect_items`.
+5. `inspect_items` when the target widget is a table, tree, or list and you need structured descendant item target references.
+6. Use action tools like `click`, `input`, `invoke`, `set_expanded`, `press_key`, `focus`, `hover`, `scroll`, `choose`, `wait`, and targeted `screenshot` with those handles. For item-view descendants, reuse the structured item target reference strings returned by `inspect_items`.
 7. `session` with `action="close"` when finished.
 
 ## Exposed MCP Interfaces
@@ -137,16 +137,16 @@ The server can be exposed through:
 | `find` | Return a small candidate set using exact, fuzzy, or auto search within one root scope |
 | `resolve_object_names` | Resolve several exact `object_name` values to stable handles under one known root scope |
 | `inspect_items` | Enumerate structured table/tree/list/tab descendants for one owner widget |
-| `click` | Click or double-click one stable-handle widget, one item target, or one active-window coordinate |
+| `click` | Click or double-click one stable-handle widget, one item target reference, or one active-window coordinate |
 | `input` | Replace, append, type, or clear widget text, optionally submitting with Enter |
 | `invoke` | Invoke one exposed custom widget method by exact name |
 | `press_key` | Send one key press to one stable-handle widget |
 | `focus` | Focus one stable-handle widget |
-| `set_expanded` | Expand or collapse one structured tree node item target |
+| `set_expanded` | Expand or collapse one structured tree node item target reference |
 | `choose` | Select one combobox option by `value`, `index`, or `label` |
-| `wait` | Wait until a widget or item target reaches a supported state |
+| `wait` | Wait until a widget or item target reference reaches a supported state |
 | `screenshot` | Capture a screenshot of the active window or one stable-handle widget |
-| `hover` | Hover over one stable-handle widget, one item target, or one active-window coordinate |
+| `hover` | Hover over one stable-handle widget, one item target reference, or one active-window coordinate |
 | `scroll` | Send a mouse wheel scroll event to one stable-handle widget |
 
 ## Core Model
@@ -177,19 +177,16 @@ That value may be either:
 
 - a stable widget handle such as `w12`
 - a qplaywright selector such as `#amount_editor`, `role=button`, `text=Submit`, or `.QLabel`
-- a structured item target object such as `{"owner": "w12", "item": {"kind": "table_cell", "row": 3, "column": 1}}`
-- a structured item target object such as `{"owner": "w9", "item": {"kind": "tree_node", "path": [0, 1]}}`
-- a structured item target object such as `{"owner": "w5", "item": {"kind": "list_item", "row": 2}}`
-- a structured item target object such as `{"owner": "w3", "item": {"kind": "tab_item", "index": 1}}
+- a structured item target reference string returned by `inspect_items`, such as `itemref:...`
 
 Exact widget actions use the same `target` parameter name, but for widgets they only accept stable handles such as `w12`.
 That applies to `click`, `input`, `invoke`, `press_key`, `focus`, `hover`, `scroll`, `choose`, `wait`, and targeted `screenshot`.
-Selectors remain valid for observation/search scopes such as `snapshot`, `find`, `inspect`, and `inspect_items` owner resolution.
+Selectors remain valid for observation/search scopes such as `snapshot`, `find`, `inspect`, and `inspect_items` owner resolution. Item-view actions do not accept handwritten `{owner, item}` objects anymore; they reuse the opaque item target reference strings returned by `inspect_items`.
 
 The selector side keeps the existing atomic qplaywright forms.
 This contract does not define inline composite syntax such as `role=button >> has-text=Submit`.
 When you need compound disambiguation, use `snapshot`, `find`, or `inspect` first, then continue with the returned stable handle.
-When you need structured item descendants, first resolve the owner widget, then call `inspect_items` and reuse the returned item `target` objects.
+When you need structured item descendants, first resolve the owner widget, then call `inspect_items` and reuse the returned item `target` strings.
 
 ### Optional Post-Action Observation
 
@@ -445,6 +442,7 @@ Request:
 `find`:
 
 - use it only when the subtree already exposes deliberate stable `object_name` values
+- use `root=""` to resolve under the active window when you do not need a narrower subtree anchor
 - it does not guess between duplicates; duplicated names are returned under `ambiguous`
 - misses are returned under `missing`
 
@@ -478,7 +476,7 @@ When `target` is provided, `inspect` returns widget or item-target state.
 If multiple widgets match the target, scalar fields describe the first match and `count` reports the total number of matches.
 When `target` is omitted, `inspect` filters common Qt infrastructure widgets by default.
 Set `include_infrastructure=true` to inspect the unfiltered raw widget tree.
-For structured item targets, `inspect` returns item metadata such as `kind`, `row`, `column`, `path`, `selected`, `expanded`, and `edit_value` when those fields apply.
+For structured item target references, `inspect` returns item metadata such as `kind`, `row`, `column`, `path`, `selected`, `expanded`, and `edit_value` when those fields apply.
 
 Targeted `inspect` may include:
 
@@ -500,9 +498,9 @@ Request:
 ```
 
 `inspect_items` enumerates structured descendants for one table, tree, list, or tab owner widget.
-Each returned entry includes an `item` descriptor plus a reusable `target` object in the form `{owner, item}`.
-Use those returned `target` objects directly with `inspect`, `click`, `hover`, `wait`, and `set_expanded`.
-Stable widget handles remain widget-only; structured item targets come from `inspect_items`.
+Each returned entry includes an `item` descriptor plus a reusable opaque `target` string in the form `itemref:...`.
+Use those returned `target` strings directly with `inspect`, `click`, `hover`, `wait`, and `set_expanded`.
+Stable widget handles remain widget-only; structured item target references come from `inspect_items`.
 When `snapshot` or widget-tree `inspect` encounters a table, tree, or list owner widget, it may include an `itemView`
 hint so the next step is explicit instead of implying that per-cell delegates are normal widget descendants.
 
@@ -525,32 +523,29 @@ Common action request shape:
 }
 ```
 
-For item-view descendants, the same `target` field may be a structured object:
+For item-view descendants, the same `target` field may be a structured item target reference string returned by `inspect_items`:
 
 ```json
 {
-  "target": {
-    "owner": "w9",
-    "item": {"kind": "tree_node", "path": [0, 1]}
-  },
+  "target": "itemref:eyJ2ZXJzaW9uIjoxLCJvd25lciI6Inc5IiwiaXRlbSI6eyJraW5kIjoidHJlZV9ub2RlIiwicGF0aCI6WzAsMV19fQ",
   "include_state": true
 }
 ```
 
 Tool-specific fields:
 
-- `click`: optional `count`, or `x` + `y` together when `target` is omitted
+- `click`: optional `count`, or `point="x,y"` when `target` is an empty string
 - `input`: optional `text`, optional `mode`, `delay`, `submit`; `text` may be omitted only when `mode="clear"`
-- `invoke`: `method`, optional `args`
+- `invoke`: `method`, optional `args_json` JSON object string
 - `press_key`: `key`
 - `focus`: no extra fields beyond `target` and optional post-action flags
 - `set_expanded`: `expanded` for structured tree node item targets only
 - `choose`: exactly one of `value`, `index`, or `label`
-- `wait`: optional `state` or `condition` + `expected`, optional `timeout`; item targets support `visible`/`hidden` and `text_equals`/`text_contains`
-- `hover`: optional `x` + `y` together when `target` is omitted
+- `wait`: `mode="state"` with `state`, or `mode="condition"` with `condition` + string `expected`; use `timeout=0` to fall back to the session timeout. Item targets support `visible`/`hidden` and `text_equals`/`text_contains`
+- `hover`: `point="x,y"` when `target` is an empty string
 - `scroll`: optional `delta_x`, `delta_y`
 
-For checkable widgets, use `click` or `press_key` on the resolved handle, then confirm the resulting state with `wait(condition="checked_equals", expected=true|false)` or `inspect`.
+For checkable widgets, use `click` or `press_key` on the resolved handle, then confirm the resulting state with `wait(mode="condition", condition="checked_equals", expected="true"|"false")` or `inspect`.
 
 ### screenshot
 
@@ -630,4 +625,4 @@ Supported selectors match the existing qplaywright syntax:
 Composite selector grammar is intentionally not part of the current contract.
 Selectors are for observation/search scopes, not exact widget actions.
 For cases like "button whose text contains Submit", first narrow to the right widget with `snapshot`, `find`, or `inspect`, then reuse its stable handle.
-For structured item interactions, resolve the owner widget first and prefer its stable handle in the item target object.
+For structured item interactions, resolve the owner widget first, call `inspect_items`, and reuse the returned item target reference string.

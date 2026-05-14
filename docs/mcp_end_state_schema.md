@@ -76,6 +76,7 @@ exact widget action 也使用 `target` 这个字段名，但它只接受 stable 
 `root` 和 `owner` 与 `target` 一样，都是字符串形态的可解析目标 spec。
 
 - `root` 用于 widget 搜索或局部观察 scope
+- `root=""` 表示当前 active window
 - `owner` 用于 table/tree/list/tab 这类 item-view owner widget
 
 它们的解析规则与 widget observation/search target 一致：优先解析 stable handle，否则按 selector 解析。
@@ -491,7 +492,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 - `mode="exact"` 时使用确定性约束搜索
 - `mode="fuzzy"` 时要求提供 `keyword`，并执行多字段近似排序
 - `mode="auto"` 时，当提供 `keyword` 走 fuzzy，否则走 exact
-- `root` 可选，缺省表示当前 active window
+- `root` 使用空字符串表示当前 active window
 - 所有显式启用的谓词按 AND 关系求交
 - `include_infrastructure` 默认为 `false`
 - `limit` 为正整数，服务端不得返回超额候选
@@ -674,10 +675,8 @@ MCP 工具失败时应返回明确、可操作的错误信息。
   "kind": "table",
   "items": [
     {
-      "item_target": {
-        "owner": "w77",
-        "item": {"kind": "table_cell", "row": 3, "column": 1}
-      },
+      "target": "itemref:eyJ2ZXJzaW9uIjoxLCJvd25lciI6Inc3NyIsIml0ZW0iOnsia2luZCI6InRhYmxlX2NlbGwiLCJyb3ciOjMsImNvbHVtbiI6MX19",
+      "item": {"kind": "table_cell", "row": 3, "column": 1},
       "text": "Approved",
       "visible": true,
       "selected": false
@@ -702,9 +701,20 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 }
 ```
 
+或者：
+
+```json
+{
+  "target": "",
+  "point": "320,180",
+  "count": 1,
+  "observation": "none"
+}
+```
+
 字段约束：
 
-- `target` 必填
+- 使用 `target` 点击已解析 widget 或 item target；使用空 `target` 加 `point="x,y"` 点击 active window 相对坐标
 - `count` 默认为 `1`
 - 允许值：`1`、`2`
 
@@ -833,7 +843,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 对 checkable widget，推荐路径是：
 
 1. 使用 `click` 或 `press_key` 触发真实交互
-2. 使用 `wait(condition="checked_equals", expected=true|false)` 或 `inspect` 确认结果状态
+2. 使用 `wait(mode="condition", condition="checked_equals", expected="true"|"false")` 或 `inspect` 确认结果状态
 
 这样可以避免直接调用 setter 绕过应用依赖的事件链。
 
@@ -894,6 +904,16 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 ```json
 {
   "target": "w21",
+  "observation": "full_tree"
+}
+```
+
+或者：
+
+```json
+{
+  "target": "",
+  "point": "320,180",
   "observation": "full_tree"
 }
 ```
@@ -982,9 +1002,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 {
   "target": "#amount_editor",
   "method": "setCurrency",
-  "args": {
-    "code": "CNY"
-  },
+  "args_json": "{\"code\": \"CNY\"}",
   "observation": "none"
 }
 ```
@@ -1035,6 +1053,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 ```json
 {
   "target": "#status_label",
+  "mode": "state",
   "state": "visible",
   "timeout": 5.0,
   "observation": "none"
@@ -1046,6 +1065,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 ```json
 {
   "target": "#status_label",
+  "mode": "condition",
   "condition": "text_contains",
   "expected": "Logged in",
   "timeout": 5.0,
@@ -1056,11 +1076,12 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 字段约束：
 
 - `target` 必填
-- `state` 与 `condition` 互斥；两者都省略时，服务端默认按 `state="visible"` 处理
+- `mode="state"` 时使用 `state`；默认 `state="visible"`
+- `mode="condition"` 时使用 `condition` 和字符串 `expected`
 - `state` 允许值：`visible`、`hidden`、`enabled`、`disabled`、`checked`、`unchecked`
 - `condition` 允许值：`text_equals`、`text_contains`、`current_text_equals`、`current_text_contains`、`value_equals`、`checked_equals`、`count_equals`
 - 使用 `condition` 时，`expected` 必填
-- `timeout` 默认由服务端决定
+- `timeout=0` 表示回退到当前 session timeout
 - `observation` 默认 `"none"`
 
 ### Wait Response
@@ -1069,6 +1090,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 {
   "ok": true,
   "target": "#status_label",
+  "mode": "state",
   "state": "visible",
   "timeout": 5.0,
   "active_window": {
@@ -1089,6 +1111,7 @@ MCP 工具失败时应返回明确、可操作的错误信息。
 {
   "ok": true,
   "target": "#status_label",
+  "mode": "condition",
   "condition": "text_contains",
   "expected": "Logged in",
   "timeout": 5.0

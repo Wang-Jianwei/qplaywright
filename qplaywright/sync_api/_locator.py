@@ -554,6 +554,20 @@ class Locator:
     def wait_for(self, *, state: str = "visible", timeout: float | None = None) -> None:
         """Wait for the widget to reach a state: visible, hidden, enabled, disabled."""
         t = timeout or self._timeout
+        if self._widget_wid is not None and state in ("visible", "hidden", "enabled", "disabled"):
+            deadline = time.monotonic() + t
+            while time.monotonic() < deadline:
+                if state == "visible" and self.is_visible():
+                    return
+                if state == "hidden" and not self.is_visible():
+                    return
+                if state == "enabled" and self.is_enabled():
+                    return
+                if state == "disabled" and not self.is_enabled():
+                    return
+                time.sleep(0.05)
+            raise TimeoutError(f"Timed out waiting for {self!r} to be {state}")
+
         if state in ("checked", "unchecked"):
             deadline = time.monotonic() + t
             want_checked = state == "checked"
