@@ -4275,7 +4275,7 @@ def _typed_cli_arguments(namespace: argparse.Namespace) -> tuple[str, dict[str, 
         return "invoke", {
             "target": namespace.target,
             "method": namespace.method,
-            "args": json.loads(namespace.args),
+            "args_json": namespace.args,
             "include_state": namespace.include_state,
             "observation": namespace.observation,
         }

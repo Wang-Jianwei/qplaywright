@@ -3674,6 +3674,27 @@ def test_try_run_typed_cli_from_command_line_supports_find_fuzzy_mode(monkeypatc
     }
 
 
+def test_try_run_typed_cli_from_command_line_passes_invoke_args_json(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_server,
+        "invoke",
+        lambda **kwargs: {"ok": True, **kwargs},
+    )
+
+    exit_code = mcp_server._try_run_typed_cli_from_command_line("invoke w3 setAmount --args '{\"value\": \"88.00\"}'")
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "ok": True,
+        "target": "w3",
+        "method": "setAmount",
+        "args_json": '{"value": "88.00"}',
+        "include_state": False,
+        "observation": "none",
+    }
+
+
 def test_cli_usage_text_lists_unified_find_modes():
     usage = mcp_server._cli_usage_text()
 
