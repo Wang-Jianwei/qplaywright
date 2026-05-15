@@ -3828,21 +3828,35 @@ def _fill_widget(widget, value: str):
     class_name = _widget_class_name(widget)
 
     if hasattr(widget, "clear") and hasattr(widget, "setText"):
-        widget.clear()
-        widget.setText(value)
-    elif callable(getattr(widget, "lineEdit", None)) and callable(getattr(widget, "stepEnabled", None)):
-        widget.clear()
+        _clear_text_via_keyboard(widget)
         if value:
             _type_text(widget, value, delay=0)
-            return
+        return
+    elif callable(getattr(widget, "lineEdit", None)) and callable(getattr(widget, "stepEnabled", None)):
+        _clear_text_via_keyboard(widget)
+        if value:
+            _type_text(widget, value, delay=0)
+        return
     elif hasattr(widget, "setPlainText"):
-        widget.setPlainText(value)
+        _clear_text_via_keyboard(widget)
+        if value:
+            _type_text(widget, value, delay=0)
+        return
     elif hasattr(widget, "setCurrentText"):
         widget.setCurrentText(value)
     else:
         raise ValueError(f"Cannot fill widget of type {class_name}")
 
     _process_events()
+
+
+def _clear_text_via_keyboard(widget):
+    """Clear editable text using the same key sequence a user would use."""
+    qt_core = _qt_core_module()
+    Qt = qt_core.Qt
+
+    _press_key(widget, "A", modifiers=Qt.ControlModifier)
+    _press_key(widget, "Delete")
 
 
 def _type_text(widget, text: str, delay: int = 0):
@@ -3904,10 +3918,12 @@ def _hover_widget(widget, pos):
     _process_events()
 
 
-def _press_key(widget, key_str: str):
+def _press_key(widget, key_str: str, *, modifiers=None):
     """Press a named key (Enter, Tab, etc.)."""
     qt_core = _qt_core_module()
     Qt = qt_core.Qt
+    if modifiers is None:
+        modifiers = Qt.NoModifier
 
     qt_key = _key_to_qt(key_str)
     if qt_key is None:
@@ -3925,14 +3941,18 @@ def _press_key(widget, key_str: str):
     _process_events()
 
     if QTest and hasattr(QTest, "keyClick"):
-        QTest.keyClick(widget, qt_key)
-    else:
+        try:
+            QTest.keyClick(widget, qt_key, modifiers)
+        except TypeError:
+            QTest = None
+
+    if not (QTest and hasattr(QTest, "keyClick")):
         qt_gui = _qt_gui_module()
         q_application = _qt_application_class()
         QKeyEvent = qt_gui.QKeyEvent
         QEvent = qt_core.QEvent
-        press = QKeyEvent(QEvent.Type.KeyPress, qt_key, Qt.NoModifier)
-        release = QKeyEvent(QEvent.Type.KeyRelease, qt_key, Qt.NoModifier)
+        press = QKeyEvent(QEvent.Type.KeyPress, qt_key, modifiers)
+        release = QKeyEvent(QEvent.Type.KeyRelease, qt_key, modifiers)
         q_application.postEvent(widget, press)
         q_application.postEvent(widget, release)
 

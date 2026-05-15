@@ -4242,24 +4242,45 @@ private:
         updateVisualFeedback(target, target->rect().center(), pulseCount);
     }
 
-    void fillWidget(QWidget *w, const QString &value)
+    void pressQtKey(QWidget *w, Qt::Key key, Qt::KeyboardModifiers modifiers = Qt::NoModifier)
     {
         moveVisualCursorToWidget(w);
-        if (auto *edit = qobject_cast<QLineEdit *>(w)) {
-            edit->clear();
-            edit->setText(value);
-        } else if (auto *spin = qobject_cast<QAbstractSpinBox *>(w)) {
-            spin->clear();
-            if (!value.isEmpty()) {
-                spin->setFocus();
-                QApplication::processEvents();
-                QTest::keyClicks(spin, value);
-            }
-        } else if (auto *te = qobject_cast<QTextEdit *>(w)) {
-            te->setPlainText(value);
-        } else if (auto *pte = qobject_cast<QPlainTextEdit *>(w)) {
-            pte->setPlainText(value);
+        w->setFocus();
+        QApplication::processEvents();
+        QTest::keyClick(w, key, modifiers);
+        QApplication::processEvents();
+    }
+
+    void clearTextViaKeyboard(QWidget *w)
+    {
+        pressQtKey(w, Qt::Key_A, Qt::ControlModifier);
+        pressQtKey(w, Qt::Key_Delete);
+    }
+
+    void fillWidget(QWidget *w, const QString &value)
+    {
+        if (qobject_cast<QLineEdit *>(w)) {
+            clearTextViaKeyboard(w);
+            if (!value.isEmpty())
+                typeText(w, value, 0);
+            return;
+        } else if (qobject_cast<QAbstractSpinBox *>(w)) {
+            clearTextViaKeyboard(w);
+            if (!value.isEmpty())
+                typeText(w, value, 0);
+            return;
+        } else if (qobject_cast<QTextEdit *>(w)) {
+            clearTextViaKeyboard(w);
+            if (!value.isEmpty())
+                typeText(w, value, 0);
+            return;
+        } else if (qobject_cast<QPlainTextEdit *>(w)) {
+            clearTextViaKeyboard(w);
+            if (!value.isEmpty())
+                typeText(w, value, 0);
+            return;
         } else if (auto *combo = qobject_cast<QComboBox *>(w)) {
+            moveVisualCursorToWidget(w);
             combo->setCurrentText(value);
         } else {
             throw std::runtime_error("Cannot fill widget of type: " +
@@ -4302,13 +4323,12 @@ private:
 
         auto it = keyMap.find(keyStr);
         if (it != keyMap.end()) {
-            QTest::keyClick(w, it.value());
+            pressQtKey(w, it.value());
         } else if (keyStr.length() == 1) {
             QTest::keyClick(w, keyStr.at(0).toLatin1());
         } else {
             throw std::runtime_error(("Unknown key: " + keyStr).toStdString());
         }
-        QApplication::processEvents();
     }
 
     void hoverWidget(QWidget *w)

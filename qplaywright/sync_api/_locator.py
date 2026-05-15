@@ -457,7 +457,7 @@ class Locator:
         self._send_action("dblclick", METHOD_DBLCLICK, **kwargs)
 
     def fill(self, value: str) -> None:
-        """Fill the widget with the given value (clears first)."""
+        """Replace the widget text using keyboard-style input (clears first)."""
         self._send_action("fill", METHOD_FILL, value=value)
 
     def invoke(self, name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -482,7 +482,7 @@ class Locator:
             ) from exc
 
     def clear(self) -> None:
-        """Clear the widget's text."""
+        """Clear the widget text using the same keyboard path as a user."""
         self._send_action("clear", METHOD_CLEAR)
 
     def type(self, text: str, *, delay: int = 0) -> None:

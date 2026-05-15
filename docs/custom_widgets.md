@@ -141,5 +141,7 @@ an explicit `errorCode` and `errorMessage`.
   is a mapping keyed by parameter name.
 - Keep custom domain behavior behind explicit invokable methods such as
   `setAmount`, `summary`, or `commit`.
+- `fill()` on standard editable widgets follows keyboard-style replace
+    semantics. It is not a direct value setter.
 - Do not use `fill()` as a custom behavior escape hatch. For composite widgets,
   expose a method and call `invoke()` instead.
