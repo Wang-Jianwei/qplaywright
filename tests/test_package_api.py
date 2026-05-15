@@ -118,6 +118,29 @@ def test_fill_widget_clears_abstract_spinbox_without_typing(monkeypatch):
     ]
 
 
+def test_fill_widget_replaces_datetime_edit_via_keyboard(monkeypatch):
+    events: list[tuple[str, object]] = []
+
+    class FakeDateTimeEdit:
+        def lineEdit(self):
+            return object()
+
+        def stepEnabled(self):
+            return 0
+
+    monkeypatch.setattr(agent_server, "_import_qt", lambda: None)
+    monkeypatch.setattr(agent_server, "_widget_class_name", lambda widget: "QDateTimeEdit")
+    monkeypatch.setattr(agent_server, "_clear_text_via_keyboard", lambda widget: events.append(("clear_keyboard", None)))
+    monkeypatch.setattr(agent_server, "_type_text", lambda widget, text, delay=0: events.append(("type", (text, delay))))
+
+    agent_server._fill_widget(FakeDateTimeEdit(), "2026-05-15 09:30")
+
+    assert events == [
+        ("clear_keyboard", None),
+        ("type", ("2026-05-15 09:30", 0)),
+    ]
+
+
 def test_fill_widget_replaces_line_edit_via_keyboard(monkeypatch):
     events: list[tuple[str, object]] = []
 
@@ -158,4 +181,28 @@ def test_fill_widget_replaces_plain_text_edit_via_keyboard(monkeypatch):
     assert events == [
         ("clear_keyboard", None),
         ("type", ("notes", 0)),
+    ]
+
+
+def test_clear_text_via_keyboard_uses_ctrl_a_then_delete(monkeypatch):
+    events: list[tuple[str, object]] = []
+
+    class FakeQt:
+        ControlModifier = "ctrl"
+
+    class FakeCore:
+        Qt = FakeQt
+
+    monkeypatch.setattr(agent_server, "_qt_core_module", lambda: FakeCore)
+    monkeypatch.setattr(
+        agent_server,
+        "_press_key",
+        lambda widget, key_str, modifiers=None: events.append(("press", key_str, modifiers)),
+    )
+
+    agent_server._clear_text_via_keyboard(object())
+
+    assert events == [
+        ("press", "A", "ctrl"),
+        ("press", "Delete", None),
     ]

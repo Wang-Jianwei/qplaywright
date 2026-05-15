@@ -4317,15 +4317,11 @@ private:
             {"Alt", Qt::Key_Alt}, {"Meta", Qt::Key_Meta},
         };
 
-        moveVisualCursorToWidget(w);
-        w->setFocus();
-        QApplication::processEvents();
-
         auto it = keyMap.find(keyStr);
         if (it != keyMap.end()) {
             pressQtKey(w, it.value());
         } else if (keyStr.length() == 1) {
-            QTest::keyClick(w, keyStr.at(0).toLatin1());
+            pressQtKey(w, static_cast<Qt::Key>(keyStr.at(0).toUpper().unicode()));
         } else {
             throw std::runtime_error(("Unknown key: " + keyStr).toStdString());
         }

@@ -47,6 +47,19 @@ def main() -> None:
         window.locator("#username").fill("cursor-stable")
         after_fill = _cursor_pos()
         _assert_cursor_stable("fill", before_fill, after_fill)
+        assert window.locator("#username").input_value() == "cursor-stable"
+
+        before_clear = _cursor_pos()
+        window.locator("#username").clear()
+        after_clear = _cursor_pos()
+        _assert_cursor_stable("clear", before_clear, after_clear)
+        assert window.locator("#username").input_value() == ""
+
+        before_replace = _cursor_pos()
+        window.locator("#username").fill("cursor-replaced")
+        after_replace = _cursor_pos()
+        _assert_cursor_stable("replace", before_replace, after_replace)
+        assert window.locator("#username").input_value() == "cursor-replaced"
 
         before_hover = _cursor_pos()
         window.locator("#username").hover()
