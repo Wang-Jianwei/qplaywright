@@ -29,10 +29,13 @@ class Connection:
         self._id_counter = 0
         self._buf = b""
 
-    def connect(self) -> None:
+    def connect(self, *, timeout: float | None = None) -> None:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._sock.settimeout(self.timeout)
+        effective_timeout = self.timeout if timeout is None else timeout
+        self._sock.settimeout(effective_timeout)
         self._sock.connect((self.host, self.port))
+        if timeout is not None:
+            self._sock.settimeout(self.timeout)
 
     def close(self) -> None:
         if self._sock:

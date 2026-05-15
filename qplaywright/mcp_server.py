@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
+import subprocess
 from typing import Annotated, Any, Literal, cast
 from uuid import uuid4
 
@@ -575,15 +576,69 @@ class ManagedConnection:
 
 
 @dataclass
+class PendingLaunch:
+    """A launched process whose qplaywright agent is not yet connected."""
+
+    name: str
+    qplaywright: Any
+    host: str
+    port: int
+    timeout: float
+    launched_executable: str
+    launched_args: tuple[str, ...] = ()
+    agent_name: str | None = None
+    started_at: float = field(default_factory=time.monotonic)
+
+    def close(self) -> None:
+        with contextlib.suppress(Exception):
+            self.qplaywright.close()
+
+    @property
+    def process(self) -> subprocess.Popen[Any] | None:
+        process = getattr(self.qplaywright, "_process", None)
+        return process if process is not None else None
+
+    @property
+    def pid(self) -> int | None:
+        process = self.process
+        pid = getattr(process, "pid", None)
+        return pid if isinstance(pid, int) else None
+
+    @property
+    def elapsed(self) -> float:
+        return max(0.0, time.monotonic() - self.started_at)
+
+    @property
+    def remaining(self) -> float:
+        return max(0.0, self.timeout - self.elapsed)
+
+    def to_session_summary(self) -> dict[str, Any]:
+        return {
+            "connected": False,
+            "launch_pending": True,
+            "host": self.host,
+            "port": self.port,
+            "launched_executable": self.launched_executable,
+            "pid": self.pid,
+            "elapsed": self.elapsed,
+            "remaining": self.remaining,
+        }
+
+
+@dataclass
 class ServerState:
     """In-process state for live qplaywright MCP sessions."""
 
     connection: ManagedConnection | None = None
+    pending_launch: PendingLaunch | None = None
 
     def close_all(self) -> None:
         if self.connection is not None:
             self.connection.close()
             self.connection = None
+        if self.pending_launch is not None:
+            self.pending_launch.close()
+            self.pending_launch = None
 
 
 _SERVER_STATE = ServerState()
@@ -996,6 +1051,111 @@ def _session_summary(connection: ManagedConnection) -> dict[str, Any]:
     }
 
 
+def _pending_launch_exited_error(pending: PendingLaunch) -> QPlaywrightConnectionError:
+    process = pending.process
+    exit_code = process.poll() if process is not None else None
+    return QPlaywrightConnectionError(
+        f"Launched executable {pending.launched_executable!r} exited before the qplaywright agent became ready at {pending.host}:{pending.port}.",
+        code="launch_exited",
+        context={
+            "executable": pending.launched_executable,
+            "args": list(pending.launched_args),
+            "exit_code": exit_code,
+            "host": pending.host,
+            "port": pending.port,
+            "timeout": pending.timeout,
+            "elapsed": pending.elapsed,
+        },
+    )
+
+
+def _pending_launch_timeout_error(pending: PendingLaunch) -> QPlaywrightConnectionError:
+    return QPlaywrightConnectionError(
+        f"Timed out waiting for launched executable {pending.launched_executable!r} to expose the qplaywright agent at {pending.host}:{pending.port}.",
+        code="launch_timeout",
+        context={
+            "executable": pending.launched_executable,
+            "args": list(pending.launched_args),
+            "host": pending.host,
+            "port": pending.port,
+            "timeout": pending.timeout,
+            "elapsed": pending.elapsed,
+        },
+    )
+
+
+def _pending_launch_not_ready_error(pending: PendingLaunch) -> QPlaywrightConnectionError:
+    return QPlaywrightConnectionError(
+        "Launched application is still starting and the qplaywright agent is not ready yet. Call session with action='status' again shortly.",
+        code="launch_pending",
+        context={
+            "executable": pending.launched_executable,
+            "host": pending.host,
+            "port": pending.port,
+            "remaining": pending.remaining,
+            "elapsed": pending.elapsed,
+        },
+    )
+
+
+def _clear_pending_launch(state: ServerState, *, close: bool) -> None:
+    pending = state.pending_launch
+    if pending is None:
+        return
+    if close:
+        pending.close()
+    state.pending_launch = None
+
+
+def _try_promote_pending_launch(
+    state: ServerState,
+    *,
+    probe_timeout: float,
+    require_ready: bool,
+) -> ManagedConnection | None:
+    pending = state.pending_launch
+    if pending is None:
+        return state.connection
+
+    process = pending.process
+    if process is not None and process.poll() is not None:
+        error = _pending_launch_exited_error(pending)
+        _clear_pending_launch(state, close=True)
+        raise error
+    if pending.remaining <= 0:
+        error = _pending_launch_timeout_error(pending)
+        _clear_pending_launch(state, close=True)
+        raise error
+
+    try:
+        app = pending.qplaywright.connect(
+            host=pending.host,
+            port=pending.port,
+            timeout=min(probe_timeout, pending.remaining),
+            agent_name=pending.agent_name,
+        )
+    except QPlaywrightConnectionError as exc:
+        if getattr(exc, "code", None) == "connect_timeout":
+            if require_ready:
+                raise _pending_launch_not_ready_error(pending) from exc
+            return None
+        raise
+
+    connection = ManagedConnection(
+        name=pending.name,
+        qplaywright=pending.qplaywright,
+        app=app,
+        host=pending.host,
+        port=pending.port,
+        timeout=pending.timeout,
+        launched_executable=pending.launched_executable,
+    )
+    state.connection = connection
+    state.pending_launch = None
+    _initialize_active_window(connection)
+    return connection
+
+
 def _select_active_window(connection: ManagedConnection, window_wid: int | None, *, override_scope: bool = False) -> None:
     connection.active_window_wid = window_wid
     connection.window_scope_override_wid = window_wid if override_scope else None
@@ -1035,6 +1195,11 @@ def _should_drop_connection_after_ping_failure(exc: Exception) -> bool:
 
 
 def _get_connection(state: ServerState) -> ManagedConnection:
+    if state.connection is None and state.pending_launch is not None:
+        promoted = _try_promote_pending_launch(state, probe_timeout=1.0, require_ready=True)
+        if promoted is not None:
+            return promoted
+
     connection = state.connection
     if connection is None:
         raise ValueError("No active session. Call session with action='attach' or action='launch' first")
@@ -1091,9 +1256,7 @@ def connect_connection(
     timeout: float = 30.0,
     agent_name: str | None = None,
 ) -> ManagedConnection:
-    if state.connection is not None:
-        state.connection.close()
-        state.connection = None
+    state.close_all()
 
     qplaywright = QPlaywright()
     connection_name = (agent_name or "default").strip() or "default"
@@ -1120,36 +1283,35 @@ def launch_connection(
     port: int = DEFAULT_PORT,
     timeout: float = 30.0,
     agent_name: str | None = None,
-) -> ManagedConnection:
-    if state.connection is not None:
-        state.connection.close()
-        state.connection = None
+) -> ManagedConnection | None:
+    state.close_all()
 
     qplaywright = QPlaywright()
     connection_name = (agent_name or "default").strip() or "default"
-    app = qplaywright.launch(
-        executable,
-        *(args or ()),
-        host=host,
-        port=port,
-        timeout=timeout,
-        agent_name=agent_name,
-    )
-    connection = ManagedConnection(
+    launch_args = tuple(args or ())
+    qplaywright._process = subprocess.Popen([executable, *launch_args])
+    state.pending_launch = PendingLaunch(
         name=connection_name,
         qplaywright=qplaywright,
-        app=app,
         host=host,
         port=port,
         timeout=timeout,
         launched_executable=executable,
+        launched_args=launch_args,
+        agent_name=agent_name,
     )
-    state.connection = connection
-    _initialize_active_window(connection)
-    return connection
+    return _try_promote_pending_launch(state, probe_timeout=min(1.0, timeout), require_ready=False)
 
 
 def disconnect_connection(state: ServerState) -> dict[str, Any]:
+    if state.pending_launch is not None and state.connection is None:
+        pending = state.pending_launch
+        _clear_pending_launch(state, close=True)
+        return {
+            "closed": True,
+            "launched_executable": pending.launched_executable,
+        }
+
     connection = state.connection
     if connection is None:
         raise ValueError("No active session. Call session with action='attach' or action='launch' first")
@@ -2638,9 +2800,9 @@ if FastMCP is not None:
 
         action must be one of:
         - attach: attach to an already running Qt app
-        - launch: launch a Qt app and attach
+        - launch: launch a Qt app, then attach immediately when the agent is already ready, otherwise return a pending launch session
         - close: close the current session
-        - status: report current session and active window
+        - status: report current session and active window, and promote a pending launch once its agent becomes ready
         """
 
         if action == "attach":
@@ -2671,6 +2833,16 @@ if FastMCP is not None:
                 timeout=timeout,
                 agent_name=agent_name,
             )
+            if connection_state is None:
+                pending = _SERVER_STATE.pending_launch
+                assert pending is not None
+                return {
+                    "ok": True,
+                    "action": action,
+                    "session": pending.to_session_summary(),
+                    "active_window": None,
+                }
+
             windows = _window_summary(connection_state)
             return {
                 "ok": True,
@@ -2684,6 +2856,18 @@ if FastMCP is not None:
             return {"ok": True, "action": action, "closed": result["closed"]}
 
         if action == "status":
+            if _SERVER_STATE.connection is None and _SERVER_STATE.pending_launch is not None:
+                connection_state = _try_promote_pending_launch(_SERVER_STATE, probe_timeout=1.0, require_ready=False)
+                if connection_state is None:
+                    pending = _SERVER_STATE.pending_launch
+                    assert pending is not None
+                    return {
+                        "ok": True,
+                        "action": action,
+                        "session": pending.to_session_summary(),
+                        "active_window": None,
+                    }
+
             connection_state = _get_connection(_SERVER_STATE)
             windows = _window_summary(connection_state)
             return {

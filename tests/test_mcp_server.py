@@ -5,6 +5,7 @@ import anyio
 import json
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -305,6 +306,10 @@ def test_launch_connection_tracks_executable(monkeypatch):
         return instance
 
     monkeypatch.setattr(mcp_server, "QPlaywright", fake_factory)
+    fake_process = MagicMock()
+    fake_process.poll.return_value = None
+    fake_process.pid = 1234
+    monkeypatch.setattr(mcp_server.subprocess, "Popen", MagicMock(return_value=fake_process))
 
     state = mcp_server.ServerState()
     result = mcp_server.launch_connection(
@@ -316,8 +321,10 @@ def test_launch_connection_tracks_executable(monkeypatch):
         timeout=6.0,
     )
 
+    assert result is not None
     assert result.launched_executable == "demo_app.exe"
-    assert created[0].launched == ("demo_app.exe", ["--flag"], "127.0.0.1", 19878, 6.0)
+    assert created[0].connected == ("127.0.0.1", 19878, 1.0)
+    assert state.pending_launch is None
 
 
 def test_get_connection_removes_stale_session_from_state():
@@ -1168,6 +1175,10 @@ def test_session_attach_status_launch_and_close(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "QPlaywright", fake_factory)
     monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    fake_process = MagicMock()
+    fake_process.poll.return_value = None
+    fake_process.pid = 5678
+    monkeypatch.setattr(mcp_server.subprocess, "Popen", MagicMock(return_value=fake_process))
 
     attached = mcp_server.session(action="attach", port=19877, timeout=5.0)
 
@@ -1189,11 +1200,73 @@ def test_session_attach_status_launch_and_close(monkeypatch):
     launched = mcp_server.session(action="launch", executable="demo_app.exe", args=["--flag"], port=19878, timeout=6.0)
     assert launched["action"] == "launch"
     assert launched["session"]["launched_executable"] == "demo_app.exe"
-    assert created[1].launched == ("demo_app.exe", ["--flag"], "127.0.0.1", 19878, 6.0)
+    assert created[1].connected == ("127.0.0.1", 19878, 1.0)
 
     closed = mcp_server.session(action="close")
     assert closed == {"ok": True, "action": "close", "closed": True}
     assert state.connection is None
+
+
+def test_session_launch_returns_pending_until_agent_is_ready(monkeypatch):
+    state = mcp_server.ServerState()
+    created: list[FakeQPlaywright] = []
+
+    class SlowConnectQPlaywright(FakeQPlaywright):
+        def connect(self, *, host: str, port: int, timeout: float, agent_name: str | None = None):
+            self.connected = (host, port, timeout)
+            calls = getattr(self, "_calls", 0)
+            self._calls = calls + 1
+            if calls == 0:
+                raise QPlaywrightConnectionError("not ready", code="connect_timeout")
+            return FakeApp([])
+
+    def fake_factory():
+        instance = SlowConnectQPlaywright()
+        created.append(instance)
+        return instance
+
+    fake_process = MagicMock()
+    fake_process.poll.return_value = None
+    fake_process.pid = 9876
+
+    monkeypatch.setattr(mcp_server, "QPlaywright", fake_factory)
+    monkeypatch.setattr(mcp_server, "_SERVER_STATE", state)
+    monkeypatch.setattr(mcp_server.subprocess, "Popen", MagicMock(return_value=fake_process))
+
+    launched = mcp_server.session(action="launch", executable="demo_app.exe", port=19878, timeout=6.0)
+
+    assert launched == {
+        "ok": True,
+        "action": "launch",
+        "session": {
+            "connected": False,
+            "launch_pending": True,
+            "host": "127.0.0.1",
+            "port": 19878,
+            "launched_executable": "demo_app.exe",
+            "pid": 9876,
+            "elapsed": pytest.approx(0.0, abs=0.5),
+            "remaining": pytest.approx(6.0, abs=0.5),
+        },
+        "active_window": None,
+    }
+    assert state.connection is None
+    assert state.pending_launch is not None
+    assert created[0].connected == ("127.0.0.1", 19878, 1.0)
+
+    status = mcp_server.session(action="status")
+
+    assert status["ok"] is True
+    assert status["action"] == "status"
+    assert status["session"] == {
+        "connected": True,
+        "host": "127.0.0.1",
+        "port": 19878,
+        "launched_executable": "demo_app.exe",
+    }
+    assert status["active_window"] is None
+    assert state.pending_launch is None
+    assert state.connection is not None
 
 
 def test_session_close_clears_stale_connection(monkeypatch):

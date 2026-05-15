@@ -124,6 +124,41 @@ def test_connect_advertises_agent_name_after_successful_handshake():
     ]
 
 
+def test_launch_fails_fast_when_process_exits_before_agent_is_ready():
+    _time = [0.0]
+
+    def fake_monotonic() -> float:
+        return _time[0]
+
+    def fake_sleep(t: float) -> None:
+        _time[0] += t
+
+    fake_conn = MagicMock()
+    fake_conn.connect.side_effect = ConnectionRefusedError("refused")
+
+    fake_process = MagicMock()
+    fake_process.poll.side_effect = [None, 7]
+
+    with (
+        patch("qplaywright.sync_api._api.Connection", return_value=fake_conn),
+        patch("qplaywright.sync_api._api.subprocess.Popen", return_value=fake_process),
+        patch("qplaywright.sync_api._api.time.monotonic", side_effect=fake_monotonic),
+        patch("qplaywright.sync_api._api.time.sleep", side_effect=fake_sleep),
+    ):
+        with pytest.raises(QPlaywrightConnectionError, match="exited before the QPlaywright agent became reachable") as exc_info:
+            QPlaywright().launch("demo_app.exe", timeout=30.0)
+
+    assert exc_info.value.code == "launch_exited"
+    assert exc_info.value.context == {
+        "executable": "demo_app.exe",
+        "exit_code": 7,
+        "host": "127.0.0.1",
+        "port": 19876,
+        "timeout": 30.0,
+    }
+    assert fake_conn.connect.mock_calls == [call(timeout=1.0)]
+
+
 def test_connect_fails_immediately_on_protocol_mismatch():
     sleep_calls: list[float] = []
     fake_conn = MagicMock()

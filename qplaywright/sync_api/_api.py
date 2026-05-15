@@ -120,6 +120,49 @@ def _advertise_agent_name(conn: Connection, agent_name: str) -> None:
         )
 
 
+def _launch_exit_error(
+    *,
+    executable: str,
+    exit_code: int | None,
+    host: str,
+    port: int,
+    timeout: float,
+) -> QPlaywrightConnectionError:
+    return QPlaywrightConnectionError(
+        f"Launched executable {executable!r} exited before the QPlaywright agent became reachable at {host}:{port}.",
+        code="launch_exited",
+        context={
+            "executable": executable,
+            "exit_code": exit_code,
+            "host": host,
+            "port": port,
+            "timeout": timeout,
+        },
+    )
+
+
+def _raise_if_launched_process_exited(
+    *,
+    executable: str | None,
+    process: subprocess.Popen[Any] | None,
+    host: str,
+    port: int,
+    timeout: float,
+) -> None:
+    if executable is None or process is None:
+        return
+    exit_code = process.poll()
+    if exit_code is None:
+        return
+    raise _launch_exit_error(
+        executable=executable,
+        exit_code=exit_code,
+        host=host,
+        port=port,
+        timeout=timeout,
+    )
+
+
 # --------------------------------------------------------------------------- #
 #  Window — equivalent to Playwright's Page                                    #
 # --------------------------------------------------------------------------- #
@@ -389,16 +432,42 @@ class QPlaywright:
         Returns:
             An Application instance.
         """
+        return self._connect_with_retry(host=host, port=port, timeout=timeout, agent_name=agent_name)
+
+    def _connect_with_retry(
+        self,
+        *,
+        host: str,
+        port: int,
+        timeout: float,
+        agent_name: str | None,
+        executable: str | None = None,
+        process: subprocess.Popen[Any] | None = None,
+    ) -> Application:
         conn = Connection(host=host, port=port, timeout=timeout)
 
         # Retry connection with exponential backoff
         deadline = time.monotonic() + timeout
         last_error = None
         backoff = 0.1
+        connect_probe_timeout = 1.0
         max_backoff = 2.0
         while time.monotonic() < deadline:
+            _raise_if_launched_process_exited(
+                executable=executable,
+                process=process,
+                host=host,
+                port=port,
+                timeout=timeout,
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                conn.connect()
+                if process is None:
+                    conn.connect()
+                else:
+                    conn.connect(timeout=min(connect_probe_timeout, remaining))
                 _perform_handshake(conn)
                 if agent_name:
                     _advertise_agent_name(conn, agent_name)
@@ -409,7 +478,19 @@ class QPlaywright:
             except (ConnectionRefusedError, QPlaywrightConnectionError, OSError) as e:
                 last_error = e
                 conn.close()
-                time.sleep(backoff)
+                _raise_if_launched_process_exited(
+                    executable=executable,
+                    process=process,
+                    host=host,
+                    port=port,
+                    timeout=timeout,
+                )
+                if process is None:
+                    time.sleep(backoff)
+                else:
+                    sleep_for = min(backoff, max(0.0, deadline - time.monotonic()))
+                    if sleep_for > 0:
+                        time.sleep(sleep_for)
                 backoff = min(backoff * 2, max_backoff)
 
         raise QPlaywrightConnectionError(
@@ -450,7 +531,14 @@ class QPlaywright:
             An Application instance.
         """
         self._process = subprocess.Popen([executable, *args])
-        return self.connect(host=host, port=port, timeout=timeout, agent_name=agent_name)
+        return self._connect_with_retry(
+            host=host,
+            port=port,
+            timeout=timeout,
+            agent_name=agent_name,
+            executable=executable,
+            process=self._process,
+        )
 
     def close(self) -> None:
         """Clean up resources."""

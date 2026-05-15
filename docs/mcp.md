@@ -90,10 +90,14 @@ qplaywright-mcp cli input w7 --mode clear
 qplaywright-mcp cli focus w7 --include-state
 ```
 
-`session attach` and `session launch` perform a formal protocol handshake as
-part of connection setup. A reachable agent with a mismatched
-`protocol_version` is rejected immediately; attach does not fall through to a
-partially connected session.
+`session attach` performs a formal protocol handshake during connection setup.
+`session launch` starts the process first, then attempts an immediate attach.
+If the app is still starting and the qplaywright agent is not ready yet,
+`session launch` returns a pending session summary instead of blocking until the
+MCP host request times out. Call `session status` again to promote that pending
+launch once the agent begins accepting connections. A reachable agent with a
+mismatched `protocol_version` is still rejected immediately; attach does not
+fall through to a partially connected session.
 
 Use `snapshot`, `find`, `resolve_object_names`, or `inspect` to observe the UI and capture widget handles first. Exact widget actions then reuse those stable handles.
 Use targeted `snapshot` when you want one subtree and several child handles in one call; use `find(mode="exact")` when you already know deterministic constraints; use `find(mode="fuzzy")` when you only have an approximate textual clue; use `resolve_object_names` when one known subtree already exposes several deliberate stable `object_name` values.
@@ -103,7 +107,7 @@ If the active window is not the desired scope, switch it first with `window sele
 
 ## Typical Tool Flow
 
-1. `session` with `action="attach"` or `action="launch"` to establish the active session through TCP connect plus formal protocol handshake.
+1. `session` with `action="attach"` or `action="launch"` to establish the active session. `launch` may first return a pending session while the target app is still starting; poll with `session status` until `session.connected` becomes true.
 2. `window` with `action="list"` to list visible top-level windows.
 3. `window` with `action="select"` when the desired scope is not the current active window.
 4. `snapshot`, `find`, `resolve_object_names`, or `inspect` to understand the widget tree and obtain stable handles.
